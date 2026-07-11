@@ -1,10 +1,11 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   hasConfiguredTelegramToken,
+  isProcessAlive,
   readDefaultTelegramLock,
   resolveBridgeConfig,
   shouldRecoverTelegramOwnership,
@@ -49,17 +50,75 @@ describe("Telegram ownership lock", () => {
     const path = join(dir, "locks.json");
     await writeFile(
       path,
-      JSON.stringify({ "@llblab/pi-telegram": { pid: 123 } }),
+      JSON.stringify({
+        "@llblab/pi-telegram": { pid: 123, heartbeatMs: 456 },
+      }),
     );
 
-    await expect(readDefaultTelegramLock(path)).resolves.toEqual({ pid: 123 });
+    await expect(readDefaultTelegramLock(path)).resolves.toEqual({
+      pid: 123,
+      heartbeatMs: 456,
+    });
   });
 
-  it("recovers only when no live owner holds the lock", () => {
+  it("rejects invalid process identifiers in ownership locks", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bridge-locks-"));
+    const path = join(dir, "locks.json");
+
+    for (const pid of [0, -1, 1.5]) {
+      await writeFile(
+        path,
+        JSON.stringify({ "@llblab/pi-telegram": { pid } }),
+      );
+      await expect(readDefaultTelegramLock(path)).resolves.toBeUndefined();
+    }
+  });
+
+  it("checks only positive pids and treats permission denial as alive", () => {
+    const kill = vi.fn<(pid: number, signal: 0) => void>();
+    expect(isProcessAlive(0, kill)).toBe(false);
+    expect(isProcessAlive(-1, kill)).toBe(false);
+    expect(kill).not.toHaveBeenCalled();
+
+    kill.mockImplementationOnce(() => {
+      throw Object.assign(new Error("not permitted"), { code: "EPERM" });
+    });
+    expect(isProcessAlive(12, kill)).toBe(true);
+    kill.mockImplementationOnce(() => {
+      throw Object.assign(new Error("missing"), { code: "ESRCH" });
+    });
+    expect(isProcessAlive(13, kill)).toBe(false);
+  });
+
+  it("recovers when no live owner holds the lock or its heartbeat is stale", () => {
     expect(shouldRecoverTelegramOwnership(undefined, 10, () => false)).toBe(true);
     expect(shouldRecoverTelegramOwnership({ pid: 10 }, 10, () => true)).toBe(false);
     expect(shouldRecoverTelegramOwnership({ pid: 20 }, 10, () => true)).toBe(false);
     expect(shouldRecoverTelegramOwnership({ pid: 20 }, 10, () => false)).toBe(true);
+    expect(
+      shouldRecoverTelegramOwnership(
+        { pid: 20, heartbeatMs: 1_000 },
+        10,
+        () => true,
+        6_001,
+      ),
+    ).toBe(true);
+    expect(
+      shouldRecoverTelegramOwnership(
+        { pid: 20, heartbeatMs: 1_001 },
+        10,
+        () => true,
+        6_001,
+      ),
+    ).toBe(false);
+    expect(
+      shouldRecoverTelegramOwnership(
+        { pid: 10, heartbeatMs: 1_000 },
+        10,
+        () => true,
+        6_001,
+      ),
+    ).toBe(true);
   });
 });
 
@@ -83,5 +142,13 @@ describe("hasConfiguredTelegramToken", () => {
     await expect(hasConfiguredTelegramToken(join(dir, "missing.json"))).resolves.toBe(false);
     await expect(hasConfiguredTelegramToken(join(dir, "bad.json"))).resolves.toBe(false);
     await expect(hasConfiguredTelegramToken(join(dir, "blank.json"))).resolves.toBe(false);
+  });
+
+  it("surfaces configuration I/O failures instead of reporting setup missing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bridge-config-"));
+
+    await expect(hasConfiguredTelegramToken(dir)).rejects.toThrow(
+      /Could not read JSON file/,
+    );
   });
 });
