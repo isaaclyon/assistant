@@ -19,6 +19,7 @@ import {
   shouldRecoverTelegramOwnership,
 } from "./config.js";
 import { resolveTelegramExtensionPath } from "./package-paths.js";
+import { bindTelegramHostNewSession } from "./telegram-host-capability.js";
 
 export interface BridgeLogger {
   info(message: string): void;
@@ -67,6 +68,20 @@ export async function startBridgeHost({
         additionalExtensionPaths: [telegramExtensionPath],
       },
     });
+    const extensions = services.resourceLoader.getExtensions();
+    const telegramLoaded = extensions.extensions.some(
+      (extension) =>
+        extension.path === telegramExtensionPath ||
+        extension.resolvedPath === telegramExtensionPath,
+    );
+    if (!telegramLoaded) {
+      const loadError = extensions.errors.find(
+        (error) => error.path === telegramExtensionPath,
+      );
+      throw new Error(
+        `Telegram extension failed to load from ${telegramExtensionPath}${loadError ? `: ${loadError.error}` : ""}`,
+      );
+    }
     const result = await createAgentSessionFromServices({
       services,
       sessionManager,
@@ -81,11 +96,56 @@ export async function startBridgeHost({
     sessionManager: SessionManager.continueRecent(config.cwd, config.sessionDir),
   });
 
+  let sessionReplacementInFlight = false;
+  let unregisterTelegramHost: () => void;
+  try {
+    unregisterTelegramHost = bindTelegramHostNewSession(async () => {
+      if (sessionReplacementInFlight) {
+        throw new Error("A Pi session replacement is already in progress.");
+      }
+      if (!runtime.session.isIdle) {
+        throw new Error("Pi became busy before session replacement could start.");
+      }
+      sessionReplacementInFlight = true;
+      try {
+        return await runtime.newSession();
+      } finally {
+        sessionReplacementInFlight = false;
+      }
+    });
+  } catch (error) {
+    await runtime.dispose();
+    throw error;
+  }
+
   const bindSession = async (session: AgentSession): Promise<void> => {
     await session.bindExtensions({
       mode: "rpc",
+      commandContextActions: {
+        waitForIdle: () => runtime.session.waitForIdle(),
+        newSession: (options) => runtime.newSession(options),
+        fork: async (entryId, options) => {
+          const result = await runtime.fork(entryId, options);
+          return { cancelled: result.cancelled };
+        },
+        navigateTree: async (targetId, options) => {
+          const result = await runtime.session.navigateTree(targetId, {
+            ...(options?.summarize === undefined ? {} : { summarize: options.summarize }),
+            ...(options?.customInstructions === undefined
+              ? {}
+              : { customInstructions: options.customInstructions }),
+            ...(options?.replaceInstructions === undefined
+              ? {}
+              : { replaceInstructions: options.replaceInstructions }),
+            ...(options?.label === undefined ? {} : { label: options.label }),
+          });
+          return { cancelled: result.cancelled };
+        },
+        switchSession: (sessionPath, options) => runtime.switchSession(sessionPath, options),
+        reload: () => runtime.session.reload(),
+      },
       shutdownHandler: () => {
-        void session.waitForIdle().then(onShutdownRequest);
+        void runtime.session.waitForIdle().then(onShutdownRequest);
       },
       onError: (error) => {
         logger.error(
@@ -95,7 +155,13 @@ export async function startBridgeHost({
     });
   };
   runtime.setRebindSession(bindSession);
-  await bindSession(runtime.session);
+  try {
+    await bindSession(runtime.session);
+  } catch (error) {
+    unregisterTelegramHost();
+    await runtime.dispose();
+    throw error;
+  }
 
   for (const diagnostic of runtime.diagnostics) {
     const render = `${diagnostic.type}: ${diagnostic.message}`;
@@ -156,7 +222,11 @@ export async function startBridgeHost({
     runtime,
     async dispose() {
       if (ownershipMonitor) clearInterval(ownershipMonitor);
-      await runtime.dispose();
+      try {
+        await runtime.dispose();
+      } finally {
+        unregisterTelegramHost();
+      }
     },
   };
 }

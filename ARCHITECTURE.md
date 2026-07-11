@@ -7,7 +7,7 @@
 - **pi-telegram:** owns Telegram polling, pairing, routing, rendering, controls, and update-offset persistence.
 - **systemd:** owns boot activation, restart policy, and logs.
 
-The host loads `@llblab/pi-telegram` through Pi's `DefaultResourceLoader` and binds extensions in RPC mode. The bridge repo is the agent's home base, so ancestor server guidance and local bridge architecture are loaded together; filesystem/tool access is not restricted to that cwd. The host does not copy upstream source or emulate the TUI.
+The host loads a full-commit-pinned `isaaclyon/pi-telegram` fork through Pi's `DefaultResourceLoader` and binds extensions in RPC mode. The RPC binding includes Pi's official command-context session actions (`waitForIdle`, `newSession`, `fork`, tree navigation, session switching, and reload). The fork's narrow process-local host capability delegates Telegram `/new` to `AgentSessionRuntime.newSession()` without exposing the runtime or retaining stale extension contexts. The bridge repo is the agent's home base, so ancestor server guidance and local bridge architecture are loaded together; filesystem/tool access is not restricted to that cwd. The host does not copy extension source or emulate the TUI. See ADR-0002.
 
 ## State
 

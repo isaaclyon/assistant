@@ -1,6 +1,6 @@
 # Pi Telegram Bridge Host
 
-A small, systemd-supervised SDK host for [`@llblab/pi-telegram`](https://github.com/llblab/pi-telegram). It keeps one persistent Pi session available through a private Telegram bot without vendoring or modifying the upstream extension.
+A small, systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](https://github.com/isaaclyon/pi-telegram/commit/3f2ed12ebb8e9533f2c46b9b38a707e6ba1c8246). It keeps one persistent Pi session available through a private Telegram bot and adds a narrow host-backed Telegram `/new` lifecycle bridge.
 
 ## Runtime shape
 
@@ -60,7 +60,7 @@ systemctl --user stop pi-telegram-bridge.service
 journalctl --user -u pi-telegram-bridge.service -f
 ```
 
-The service automatically restarts after failures. Pi conversation history, Telegram configuration, pairing, and Telegram update offsets persist across restarts. The upstream extension reclaims its stale same-working-directory ownership lock when the host returns.
+The service automatically restarts after failures. Pi conversation history, Telegram configuration, pairing, and Telegram update offsets persist across restarts. The extension reclaims its stale same-working-directory ownership lock when the host returns. Telegram `/new` starts a fresh session in the same thread only when Pi and the Telegram queue are idle; otherwise it reports why replacement is unsafe.
 
 ## Configuration
 
