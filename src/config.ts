@@ -19,8 +19,9 @@ function resolveFromHome(value: string | undefined, fallback: string, home: stri
 export function resolveBridgeConfig(
   env: BridgeEnvironment = process.env,
   home = homedir(),
+  defaultCwd = process.cwd(),
 ): BridgeConfig {
-  const cwd = resolveFromHome(env.PI_TELEGRAM_BRIDGE_CWD, home, home);
+  const cwd = resolveFromHome(env.PI_TELEGRAM_BRIDGE_CWD, defaultCwd, home);
   const agentDir = resolveFromHome(
     env.PI_CODING_AGENT_DIR,
     join(home, ".pi", "agent"),
@@ -56,7 +57,40 @@ export async function hasConfiguredTelegramToken(path: string): Promise<boolean>
   return typeof config?.botToken === "string" && config.botToken.trim().length > 0;
 }
 
-export async function hasDefaultTelegramLock(path: string): Promise<boolean> {
+export interface TelegramLockView {
+  pid: number;
+  cwd?: string;
+}
+
+export async function readDefaultTelegramLock(
+  path: string,
+): Promise<TelegramLockView | undefined> {
   const locks = await readJsonObject(path);
-  return typeof locks?.["@llblab/pi-telegram"] === "object";
+  const value = locks?.["@llblab/pi-telegram"];
+  if (typeof value !== "object" || value === null) return undefined;
+  const lock = value as Record<string, unknown>;
+  if (!Number.isInteger(lock.pid)) return undefined;
+  return {
+    pid: lock.pid as number,
+    ...(typeof lock.cwd === "string" ? { cwd: lock.cwd } : {}),
+  };
+}
+
+export function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function shouldRecoverTelegramOwnership(
+  lock: TelegramLockView | undefined,
+  currentPid: number,
+  isAlive: (pid: number) => boolean = isProcessAlive,
+): boolean {
+  if (!lock) return true;
+  if (lock.pid === currentPid) return false;
+  return !isAlive(lock.pid);
 }

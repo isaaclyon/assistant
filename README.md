@@ -11,7 +11,7 @@ systemd user service
               └── @llblab/pi-telegram (Telegram transport and UI)
 ```
 
-The Pi runtime uses `/home/isaaclyon` as its working directory by default, so it loads the server-level `AGENTS.md`. Conversation sessions are isolated under `~/.local/state/pi-telegram-bridge/sessions`.
+The Pi runtime uses this repository as its working directory by default. Pi therefore loads both the server-level `/home/isaaclyon/AGENTS.md` and this repo's local architecture/agent guidance, while its tools remain free to work elsewhere on the server. Conversation sessions are isolated under `~/.local/state/pi-telegram-bridge/sessions`.
 
 ## Initial setup
 
@@ -68,7 +68,7 @@ Optional environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `PI_TELEGRAM_BRIDGE_CWD` | `$HOME` | Pi working directory and context root |
+| `PI_TELEGRAM_BRIDGE_CWD` | process working directory (this repo under systemd) | Pi home base and context root |
 | `PI_TELEGRAM_BRIDGE_STATE_DIR` | `~/.local/state/pi-telegram-bridge` | Dedicated session state |
 | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi credentials, settings, and Telegram config |
 | `PI_BIN` | `pi` | Pi executable used only by `telegram:setup` |

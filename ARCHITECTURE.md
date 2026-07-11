@@ -7,7 +7,7 @@
 - **pi-telegram:** owns Telegram polling, pairing, routing, rendering, controls, and update-offset persistence.
 - **systemd:** owns boot activation, restart policy, and logs.
 
-The host loads `@llblab/pi-telegram` through Pi's `DefaultResourceLoader` and binds extensions in RPC mode. It does not copy upstream source or emulate the TUI.
+The host loads `@llblab/pi-telegram` through Pi's `DefaultResourceLoader` and binds extensions in RPC mode. The bridge repo is the agent's home base, so ancestor server guidance and local bridge architecture are loaded together; filesystem/tool access is not restricted to that cwd. The host does not copy upstream source or emulate the TUI.
 
 ## State
 
@@ -25,8 +25,9 @@ The host loads `@llblab/pi-telegram` through Pi's `DefaultResourceLoader` and bi
 2. Continue the most recent session in the bridge-only session directory.
 3. Build an `AgentSessionRuntime` with the upstream Telegram extension path.
 4. Bind extensions in RPC mode, emitting `session_start`.
-5. Let pi-telegram resume an existing lock, or invoke `/telegram-connect` when configured and no default lock exists.
-6. Wait for SIGINT, SIGTERM, or an extension shutdown request.
+5. Let pi-telegram resume an owned/stale lock, or invoke `/telegram-connect` when no owner exists.
+6. Monitor polling ownership every five seconds. A live external Pi owner is respected; when it exits, the host reconnects automatically.
+7. Wait for SIGINT, SIGTERM, or an extension shutdown request.
 
 ## Shutdown
 

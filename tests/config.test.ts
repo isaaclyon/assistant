@@ -5,15 +5,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   hasConfiguredTelegramToken,
-  hasDefaultTelegramLock,
+  readDefaultTelegramLock,
   resolveBridgeConfig,
+  shouldRecoverTelegramOwnership,
 } from "../src/config.js";
 
 describe("resolveBridgeConfig", () => {
   it("uses a dedicated state directory and the home directory as the agent cwd", () => {
-    const config = resolveBridgeConfig({}, "/home/tester");
+    const config = resolveBridgeConfig({}, "/home/tester", "/srv/assistant");
 
-    expect(config.cwd).toBe("/home/tester");
+    expect(config.cwd).toBe("/srv/assistant");
     expect(config.agentDir).toBe("/home/tester/.pi/agent");
     expect(config.stateDir).toBe(
       "/home/tester/.local/state/pi-telegram-bridge",
@@ -42,8 +43,8 @@ describe("resolveBridgeConfig", () => {
   });
 });
 
-describe("hasDefaultTelegramLock", () => {
-  it("detects only the default pi-telegram ownership lock", async () => {
+describe("Telegram ownership lock", () => {
+  it("reads only the default pi-telegram ownership lock", async () => {
     const dir = await mkdtemp(join(tmpdir(), "bridge-locks-"));
     const path = join(dir, "locks.json");
     await writeFile(
@@ -51,7 +52,14 @@ describe("hasDefaultTelegramLock", () => {
       JSON.stringify({ "@llblab/pi-telegram": { pid: 123 } }),
     );
 
-    await expect(hasDefaultTelegramLock(path)).resolves.toBe(true);
+    await expect(readDefaultTelegramLock(path)).resolves.toEqual({ pid: 123 });
+  });
+
+  it("recovers only when no live owner holds the lock", () => {
+    expect(shouldRecoverTelegramOwnership(undefined, 10, () => false)).toBe(true);
+    expect(shouldRecoverTelegramOwnership({ pid: 10 }, 10, () => true)).toBe(false);
+    expect(shouldRecoverTelegramOwnership({ pid: 20 }, 10, () => true)).toBe(false);
+    expect(shouldRecoverTelegramOwnership({ pid: 20 }, 10, () => false)).toBe(true);
   });
 });
 
