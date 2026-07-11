@@ -1,0 +1,29 @@
+{
+  "name": "pi-telegram-bridge-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A durable, systemd-supervised Pi host for the pi-telegram extension",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "check": "npm run typecheck && npm test",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "service:install": "npm run build && node dist/src/install-service.js",
+    "start": "node dist/src/daemon.js",
+    "telegram:setup": "npm run build && node dist/src/setup.js",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.6",
+    "@llblab/pi-telegram": "0.20.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}
