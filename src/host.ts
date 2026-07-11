@@ -13,8 +13,9 @@ import { join } from "node:path";
 
 import {
   type BridgeConfig,
+  type TelegramLockView,
   hasConfiguredTelegramToken,
-  isProcessAlive,
+  isProcessAlive as isProcessAliveByPid,
   readDefaultTelegramLock,
   shouldRecoverTelegramOwnership,
 } from "./config.js";
@@ -32,6 +33,10 @@ export interface BridgeHostOptions {
   logger?: BridgeLogger;
   onShutdownRequest?: () => void;
   telegramExtensionPath?: string;
+  isProcessAlive?: (pid: number) => boolean;
+  nowMs?: () => number;
+  ownershipMonitorIntervalMs?: number;
+  readTelegramLock?: (path: string) => Promise<TelegramLockView | undefined>;
 }
 
 export interface BridgeHost {
@@ -50,6 +55,10 @@ export async function startBridgeHost({
   logger = consoleLogger,
   onShutdownRequest = () => {},
   telegramExtensionPath = resolveTelegramExtensionPath(),
+  isProcessAlive = isProcessAliveByPid,
+  nowMs = Date.now,
+  ownershipMonitorIntervalMs = 5_000,
+  readTelegramLock = readDefaultTelegramLock,
 }: BridgeHostOptions): Promise<BridgeHost> {
   process.env.PI_CODING_AGENT_DIR = config.agentDir;
   initTheme();
@@ -118,6 +127,29 @@ export async function startBridgeHost({
     throw error;
   }
 
+  let ownershipMonitor: ReturnType<typeof setInterval> | undefined;
+  let ownershipRecoveryPromise: Promise<void> | undefined;
+  let stopping = false;
+  let disposePromise: Promise<void> | undefined;
+  const dispose = (): Promise<void> => {
+    disposePromise ??= (async () => {
+      stopping = true;
+      if (ownershipMonitor) clearInterval(ownershipMonitor);
+      try {
+        await ownershipRecoveryPromise;
+      } catch {
+        // Startup rethrows this error and monitor callbacks log it. Disposal
+        // must still release Pi and the process-local host capability.
+      }
+      try {
+        await runtime.dispose();
+      } finally {
+        unregisterTelegramHost();
+      }
+    })();
+    return disposePromise;
+  };
+
   const bindSession = async (session: AgentSession): Promise<void> => {
     await session.bindExtensions({
       mode: "rpc",
@@ -158,75 +190,96 @@ export async function startBridgeHost({
   try {
     await bindSession(runtime.session);
   } catch (error) {
-    unregisterTelegramHost();
-    await runtime.dispose();
+    await dispose();
     throw error;
   }
 
-  for (const diagnostic of runtime.diagnostics) {
-    const render = `${diagnostic.type}: ${diagnostic.message}`;
-    if (diagnostic.type === "error") logger.error(render);
-    else if (diagnostic.type === "warning") logger.warn(render);
-    else logger.info(render);
-  }
-  if (runtime.modelFallbackMessage) logger.warn(runtime.modelFallbackMessage);
-
-  const telegramConfigPath = join(config.agentDir, "telegram.json");
-  const locksPath = join(config.agentDir, "locks.json");
-  const telegramConfigured = await hasConfiguredTelegramToken(telegramConfigPath);
-  let recoveringOwnership = false;
-  const recoverOwnership = async (): Promise<void> => {
-    if (recoveringOwnership) return;
-    const lock = await readDefaultTelegramLock(locksPath);
-    if (!shouldRecoverTelegramOwnership(lock, process.pid)) return;
-    recoveringOwnership = true;
-    logger.info("Telegram has no live polling owner; connecting the default profile.");
-    try {
-      await runtime.session.prompt("/telegram-connect", { source: "rpc" });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.error(`Telegram connect command failed: ${message}`);
-    } finally {
-      recoveringOwnership = false;
+  try {
+    for (const diagnostic of runtime.diagnostics) {
+      const render = `${diagnostic.type}: ${diagnostic.message}`;
+      if (diagnostic.type === "error") logger.error(render);
+      else if (diagnostic.type === "warning") logger.warn(render);
+      else logger.info(render);
     }
-  };
+    if (runtime.modelFallbackMessage) logger.warn(runtime.modelFallbackMessage);
 
-  let ownershipMonitor: ReturnType<typeof setInterval> | undefined;
-  if (!telegramConfigured) {
-    logger.warn(
-      "Telegram is not configured. Run `npm run telegram:setup`, then restart this service.",
-    );
-  } else {
-    const lock = await readDefaultTelegramLock(locksPath);
-    if (lock?.pid === process.pid) {
-      logger.info("This service owns Telegram polling.");
-    } else if (lock && isProcessAlive(lock.pid)) {
+    const telegramConfigPath = join(config.agentDir, "telegram.json");
+    const locksPath = join(config.agentDir, "locks.json");
+    const telegramConfigured = await hasConfiguredTelegramToken(telegramConfigPath);
+    const recoverOwnership = (): Promise<void> => {
+      if (stopping) return Promise.resolve();
+      if (ownershipRecoveryPromise) return ownershipRecoveryPromise;
+      const recovery = (async () => {
+        const lock = await readTelegramLock(locksPath);
+        if (stopping) return;
+        if (
+          !shouldRecoverTelegramOwnership(
+            lock,
+            process.pid,
+            isProcessAlive,
+            nowMs(),
+          )
+        ) {
+          return;
+        }
+        logger.info("Telegram has no live polling owner; connecting the default profile.");
+        try {
+          await runtime.session.prompt("/telegram-connect", { source: "rpc" });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          logger.error(`Telegram connect command failed: ${message}`);
+        }
+      })();
+      const trackedRecovery = recovery.finally(() => {
+        if (ownershipRecoveryPromise === trackedRecovery) {
+          ownershipRecoveryPromise = undefined;
+        }
+      });
+      ownershipRecoveryPromise = trackedRecovery;
+      return trackedRecovery;
+    };
+
+    if (!telegramConfigured) {
       logger.warn(
-        `Telegram polling is currently owned by another live Pi process (PID ${lock.pid}); waiting to recover it when that process exits.`,
+        "Telegram is not configured. Run `npm run telegram:setup`, then restart this service.",
       );
-    } else if (lock) {
-      logger.info("A stale Telegram ownership lock exists; pi-telegram will reclaim it.");
     } else {
-      await recoverOwnership();
+      const lock = await readTelegramLock(locksPath);
+      const shouldRecover = shouldRecoverTelegramOwnership(
+        lock,
+        process.pid,
+        isProcessAlive,
+        nowMs(),
+      );
+      if (lock && !shouldRecover) {
+        if (lock.pid === process.pid) {
+          logger.info("This service owns Telegram polling.");
+        } else {
+          logger.warn(
+            `Telegram polling is currently owned by another live Pi process (PID ${lock.pid}); waiting to recover it when that process exits.`,
+          );
+        }
+      } else {
+        if (lock) {
+          logger.info("A stale Telegram ownership lock exists; reclaiming it.");
+        }
+        await recoverOwnership();
+      }
+
+      ownershipMonitor = setInterval(() => {
+        void recoverOwnership().catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          logger.error(`Telegram ownership check failed: ${message}`);
+        });
+      }, ownershipMonitorIntervalMs);
+      ownershipMonitor.unref?.();
     }
 
-    ownershipMonitor = setInterval(() => {
-      void recoverOwnership();
-    }, 5_000);
-    ownershipMonitor.unref?.();
+    logger.info(`Pi Telegram bridge ready (session: ${runtime.session.sessionFile ?? "ephemeral"}).`);
+
+    return { runtime, dispose };
+  } catch (error) {
+    await dispose();
+    throw error;
   }
-
-  logger.info(`Pi Telegram bridge ready (session: ${runtime.session.sessionFile ?? "ephemeral"}).`);
-
-  return {
-    runtime,
-    async dispose() {
-      if (ownershipMonitor) clearInterval(ownershipMonitor);
-      try {
-        await runtime.dispose();
-      } finally {
-        unregisterTelegramHost();
-      }
-    },
-  };
 }
