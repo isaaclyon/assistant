@@ -57,12 +57,40 @@ describe("ensureCodexConfig", () => {
 
     await ensureCodexConfig(path);
     await expect(readFile(path, "utf8")).resolves.toBe(
-      `${JSON.stringify({ mode: "normal" }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          mode: "normal",
+          tools: { imageGeneration: false, imageGenerationOnly: false },
+        },
+        null,
+        2,
+      )}\n`,
     );
 
-    await writeFile(path, '{"mode":"path"}\n');
+    await writeFile(
+      path,
+      JSON.stringify({
+        mode: "path",
+        tools: { webRun: false },
+        openai: { fast: true },
+      }),
+    );
     await ensureCodexConfig(path);
-    await expect(readFile(path, "utf8")).resolves.toBe('{"mode":"path"}\n');
+    await expect(readFile(path, "utf8")).resolves.toBe(
+      `${JSON.stringify(
+        {
+          mode: "path",
+          tools: {
+            webRun: false,
+            imageGeneration: false,
+            imageGenerationOnly: false,
+          },
+          openai: { fast: true },
+        },
+        null,
+        2,
+      )}\n`,
+    );
   });
 });
 

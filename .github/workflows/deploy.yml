@@ -1,0 +1,44 @@
+name: Test and deploy
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the merged revision
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - name: Use Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: npm run build
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: [self-hosted, assistant-production]
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - name: Check out the merged revision
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - name: Deploy and verify the user service
+        env:
+          DEPLOY_PATH: /home/isaaclyon/projects/assistant
+        run: bash scripts/deploy-local.sh "$GITHUB_SHA"

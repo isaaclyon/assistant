@@ -65,19 +65,22 @@ The service automatically restarts after failures. Pi conversation history, Tele
 
 ## Deploying updates
 
+Pull requests run `.github/workflows/deploy.yml` checks on GitHub-hosted CI. Merges to `master` rerun those checks, then the `assistant-production` self-hosted runner on `lyon-server` deploys the green commit and verifies the systemd user service. The single runner and a shared deployment lock serialize activation; superseded queued revisions exit successfully instead of rolling production backward. A failed check prevents deployment. The runner itself is managed by `github-actions-assistant.service`; check it with `systemctl --user status github-actions-assistant.service` on the server.
+
+### Manual fallback
+
 To ship a new commit to the box running the service, push to `origin/master`, then from a machine with SSH access:
 
 ```bash
 npm run deploy
 ```
 
-`scripts/deploy.sh` connects over SSH, fast-forwards the remote checkout to `origin/master` (`git reset --hard`), runs `npm ci` + `npm run build`, restarts the service, and prints status plus recent logs. It deploys whatever is on `origin` — it warns if your local branch tip differs, so push first. The target is overridable:
+`scripts/deploy.sh` connects over SSH and invokes the same exact-SHA, immutable-release, locked deployment path used by Actions. It deploys only commits on `origin/master`, preserves tracked live edits by refusing to overwrite them, and applies the same rollback and readiness checks. The target is overridable:
 
 | Variable | Default |
 | --- | --- |
 | `DEPLOY_HOST` | `lyon-server` |
 | `DEPLOY_PATH` | `/home/isaaclyon/projects/assistant` |
-| `DEPLOY_BRANCH` | `master` |
 
 The script sources nvm on the remote before invoking `node`/`npm`, since the nvm-managed toolchain is not on a non-interactive SSH `PATH`.
 
@@ -95,7 +98,7 @@ Optional environment variables:
 
 Re-run `npm run service:install` after changing these variables so the generated unit captures the new paths.
 
-The Codex adapter defaults to normal mode for the bridge's `openai-codex` model, exposing `exec_command`, `write_stdin`, `apply_patch`, image, and web tools. Its settings are independent of normal Pi sessions. The pinned extension receives this separate path through the version-checked patch in `scripts/patch-codex-conversion.mjs`; update that patch deliberately when changing the extension version.
+The Codex adapter defaults to normal mode for the bridge's `openai-codex` model, exposing `exec_command`, `write_stdin`, `apply_patch`, image viewing, and web search. Image generation is disabled. Its settings are independent of normal Pi sessions. The pinned extension receives this separate path through the version-checked patch in `scripts/patch-codex-conversion.mjs`; update that patch deliberately when changing the extension version.
 
 ## Security and durability boundary
 
