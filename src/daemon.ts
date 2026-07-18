@@ -6,6 +6,12 @@ import {
   createShutdownLatch,
   restartExitCode,
 } from "./lifecycle.js";
+import {
+  markRestartPending,
+  notifyPendingRestart,
+} from "./restart-notification.js";
+
+const config = resolveBridgeConfig();
 
 const latch = createShutdownLatch((reason) => {
   console.log(`Shutdown requested (${reason}).`);
@@ -16,10 +22,26 @@ const keepAlive = setInterval(() => {}, 60_000);
 
 try {
   const host = await startBridgeHost({
-    config: resolveBridgeConfig(),
+    config,
     onShutdownRequest: () => latch.request("extension"),
-    onRestartRequest: () => latch.request("restart"),
+    onRestartRequest: () => {
+      try {
+        markRestartPending(config.stateDir);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`Could not persist restart confirmation: ${message}`);
+      }
+      latch.request("restart");
+    },
   });
+  try {
+    if (await notifyPendingRestart(config)) {
+      console.log("Sent restart confirmation to Telegram.");
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Could not send restart confirmation: ${message}`);
+  }
   const reason = await latch.wait();
   const exitCode = restartExitCode(reason);
   const disposalResult = await awaitShutdownDisposal(() => host.dispose());
