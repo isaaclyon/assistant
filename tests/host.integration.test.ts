@@ -570,4 +570,126 @@ describe("startBridgeHost", () => {
       else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
     }
   }, 20_000);
+
+  it("opens the durable inbox under stateDir, registers it, and releases it on dispose", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-telegram-inbox-"));
+    const extensionPath = join(root, "noop-extension.mjs");
+    await writeFile(extensionPath, `export default function() {}\n`);
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const close = vi.fn();
+    const fakeInbox = {
+      persist: vi.fn(),
+      remove: vi.fn(),
+      loadPending: vi.fn(() => []),
+      close,
+    };
+    const openInbox = vi.fn(() => fakeInbox);
+    const unbindInbox = vi.fn();
+    const bindInbox = vi.fn(() => unbindInbox);
+
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const host = await startBridgeHost({
+      config: {
+        agentDir: join(root, "agent"),
+        cwd: root,
+        sessionDir: join(root, "state", "sessions"),
+        stateDir: join(root, "state"),
+      },
+      logger,
+      telegramExtensionPath: extensionPath,
+      openInbox,
+      bindInbox,
+    });
+
+    try {
+      expect(openInbox).toHaveBeenCalledWith(join(root, "state", "inbox.db"));
+      expect(bindInbox).toHaveBeenCalledWith(fakeInbox);
+      expect(unbindInbox).not.toHaveBeenCalled();
+      expect(close).not.toHaveBeenCalled();
+    } finally {
+      await host.dispose();
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
+
+    expect(unbindInbox).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  }, 20_000);
+
+  it("round-trips a real turn: host SQLite inbox ↔ pinned fork reconcile/replay", async () => {
+    const { bindTelegramInboundInbox } = await import(
+      "../src/telegram-inbox-capability.js"
+    );
+    const { openInbox } = await import("../src/inbox.js");
+    const inboxModulePath = join(
+      dirname(resolveTelegramExtensionPath()),
+      "lib",
+      "inbox.ts",
+    );
+    const queueModulePath = join(
+      dirname(resolveTelegramExtensionPath()),
+      "lib",
+      "queue.ts",
+    );
+    const forkInbox = (await import(pathToFileURL(inboxModulePath).href)) as {
+      getTelegramInboundInbox: () => unknown;
+      withTelegramInboundInboxPersistence: (store: unknown) => {
+        getQueuedItems: () => unknown[];
+        setQueuedItems: (items: unknown[]) => void;
+      };
+      replayTelegramInboundInbox: (store: unknown, inbox: unknown) => number;
+    };
+    const forkQueue = (await import(pathToFileURL(queueModulePath).href)) as {
+      createTelegramQueueStore: () => unknown;
+    };
+
+    const root = await mkdtemp(join(tmpdir(), "pi-telegram-inbox-e2e-"));
+    const inbox = openInbox(join(root, "inbox.db"));
+    const unbind = bindTelegramInboundInbox(inbox);
+
+    const turn = {
+      kind: "prompt",
+      chatId: 7,
+      replyToMessageId: 10,
+      queueOrder: 0,
+      queueLane: "default",
+      laneOrder: 0,
+      statusSummary: "hi",
+      sourceMessageIds: [10],
+      queuedAttachments: [],
+      content: [{ type: "text", text: "remember the milk" }],
+      historyText: "hi",
+    };
+
+    try {
+      // The host's bind and the fork's read rendezvous on the shared symbol.
+      expect(forkInbox.getTelegramInboundInbox()).toBe(inbox);
+
+      // Fork wraps its queue store; accepting a turn persists it to real SQLite.
+      const store = forkInbox.withTelegramInboundInboxPersistence(
+        forkQueue.createTelegramQueueStore(),
+      );
+      store.setQueuedItems([turn]);
+      expect(inbox.loadPending()).toEqual([
+        { id: "7:10", payload: JSON.stringify(turn) },
+      ]);
+
+      // Simulate a restart: a fresh queue store replays the durable turn.
+      const restartedStore = forkInbox.withTelegramInboundInboxPersistence(
+        forkQueue.createTelegramQueueStore(),
+      );
+      expect(
+        forkInbox.replayTelegramInboundInbox(restartedStore, inbox),
+      ).toBe(1);
+      expect(restartedStore.getQueuedItems()).toEqual([turn]);
+
+      // Dispatch (turn leaves the queue) clears the durable record.
+      restartedStore.setQueuedItems([]);
+      expect(inbox.loadPending()).toEqual([]);
+    } finally {
+      unbind();
+      inbox.close();
+    }
+  }, 20_000);
 });

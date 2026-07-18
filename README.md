@@ -79,7 +79,7 @@ Re-run `npm run service:install` after changing these variables so the generated
 
 The bot controls a Pi process with the current user's filesystem and command permissions. Keep the bot token private and pair only the intended Telegram account.
 
-This host provides process restart and persistent Pi sessions, but `pi-telegram` keeps accepted queued turns in memory. A host crash after Telegram records an update but before the queued turn runs can lose that turn. A durable SQLite inbox/outbox is the next step if at-least-once prompt execution is required.
+This host provides process restart and persistent Pi sessions. Accepted inbound turns are also made crash-durable by a SQLite inbox at `<stateDir>/inbox.db` (`src/inbox.ts`): a turn is persisted the instant it is accepted, removed once Pi owns it, and replayed on startup, giving at-least-once execution across a host crash. Idempotency is keyed on a stable per-turn identity (chat plus source message id). The host and the pinned fork rendezvous on a shared process-global registry (`src/telegram-inbox-capability.ts`) — the same pattern as the session-replacement capability — so the compiled host never imports the source-only fork; binding is inert against a fork build that does not read it. Durable *outbound* delivery is intentionally out of scope for a 1-2 user assistant — a failed send leaves the answer in Pi's session to re-ask. See [ADR-0003](docs/adr/0003-durable-inbound-inbox.md).
 
 ## Development
 

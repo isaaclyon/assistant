@@ -19,8 +19,19 @@ import {
   readDefaultTelegramLock,
   shouldRecoverTelegramOwnership,
 } from "./config.js";
+import { type InboundInbox, openInbox } from "./inbox.js";
 import { resolveTelegramExtensionPath } from "./package-paths.js";
 import { bindTelegramHostNewSession } from "./telegram-host-capability.js";
+import {
+  type InboundInboxCapability,
+  bindTelegramInboundInbox,
+} from "./telegram-inbox-capability.js";
+
+/**
+ * Publishes the durable inbox on the shared registry the pinned fork reads, and
+ * returns an unbind callback. Injectable so tests can substitute a fake binding.
+ */
+export type BindInbox = (inbox: InboundInboxCapability) => () => void;
 
 export interface BridgeLogger {
   info(message: string): void;
@@ -37,6 +48,8 @@ export interface BridgeHostOptions {
   nowMs?: () => number;
   ownershipMonitorIntervalMs?: number;
   readTelegramLock?: (path: string) => Promise<TelegramLockView | undefined>;
+  openInbox?: (dbPath: string) => InboundInbox;
+  bindInbox?: BindInbox;
 }
 
 export interface BridgeHost {
@@ -59,10 +72,25 @@ export async function startBridgeHost({
   nowMs = Date.now,
   ownershipMonitorIntervalMs = 5_000,
   readTelegramLock = readDefaultTelegramLock,
+  openInbox: openInboxStore = openInbox,
+  bindInbox = bindTelegramInboundInbox,
 }: BridgeHostOptions): Promise<BridgeHost> {
   process.env.PI_CODING_AGENT_DIR = config.agentDir;
   initTheme();
+  await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   await mkdir(config.sessionDir, { recursive: true, mode: 0o700 });
+
+  // Open and register the durable inbox before the runtime starts its session:
+  // the fork replays pending turns on session start, so the capability must be
+  // live first. A registration failure must still release the database handle.
+  const inbox = openInboxStore(join(config.stateDir, "inbox.db"));
+  let unregisterInbox: () => void;
+  try {
+    unregisterInbox = bindInbox(inbox);
+  } catch (error) {
+    inbox.close();
+    throw error;
+  }
 
   const createRuntime: CreateAgentSessionRuntimeFactory = async ({
     cwd,
@@ -99,11 +127,18 @@ export async function startBridgeHost({
     return { ...result, services, diagnostics: services.diagnostics };
   };
 
-  const runtime = await createAgentSessionRuntime(createRuntime, {
-    cwd: config.cwd,
-    agentDir: config.agentDir,
-    sessionManager: SessionManager.continueRecent(config.cwd, config.sessionDir),
-  });
+  let runtime: AgentSessionRuntime;
+  try {
+    runtime = await createAgentSessionRuntime(createRuntime, {
+      cwd: config.cwd,
+      agentDir: config.agentDir,
+      sessionManager: SessionManager.continueRecent(config.cwd, config.sessionDir),
+    });
+  } catch (error) {
+    unregisterInbox();
+    inbox.close();
+    throw error;
+  }
 
   let sessionReplacementInFlight = false;
   let unregisterTelegramHost: () => void;
@@ -124,6 +159,8 @@ export async function startBridgeHost({
     });
   } catch (error) {
     await runtime.dispose();
+    unregisterInbox();
+    inbox.close();
     throw error;
   }
 
@@ -145,6 +182,8 @@ export async function startBridgeHost({
         await runtime.dispose();
       } finally {
         unregisterTelegramHost();
+        unregisterInbox();
+        inbox.close();
       }
     })();
     return disposePromise;
