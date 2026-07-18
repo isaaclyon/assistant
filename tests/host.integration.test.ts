@@ -146,9 +146,9 @@ describe("startBridgeHost", () => {
           "apply_patch",
           "view_image",
           "web_run",
-          "imagegen",
         ]),
       );
+      expect(host.runtime.session.getActiveToolNames()).not.toContain("imagegen");
 
       const messages: string[] = [];
       const replacement = createTelegramSessionReplacementRuntime({

@@ -6,6 +6,7 @@
 - **Pi:** owns agent execution, model/tool state, extension lifecycle, and conversation persistence.
 - **pi-telegram:** owns Telegram polling, pairing, routing, rendering, controls, and update-offset persistence.
 - **systemd:** owns boot activation, restart policy, and logs.
+- **GitHub Actions:** owns post-merge validation and serialized production deployment through the server's repository-scoped runner.
 
 The host loads a full-commit-pinned `isaaclyon/pi-telegram` fork through Pi's `DefaultResourceLoader` and binds extensions in RPC mode. The RPC binding includes Pi's official command-context session actions (`waitForIdle`, `newSession`, `fork`, tree navigation, session switching, and reload). The fork's narrow process-local host capability delegates Telegram `/new` to `AgentSessionRuntime.newSession()` without exposing the runtime or retaining stale extension contexts. The bridge repo is the agent's home base, so ancestor server guidance and local bridge architecture are loaded together; filesystem/tool access is not restricted to that cwd. Extensions and skills discovered outside the bridge repo cwd (global `~/.pi/agent`, `~/.agents`, ancestor `.agents` dirs) are filtered out and logged, so the agent's capabilities are exactly what the repo ships.
 
@@ -32,6 +33,10 @@ The host explicitly loads the pinned, repo-installed Codex conversion dependency
 6. Let pi-telegram resume an owned/stale lock, or invoke `/telegram-connect` when no owner exists.
 7. Monitor polling ownership every five seconds. A live external Pi owner is respected; when it exits, the host reconnects automatically.
 8. Wait for SIGINT, SIGTERM, or an extension shutdown request.
+
+## Deployment
+
+Pushes to `master` run checks on a GitHub-hosted runner. After they pass, the `assistant-production` self-hosted runner builds an immutable release for the exact merged SHA, updates the canonical agent checkout, removes untracked and ignored project settings plus all repo-local extension/skill locations (`.pi` and `.agents`), points systemd at the release, and requires both the application-ready signal and a stable PID. Activation failure restores the previous unit. See ADR-0005.
 
 ## Shutdown
 

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -50,14 +50,75 @@ export function resolveBridgeConfig(
 
 export async function ensureCodexConfig(path: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const initialConfig = {
+    mode: "normal",
+    tools: { imageGeneration: false, imageGenerationOnly: false },
+  };
   try {
-    await writeFile(path, `${JSON.stringify({ mode: "normal" }, null, 2)}\n`, {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    });
+    await writeFile(
+      path,
+      `${JSON.stringify(initialConfig, null, 2)}\n`,
+      {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o600,
+      },
+    );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(path, "utf8"));
+  } catch (error) {
+    throw new Error(`Could not parse Codex configuration: ${path}`, {
+      cause: error,
+    });
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Codex configuration must be a JSON object: ${path}`);
+  }
+  const config = parsed as Record<string, unknown>;
+  const existingTools = config.tools;
+  if (
+    typeof existingTools === "object" &&
+    existingTools !== null &&
+    !Array.isArray(existingTools) &&
+    (existingTools as Record<string, unknown>).imageGeneration === false &&
+    (existingTools as Record<string, unknown>).imageGenerationOnly === false
+  ) {
+    return;
+  }
+
+  const tools =
+    typeof existingTools === "object" &&
+    existingTools !== null &&
+    !Array.isArray(existingTools)
+      ? (existingTools as Record<string, unknown>)
+      : {};
+  const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await writeFile(
+      temporaryPath,
+      `${JSON.stringify(
+        {
+          ...config,
+          tools: {
+            ...tools,
+            imageGeneration: false,
+            imageGenerationOnly: false,
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+    await rename(temporaryPath, path);
+  } catch (error) {
+    await rm(temporaryPath, { force: true });
+    throw error;
   }
 }
 
