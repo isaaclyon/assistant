@@ -7,6 +7,7 @@ describe("renderServiceUnit", () => {
     const unit = renderServiceUnit({
       config: {
         agentDir: "/home/test/.pi/agent",
+        codexConfigPath: "/home/test/.config/telegram-codex.json",
         cwd: "/home/test",
         sessionDir: "/home/test/.local/state/pi-telegram-bridge/sessions",
         stateDir: "/home/test/.local/state/pi-telegram-bridge",
@@ -21,6 +22,9 @@ describe("renderServiceUnit", () => {
     expect(unit).toContain("WorkingDirectory=/home/test");
     expect(unit).toContain("Restart=on-failure");
     expect(unit).toContain('Environment="PI_TELEGRAM_BRIDGE_CWD=/home/test"');
+    expect(unit).toContain(
+      'Environment="PI_TELEGRAM_CODEX_CONFIG=/home/test/.config/telegram-codex.json"',
+    );
     expect(unit).toContain("UMask=0077");
   });
 });

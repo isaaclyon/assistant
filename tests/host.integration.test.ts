@@ -81,6 +81,26 @@ describe("startBridgeHost", () => {
       await loadPinnedSessionReplacementFactory();
     const root = await mkdtemp(join(tmpdir(), "pi-telegram-host-new-session-"));
     const extensionPath = join(root, "new-session-extension.mjs");
+    const agentDir = join(root, "agent");
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(
+      join(agentDir, "auth.json"),
+      JSON.stringify({
+        "openai-codex": {
+          type: "oauth",
+          access: "test-access-token",
+          refresh: "test-refresh-token",
+          expires: Date.now() + 60_000,
+        },
+      }),
+    );
+    await writeFile(
+      join(agentDir, "settings.json"),
+      JSON.stringify({
+        defaultProvider: "openai-codex",
+        defaultModel: "gpt-5.6-sol",
+      }),
+    );
     await writeFile(
       extensionPath,
       `export default function(pi) {
@@ -101,7 +121,7 @@ describe("startBridgeHost", () => {
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
     const host = await startBridgeHost({
       config: {
-        agentDir: join(root, "agent"),
+        agentDir,
         cwd: root,
         sessionDir: join(root, "state", "sessions"),
         stateDir: join(root, "state"),
@@ -116,6 +136,19 @@ describe("startBridgeHost", () => {
       ).toThrow(/already registered/);
       const originalSessionFile = host.runtime.session.sessionFile;
       expect(originalSessionFile).toContain(join(root, "state", "sessions"));
+      expect(host.runtime.session.model).toEqual(
+        expect.objectContaining({ provider: "openai-codex", id: "gpt-5.6-sol" }),
+      );
+      expect(host.runtime.session.getActiveToolNames()).toEqual(
+        expect.arrayContaining([
+          "exec_command",
+          "write_stdin",
+          "apply_patch",
+          "view_image",
+          "web_run",
+          "imagegen",
+        ]),
+      );
 
       const messages: string[] = [];
       const replacement = createTelegramSessionReplacementRuntime({

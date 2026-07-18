@@ -1,10 +1,11 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   hasConfiguredTelegramToken,
+  ensureCodexConfig,
   isProcessAlive,
   readDefaultTelegramLock,
   resolveBridgeConfig,
@@ -23,6 +24,9 @@ describe("resolveBridgeConfig", () => {
     expect(config.sessionDir).toBe(
       "/home/tester/.local/state/pi-telegram-bridge/sessions",
     );
+    expect(config.codexConfigPath).toBe(
+      "/home/tester/.local/state/pi-telegram-bridge/pi-codex-conversion.json",
+    );
   });
 
   it("honors explicit runtime paths", () => {
@@ -31,16 +35,34 @@ describe("resolveBridgeConfig", () => {
         PI_CODING_AGENT_DIR: "/agent",
         PI_TELEGRAM_BRIDGE_CWD: "/workspace",
         PI_TELEGRAM_BRIDGE_STATE_DIR: "/state",
+        PI_TELEGRAM_CODEX_CONFIG: "/config/codex.json",
       },
       "/home/tester",
     );
 
     expect(config).toEqual({
       agentDir: "/agent",
+      codexConfigPath: "/config/codex.json",
       cwd: "/workspace",
       sessionDir: "/state/sessions",
       stateDir: "/state",
     });
+  });
+});
+
+describe("ensureCodexConfig", () => {
+  it("creates an explicit private normal-mode config without replacing an existing file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bridge-codex-config-"));
+    const path = join(dir, "nested", "codex.json");
+
+    await ensureCodexConfig(path);
+    await expect(readFile(path, "utf8")).resolves.toBe(
+      `${JSON.stringify({ mode: "normal" }, null, 2)}\n`,
+    );
+
+    await writeFile(path, '{"mode":"path"}\n');
+    await ensureCodexConfig(path);
+    await expect(readFile(path, "utf8")).resolves.toBe('{"mode":"path"}\n');
   });
 });
 

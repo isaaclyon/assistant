@@ -14,13 +14,17 @@ import { join, sep } from "node:path";
 import {
   type BridgeConfig,
   type TelegramLockView,
+  ensureCodexConfig,
   hasConfiguredTelegramToken,
   isProcessAlive as isProcessAliveByPid,
   readDefaultTelegramLock,
   shouldRecoverTelegramOwnership,
 } from "./config.js";
 import { type InboundInbox, openInbox } from "./inbox.js";
-import { resolveTelegramExtensionPath } from "./package-paths.js";
+import {
+  resolveCodexExtensionPath,
+  resolveTelegramExtensionPath,
+} from "./package-paths.js";
 import {
   type InboundInboxCapability,
   bindTelegramHostNewSession,
@@ -44,6 +48,7 @@ export interface BridgeHostOptions {
   logger?: BridgeLogger;
   onShutdownRequest?: () => void;
   telegramExtensionPath?: string;
+  codexExtensionPath?: string;
   isProcessAlive?: (pid: number) => boolean;
   nowMs?: () => number;
   ownershipMonitorIntervalMs?: number;
@@ -68,6 +73,7 @@ export async function startBridgeHost({
   logger = consoleLogger,
   onShutdownRequest = () => {},
   telegramExtensionPath = resolveTelegramExtensionPath(),
+  codexExtensionPath = resolveCodexExtensionPath(),
   isProcessAlive = isProcessAliveByPid,
   nowMs = Date.now,
   ownershipMonitorIntervalMs = 5_000,
@@ -76,9 +82,14 @@ export async function startBridgeHost({
   bindInbox = bindTelegramInboundInbox,
 }: BridgeHostOptions): Promise<BridgeHost> {
   process.env.PI_CODING_AGENT_DIR = config.agentDir;
+  process.env.PI_CODEX_CONVERSION_CONFIG_PATH =
+    config.codexConfigPath ?? join(config.stateDir, "pi-codex-conversion.json");
   initTheme();
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   await mkdir(config.sessionDir, { recursive: true, mode: 0o700 });
+  await ensureCodexConfig(
+    config.codexConfigPath ?? join(config.stateDir, "pi-codex-conversion.json"),
+  );
 
   // Open and register the durable inbox before the runtime starts its session:
   // the fork replays pending turns on session start, so the capability must be
@@ -104,12 +115,14 @@ export async function startBridgeHost({
     // always-on bridge without going through git.
     const repoPrefix = cwd + sep;
     const isRepoLocal = (path: string): boolean =>
-      path.startsWith(repoPrefix) || path === telegramExtensionPath;
+      path.startsWith(repoPrefix) ||
+      path === telegramExtensionPath ||
+      path === codexExtensionPath;
     const services = await createAgentSessionServices({
       cwd,
       agentDir,
       resourceLoaderOptions: {
-        additionalExtensionPaths: [telegramExtensionPath],
+        additionalExtensionPaths: [telegramExtensionPath, codexExtensionPath],
         extensionsOverride: (base) => ({
           ...base,
           extensions: base.extensions.filter((extension) => {
@@ -140,6 +153,19 @@ export async function startBridgeHost({
       );
       throw new Error(
         `Telegram extension failed to load from ${telegramExtensionPath}${loadError ? `: ${loadError.error}` : ""}`,
+      );
+    }
+    const codexLoaded = extensions.extensions.some(
+      (extension) =>
+        extension.path === codexExtensionPath ||
+        extension.resolvedPath === codexExtensionPath,
+    );
+    if (!codexLoaded) {
+      const loadError = extensions.errors.find(
+        (error) => error.path === codexExtensionPath,
+      );
+      throw new Error(
+        `Codex conversion extension failed to load from ${codexExtensionPath}${loadError ? `: ${loadError.error}` : ""}`,
       );
     }
     const result = await createAgentSessionFromServices({
