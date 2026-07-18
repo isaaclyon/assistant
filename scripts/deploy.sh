@@ -5,7 +5,7 @@ set -euo pipefail
 DEPLOY_HOST="${DEPLOY_HOST:-lyon-server}"
 DEPLOY_PATH="${DEPLOY_PATH:-/home/isaaclyon/projects/assistant}"
 
-echo "==> Deploying origin/master to $DEPLOY_HOST:$DEPLOY_PATH"
+echo "==> Deploying origin/main to $DEPLOY_HOST:$DEPLOY_PATH"
 ssh "$DEPLOY_HOST" bash -s -- "$DEPLOY_PATH" <<'REMOTE'
 set -euo pipefail
 DEPLOY_PATH="$1"
@@ -17,8 +17,8 @@ if [[ -s "$NVM_DIR/nvm.sh" ]]; then
 fi
 
 cd "$DEPLOY_PATH"
-git fetch --prune origin master
-EXPECTED_SHA="$(git rev-parse origin/master)"
+git fetch --prune origin main
+EXPECTED_SHA="$(git rev-parse origin/main)"
 DEPLOY_SCRIPT="$(mktemp)"
 trap 'rm -f "$DEPLOY_SCRIPT"' EXIT
 git show "$EXPECTED_SHA:scripts/deploy-local.sh" >"$DEPLOY_SCRIPT"

@@ -65,17 +65,17 @@ The service automatically restarts after failures. Pi conversation history, Tele
 
 ## Deploying updates
 
-Pull requests run `.github/workflows/deploy.yml` checks on GitHub-hosted CI. Merges to `master` rerun those checks, then the `assistant-production` self-hosted runner on `lyon-server` deploys the green commit and verifies the systemd user service. The single runner and a shared deployment lock serialize activation; superseded queued revisions exit successfully instead of rolling production backward. A failed check prevents deployment. The runner itself is managed by `github-actions-assistant.service`; check it with `systemctl --user status github-actions-assistant.service` on the server.
+Pull requests run `.github/workflows/deploy.yml` checks on GitHub-hosted CI. Merges to `main` rerun those checks, then the `assistant-production` self-hosted runner on `lyon-server` deploys the green commit and verifies the systemd user service. The single runner and a shared deployment lock serialize activation; superseded queued revisions exit successfully instead of rolling production backward. A failed check prevents deployment. The runner itself is managed by `github-actions-assistant.service`; check it with `systemctl --user status github-actions-assistant.service` on the server.
 
 ### Manual fallback
 
-To ship a new commit to the box running the service, push to `origin/master`, then from a machine with SSH access:
+To ship a new commit to the box running the service, push to `origin/main`, then from a machine with SSH access:
 
 ```bash
 npm run deploy
 ```
 
-`scripts/deploy.sh` connects over SSH and invokes the same exact-SHA, immutable-release, locked deployment path used by Actions. It deploys only commits on `origin/master`, preserves tracked live edits by refusing to overwrite them, and applies the same rollback and readiness checks. The target is overridable:
+`scripts/deploy.sh` connects over SSH and invokes the same exact-SHA, immutable-release, locked deployment path used by Actions. It deploys only commits on `origin/main`, preserves tracked live edits by refusing to overwrite them, and applies the same rollback and readiness checks. The target is overridable:
 
 | Variable | Default |
 | --- | --- |
