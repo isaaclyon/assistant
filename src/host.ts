@@ -21,11 +21,11 @@ import {
 } from "./config.js";
 import { type InboundInbox, openInbox } from "./inbox.js";
 import { resolveTelegramExtensionPath } from "./package-paths.js";
-import { bindTelegramHostNewSession } from "./telegram-host-capability.js";
 import {
   type InboundInboxCapability,
+  bindTelegramHostNewSession,
   bindTelegramInboundInbox,
-} from "./telegram-inbox-capability.js";
+} from "./telegram-capabilities.js";
 
 /**
  * Publishes the durable inbox on the shared registry the pinned fork reads, and

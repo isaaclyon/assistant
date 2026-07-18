@@ -6,7 +6,7 @@ export interface ShutdownLatch {
 export function createShutdownLatch(
   onRequested: (reason: string) => void = () => {},
 ): ShutdownLatch {
-  let resolveWait: ((reason: string) => void) | undefined;
+  let resolveWait!: (reason: string) => void;
   let requestedReason: string | undefined;
   const waitPromise = new Promise<string>((resolve) => {
     resolveWait = resolve;
@@ -17,34 +17,10 @@ export function createShutdownLatch(
       if (requestedReason !== undefined) return;
       requestedReason = reason;
       onRequested(reason);
-      resolveWait?.(reason);
+      resolveWait(reason);
     },
     wait: () => waitPromise,
   };
-}
-
-export interface KeepAliveTimer<THandle> {
-  start(): THandle;
-  clear(handle: THandle): void;
-}
-
-const defaultKeepAliveTimer: KeepAliveTimer<ReturnType<typeof setInterval>> = {
-  start: () => setInterval(() => {}, 60_000),
-  clear: (handle) => clearInterval(handle),
-};
-
-export async function waitForShutdown<
-  THandle = ReturnType<typeof setInterval>,
->(
-  latch: ShutdownLatch,
-  timer: KeepAliveTimer<THandle> = defaultKeepAliveTimer as KeepAliveTimer<THandle>,
-): Promise<string> {
-  const handle = timer.start();
-  try {
-    return await latch.wait();
-  } finally {
-    timer.clear(handle);
-  }
 }
 
 export function bindProcessShutdownSignals(latch: ShutdownLatch): () => void {

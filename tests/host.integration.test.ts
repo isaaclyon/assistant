@@ -619,7 +619,7 @@ describe("startBridgeHost", () => {
 
   it("round-trips a real turn: host SQLite inbox ↔ pinned fork reconcile/replay", async () => {
     const { bindTelegramInboundInbox } = await import(
-      "../src/telegram-inbox-capability.js"
+      "../src/telegram-capabilities.js"
     );
     const { openInbox } = await import("../src/inbox.js");
     const inboxModulePath = join(

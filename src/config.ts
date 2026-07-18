@@ -110,12 +110,11 @@ export function shouldRecoverTelegramOwnership(
   currentPid: number,
   isAlive: (pid: number) => boolean = isProcessAlive,
   nowMs = Date.now(),
-  staleHeartbeatMs = TELEGRAM_LOCK_STALE_HEARTBEAT_MS,
 ): boolean {
   if (!lock) return true;
   if (
     lock.heartbeatMs !== undefined &&
-    nowMs - lock.heartbeatMs > staleHeartbeatMs
+    nowMs - lock.heartbeatMs > TELEGRAM_LOCK_STALE_HEARTBEAT_MS
   ) {
     return true;
   }
