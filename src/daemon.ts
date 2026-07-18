@@ -1,6 +1,7 @@
 import { resolveBridgeConfig } from "./config.js";
 import { startBridgeHost } from "./host.js";
 import {
+  awaitShutdownDisposal,
   bindProcessShutdownSignals,
   createShutdownLatch,
   restartExitCode,
@@ -20,8 +21,14 @@ try {
     onRestartRequest: () => latch.request("restart"),
   });
   const reason = await latch.wait();
-  await host.dispose();
   const exitCode = restartExitCode(reason);
+  const disposalResult = await awaitShutdownDisposal(() => host.dispose());
+  if (disposalResult === "timed-out") {
+    console.error(
+      "Graceful bridge shutdown timed out; forcing process exit so the service supervisor can recover.",
+    );
+    process.exit(exitCode);
+  }
   if (exitCode !== 0) {
     process.exitCode = exitCode;
     console.log("Restart requested; exiting non-zero so systemd restarts the bridge.");

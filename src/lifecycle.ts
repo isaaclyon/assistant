@@ -7,9 +7,29 @@ export interface ShutdownLatch {
 // systemd unit's `Restart=on-failure` policy brings the process back; a clean
 // (code 0) shutdown would not restart. See docs/adr/0006.
 export const RESTART_EXIT_CODE = 75;
+export const SHUTDOWN_DISPOSAL_TIMEOUT_MS = 10_000;
+
+export type ShutdownDisposalResult = "disposed" | "timed-out";
 
 export const restartExitCode = (reason: string): number =>
   reason === "restart" ? RESTART_EXIT_CODE : 0;
+
+export async function awaitShutdownDisposal(
+  dispose: () => Promise<void>,
+  timeoutMs = SHUTDOWN_DISPOSAL_TIMEOUT_MS,
+): Promise<ShutdownDisposalResult> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      dispose().then(() => "disposed" as const),
+      new Promise<"timed-out">((resolve) => {
+        timeout = setTimeout(() => resolve("timed-out"), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
 export function createShutdownLatch(
   onRequested: (reason: string) => void = () => {},

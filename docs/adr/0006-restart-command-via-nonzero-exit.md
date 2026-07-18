@@ -35,7 +35,10 @@ mirroring the existing fork capability seam. The host defers the trigger to
 with the reason `"restart"`. The daemon disposes gracefully (releasing the
 Telegram ownership lock and closing the inbox) and, for that reason only, exits
 with `RESTART_EXIT_CODE` (75), so `Restart=on-failure` brings the process back on
-the current release with session continuity preserved.
+the current release with session continuity preserved. Graceful disposal has a
+bounded ten-second window; if transport or extension teardown remains pending,
+the daemon forces the same requested exit code so a half-shut-down process cannot
+remain alive without polling Telegram.
 
 ## Consequences
 
@@ -45,7 +48,10 @@ the current release with session continuity preserved.
 - The bridge's restart path now depends on `Restart=on-failure`; changing that
   systemd policy would break `/restart`.
 - A restart appears in the journal as a code-75 exit followed by a systemd
-restart — expected, not a fault.
+  restart — expected, not a fault.
+- A teardown that exceeds ten seconds sacrifices graceful cleanup and relies on
+  stale-lock and durable-inbox recovery, preferring restored availability over an
+  indefinitely wedged process.
 - A repo-local Telegram `/reload` adapter advertises Pi's built-in command in the
   native command menu and forwards it through the normal Pi prompt queue.
 - Shelling out to `systemctl --user restart` from the command was rejected: it
