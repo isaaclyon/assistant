@@ -48,7 +48,6 @@ export interface BridgeHostOptions {
   logger?: BridgeLogger;
   onShutdownRequest?: () => void;
   telegramExtensionPath?: string;
-  codexExtensionPath?: string;
   isProcessAlive?: (pid: number) => boolean;
   nowMs?: () => number;
   ownershipMonitorIntervalMs?: number;
@@ -73,7 +72,6 @@ export async function startBridgeHost({
   logger = consoleLogger,
   onShutdownRequest = () => {},
   telegramExtensionPath = resolveTelegramExtensionPath(),
-  codexExtensionPath = resolveCodexExtensionPath(),
   isProcessAlive = isProcessAliveByPid,
   nowMs = Date.now,
   ownershipMonitorIntervalMs = 5_000,
@@ -81,15 +79,13 @@ export async function startBridgeHost({
   openInbox: openInboxStore = openInbox,
   bindInbox = bindTelegramInboundInbox,
 }: BridgeHostOptions): Promise<BridgeHost> {
+  const codexExtensionPath = resolveCodexExtensionPath();
   process.env.PI_CODING_AGENT_DIR = config.agentDir;
-  process.env.PI_CODEX_CONVERSION_CONFIG_PATH =
-    config.codexConfigPath ?? join(config.stateDir, "pi-codex-conversion.json");
+  process.env.PI_CODEX_CONVERSION_CONFIG_PATH = config.codexConfigPath;
   initTheme();
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   await mkdir(config.sessionDir, { recursive: true, mode: 0o700 });
-  await ensureCodexConfig(
-    config.codexConfigPath ?? join(config.stateDir, "pi-codex-conversion.json"),
-  );
+  await ensureCodexConfig(config.codexConfigPath);
 
   // Open and register the durable inbox before the runtime starts its session:
   // the fork replays pending turns on session start, so the capability must be
