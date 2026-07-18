@@ -1,6 +1,6 @@
 # Pi Telegram Bridge Host
 
-A small, systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](https://github.com/isaaclyon/pi-telegram/commit/3f2ed12ebb8e9533f2c46b9b38a707e6ba1c8246). It keeps one persistent Pi session available through a private Telegram bot and adds a narrow host-backed Telegram `/new` lifecycle bridge.
+A small, systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](https://github.com/isaaclyon/pi-telegram/commit/c1692633dc9838bdf64b1b792f6d6249c3b13d53). It keeps one persistent Pi session available through a private Telegram bot and adds a narrow host-backed Telegram `/new` lifecycle bridge.
 
 ## Runtime shape
 

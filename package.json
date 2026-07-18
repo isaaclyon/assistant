@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.80.6",
-    "@llblab/pi-telegram": "https://codeload.github.com/isaaclyon/pi-telegram/tar.gz/d52cb4b0dafcea2cadceeabd8fbe4f80813de807"
+    "@llblab/pi-telegram": "https://codeload.github.com/isaaclyon/pi-telegram/tar.gz/c1692633dc9838bdf64b1b792f6d6249c3b13d53"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
