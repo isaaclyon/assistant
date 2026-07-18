@@ -36,7 +36,7 @@ The host explicitly loads the pinned, repo-installed Codex conversion dependency
 
 ## Deployment
 
-Pushes to `master` run checks on a GitHub-hosted runner. After they pass, the `assistant-production` self-hosted runner builds an immutable release for the exact merged SHA, updates the canonical agent checkout, removes untracked and ignored project settings plus all repo-local extension/skill locations (`.pi` and `.agents`), points systemd at the release, and requires both the application-ready signal and a stable PID. Activation failure restores the previous unit. See ADR-0005.
+Pushes to `main` run checks on a GitHub-hosted runner. After they pass, the `assistant-production` self-hosted runner builds an immutable release for the exact merged SHA, updates the canonical agent checkout, removes untracked and ignored project settings plus all repo-local extension/skill locations (`.pi` and `.agents`), points systemd at the release, and requires both the application-ready signal and a stable PID. Activation failure restores the previous unit. See ADR-0005.
 
 ## Shutdown
 

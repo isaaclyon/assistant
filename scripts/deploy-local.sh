@@ -105,10 +105,10 @@ node -e 'if (Number(process.versions.node.split(".")[0]) !== 24) process.exit(1)
 
 cd "$DEPLOY_PATH"
 echo "==> Fetching merged revision $EXPECTED_SHA"
-git fetch --prune origin master
-REMOTE_SHA="$(git rev-parse origin/master)"
+git fetch --prune origin main
+REMOTE_SHA="$(git rev-parse origin/main)"
 if ! git merge-base --is-ancestor "$EXPECTED_SHA" "$REMOTE_SHA"; then
-  echo "Requested revision $EXPECTED_SHA is not on origin/master." >&2
+  echo "Requested revision $EXPECTED_SHA is not on origin/main." >&2
   exit 1
 fi
 CURRENT_SHA="$(git rev-parse HEAD)"
