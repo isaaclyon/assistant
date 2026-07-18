@@ -1,9 +1,10 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 export interface BridgeConfig {
   agentDir: string;
+  codexConfigPath?: string;
   cwd: string;
   sessionDir: string;
   stateDir: string;
@@ -32,13 +33,32 @@ export function resolveBridgeConfig(
     join(home, ".local", "state", "pi-telegram-bridge"),
     home,
   );
+  const codexConfigPath = resolveFromHome(
+    env.PI_TELEGRAM_CODEX_CONFIG,
+    join(stateDir, "pi-codex-conversion.json"),
+    home,
+  );
 
   return {
     agentDir,
+    codexConfigPath,
     cwd,
     sessionDir: join(stateDir, "sessions"),
     stateDir,
   };
+}
+
+export async function ensureCodexConfig(path: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  try {
+    await writeFile(path, `${JSON.stringify({ mode: "normal" }, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
 }
 
 async function readJsonObject(path: string): Promise<Record<string, unknown> | undefined> {

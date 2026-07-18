@@ -8,7 +8,8 @@ A small, systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](ht
 systemd user service
   └── this Node.js host
         └── Pi AgentSessionRuntime (persistent session)
-              └── @llblab/pi-telegram (Telegram transport and UI)
+              ├── @llblab/pi-telegram (Telegram transport and UI)
+              └── @howaboua/pi-codex-conversion (Codex tools/prompt adapter)
 ```
 
 The Pi runtime uses this repository as its working directory by default. Pi therefore loads both the server-level `/home/isaaclyon/AGENTS.md` and this repo's local architecture/agent guidance, while its tools remain free to work elsewhere on the server. Conversation sessions are isolated under `~/.local/state/pi-telegram-bridge/sessions`.
@@ -89,9 +90,12 @@ Optional environment variables:
 | `PI_TELEGRAM_BRIDGE_CWD` | process working directory (this repo under systemd) | Pi home base and context root |
 | `PI_TELEGRAM_BRIDGE_STATE_DIR` | `~/.local/state/pi-telegram-bridge` | Dedicated session state |
 | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi credentials, settings, and Telegram config |
+| `PI_TELEGRAM_CODEX_CONFIG` | `<stateDir>/pi-codex-conversion.json` | Telegram-only Codex conversion settings |
 | `PI_BIN` | `pi` | Pi executable used only by `telegram:setup` |
 
 Re-run `npm run service:install` after changing these variables so the generated unit captures the new paths.
+
+The Codex adapter defaults to normal mode for the bridge's `openai-codex` model, exposing `exec_command`, `write_stdin`, `apply_patch`, image, and web tools. Its settings are independent of normal Pi sessions. The pinned extension receives this separate path through the version-checked patch in `scripts/patch-codex-conversion.mjs`; update that patch deliberately when changing the extension version.
 
 ## Security and durability boundary
 

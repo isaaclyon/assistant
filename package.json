@@ -13,13 +13,18 @@
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "deploy": "bash scripts/deploy.sh",
     "service:install": "npm run build && node dist/src/install-service.js",
+    "postinstall": "node scripts/patch-codex-conversion.mjs",
     "start": "node dist/src/daemon.js",
     "telegram:setup": "npm run build && node dist/src/setup.js",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.80.6",
+    "@earendil-works/pi-agent-core": "0.80.10",
+    "@earendil-works/pi-ai": "0.80.10",
+    "@earendil-works/pi-coding-agent": "0.80.10",
+    "@earendil-works/pi-tui": "0.80.10",
+    "@howaboua/pi-codex-conversion": "2.2.13",
     "@llblab/pi-telegram": "https://codeload.github.com/isaaclyon/pi-telegram/tar.gz/a575e08b252bfd6e98be6d64e35c232bf3d1fa8b"
   },
   "devDependencies": {
