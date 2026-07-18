@@ -45,7 +45,9 @@ the current release with session continuity preserved.
 - The bridge's restart path now depends on `Restart=on-failure`; changing that
   systemd policy would break `/restart`.
 - A restart appears in the journal as a code-75 exit followed by a systemd
-  restart — expected, not a fault.
+restart — expected, not a fault.
+- A repo-local Telegram `/reload` adapter advertises Pi's built-in command in the
+  native command menu and forwards it through the normal Pi prompt queue.
 - Shelling out to `systemctl --user restart` from the command was rejected: it
   hardcodes the unit name, is Linux/systemd-only, and risks the restart job being
   killed with the service's cgroup.
