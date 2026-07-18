@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 
 export interface BridgeConfig {
   agentDir: string;
-  codexConfigPath?: string;
+  codexConfigPath: string;
   cwd: string;
   sessionDir: string;
   stateDir: string;
