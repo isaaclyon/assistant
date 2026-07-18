@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@llblab/pi-telegram/commands": [".pi/types/pi-telegram-commands.d.ts"]
+    }
+  },
+  "include": [".pi/extensions/**/*.ts", ".pi/lib/**/*.ts"]
+}

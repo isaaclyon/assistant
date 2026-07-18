@@ -1,6 +1,10 @@
 import { resolveBridgeConfig } from "./config.js";
 import { startBridgeHost } from "./host.js";
-import { bindProcessShutdownSignals, createShutdownLatch } from "./lifecycle.js";
+import {
+  bindProcessShutdownSignals,
+  createShutdownLatch,
+  restartExitCode,
+} from "./lifecycle.js";
 
 const latch = createShutdownLatch((reason) => {
   console.log(`Shutdown requested (${reason}).`);
@@ -13,10 +17,17 @@ try {
   const host = await startBridgeHost({
     config: resolveBridgeConfig(),
     onShutdownRequest: () => latch.request("extension"),
+    onRestartRequest: () => latch.request("restart"),
   });
-  await latch.wait();
+  const reason = await latch.wait();
   await host.dispose();
-  console.log("Pi Telegram bridge stopped cleanly.");
+  const exitCode = restartExitCode(reason);
+  if (exitCode !== 0) {
+    process.exitCode = exitCode;
+    console.log("Restart requested; exiting non-zero so systemd restarts the bridge.");
+  } else {
+    console.log("Pi Telegram bridge stopped cleanly.");
+  }
 } catch (error) {
   const message = error instanceof Error ? error.stack ?? error.message : String(error);
   console.error(`Pi Telegram bridge failed: ${message}`);

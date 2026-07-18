@@ -27,6 +27,7 @@ import {
 } from "./package-paths.js";
 import {
   type InboundInboxCapability,
+  bindBridgeRestart,
   bindTelegramHostNewSession,
   bindTelegramInboundInbox,
 } from "./telegram-capabilities.js";
@@ -47,6 +48,7 @@ export interface BridgeHostOptions {
   config: BridgeConfig;
   logger?: BridgeLogger;
   onShutdownRequest?: () => void;
+  onRestartRequest?: () => void;
   telegramExtensionPath?: string;
   isProcessAlive?: (pid: number) => boolean;
   nowMs?: () => number;
@@ -71,6 +73,7 @@ export async function startBridgeHost({
   config,
   logger = consoleLogger,
   onShutdownRequest = () => {},
+  onRestartRequest = () => {},
   telegramExtensionPath = resolveTelegramExtensionPath(),
   isProcessAlive = isProcessAliveByPid,
   nowMs = Date.now,
@@ -185,6 +188,21 @@ export async function startBridgeHost({
     throw error;
   }
 
+  // Publish the restart trigger for the repo-local /restart command. Deferring
+  // to waitForIdle mirrors the shutdownHandler below so disposal never races an
+  // in-flight turn; the daemon exits non-zero on this reason so systemd restarts.
+  let unbindRestart: () => void;
+  try {
+    unbindRestart = bindBridgeRestart(() => {
+      void runtime.session.waitForIdle().then(onRestartRequest);
+    });
+  } catch (error) {
+    await runtime.dispose();
+    unregisterInbox();
+    inbox.close();
+    throw error;
+  }
+
   let sessionReplacementInFlight = false;
   let unregisterTelegramHost: () => void;
   try {
@@ -204,6 +222,7 @@ export async function startBridgeHost({
     });
   } catch (error) {
     await runtime.dispose();
+    unbindRestart();
     unregisterInbox();
     inbox.close();
     throw error;
@@ -227,6 +246,7 @@ export async function startBridgeHost({
         await runtime.dispose();
       } finally {
         unregisterTelegramHost();
+        unbindRestart();
         unregisterInbox();
         inbox.close();
       }

@@ -15,6 +15,19 @@ You are explicitly allowed to improve this agent from inside its own repository.
 
 Prefer a skill over code when guidance is sufficient. Prefer one extension file until the implementation genuinely needs multiple modules. Prefer a custom tool over shell instructions when a command-backed capability should be reliable and reusable.
 
+## Telegram-visible slash commands
+
+To add a slash command that appears in Telegram's `/` autocomplete menu, call
+`registerReloadSafeTelegramCommand` from `.pi/lib/telegram-command.ts` with
+`showInMenu: true` and an `emoji` — start from [the Telegram command scaffold](templates/telegram-command.ts).
+That helper registers through the fork's Telegram registry (dispatched at the
+Telegram layer and listed in the menu) and handles the reload-safe
+re-registration the process-global registry requires. Do **not** use
+`pi.registerCommand` for a menu command: those still run when typed but only reach
+Pi as a forwarded turn, so they never show in autocomplete. Extension files are
+type-checked via `npm run check` (`tsconfig.extensions.json`). Working examples:
+`.pi/extensions/restart.ts` and `.pi/extensions/skills.ts`.
+
 ## Workflow
 
 1. Inspect the nearest existing example and the relevant source/tests before editing.
