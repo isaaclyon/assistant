@@ -78,6 +78,23 @@ export function bindTelegramHostNewSession(
 }
 
 /**
+ * Publishes a "restart the bridge process" trigger for the repo-local restart
+ * extension to invoke. Unlike the fork capabilities above this one is consumed
+ * inside this repo, but it uses the same global-symbol seam so the extension
+ * (loaded as TypeScript by Pi, outside the host's compiled module graph) shares
+ * the host's function reference through globalThis rather than an import.
+ */
+export function bindBridgeRestart(request: () => void): () => void {
+  return bindRegistry(
+    Symbol.for("pi-telegram-bridge.restart-registry"),
+    "request",
+    request,
+    "Bridge restart registry is occupied by an incompatible value.",
+    "Bridge restart capability is already registered",
+  );
+}
+
+/**
  * The subset of the durable inbox handed across the ADR-0003 capability
  * boundary. The pinned pi-telegram fork records and reads turns but never owns
  * the database lifecycle, so `close` stays host-side.
