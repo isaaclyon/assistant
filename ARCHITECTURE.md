@@ -41,6 +41,7 @@ Pushes to `main` run checks on a GitHub-hosted runner. After they pass, the `ass
 ## Shutdown
 
 The host disposes `AgentSessionRuntime`, which emits `session_shutdown` before invalidating the session. This lets pi-telegram stop long polling and timers cleanly.
+Daemon shutdown gives that graceful disposal a bounded ten-second window. If an extension or transport teardown remains pending, the daemon forces the requested exit code so systemd can stop or restart the service instead of leaving a live process that no longer polls Telegram.
 
 ## Known limitation
 

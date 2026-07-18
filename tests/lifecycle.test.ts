@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   RESTART_EXIT_CODE,
+  awaitShutdownDisposal,
   createShutdownLatch,
   restartExitCode,
 } from "../src/lifecycle.js";
@@ -27,5 +28,29 @@ describe("restartExitCode", () => {
     expect(restartExitCode("extension")).toBe(0);
     expect(restartExitCode("SIGTERM")).toBe(0);
     expect(restartExitCode("SIGINT")).toBe(0);
+  });
+});
+
+describe("awaitShutdownDisposal", () => {
+  it("times out when graceful disposal never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const disposal = awaitShutdownDisposal(
+        () => new Promise<void>(() => {}),
+        10_000,
+      );
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      await expect(disposal).resolves.toBe("timed-out");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports graceful disposal before the timeout", async () => {
+    await expect(
+      awaitShutdownDisposal(async () => {}, 10_000),
+    ).resolves.toBe("disposed");
   });
 });

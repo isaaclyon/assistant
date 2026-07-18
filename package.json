@@ -16,7 +16,7 @@
     "postinstall": "node scripts/patch-codex-conversion.mjs",
     "start": "node dist/src/daemon.js",
     "telegram:setup": "npm run build && node dist/src/setup.js",
-    "test": "vitest run",
+    "test": "vitest run --exclude '.worktrees/**'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:extensions": "tsc -p tsconfig.extensions.json"
   },
