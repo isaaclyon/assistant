@@ -62,6 +62,24 @@ journalctl --user -u pi-telegram-bridge.service -f
 
 The service automatically restarts after failures. Pi conversation history, Telegram configuration, pairing, and Telegram update offsets persist across restarts. The extension reclaims its stale same-working-directory ownership lock when the host returns. Telegram `/new` starts a fresh session in the same thread only when Pi and the Telegram queue are idle; otherwise it reports why replacement is unsafe.
 
+## Deploying updates
+
+To ship a new commit to the box running the service, push to `origin/master`, then from a machine with SSH access:
+
+```bash
+npm run deploy
+```
+
+`scripts/deploy.sh` connects over SSH, fast-forwards the remote checkout to `origin/master` (`git reset --hard`), runs `npm ci` + `npm run build`, restarts the service, and prints status plus recent logs. It deploys whatever is on `origin` — it warns if your local branch tip differs, so push first. The target is overridable:
+
+| Variable | Default |
+| --- | --- |
+| `DEPLOY_HOST` | `lyon-server` |
+| `DEPLOY_PATH` | `/home/isaaclyon/projects/assistant` |
+| `DEPLOY_BRANCH` | `master` |
+
+The script sources nvm on the remote before invoking `node`/`npm`, since the nvm-managed toolchain is not on a non-interactive SSH `PATH`.
+
 ## Configuration
 
 Optional environment variables:

@@ -11,6 +11,7 @@
     "build": "npm run clean && tsc -p tsconfig.json",
     "check": "npm run typecheck && npm test",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "deploy": "bash scripts/deploy.sh",
     "service:install": "npm run build && node dist/src/install-service.js",
     "start": "node dist/src/daemon.js",
     "telegram:setup": "npm run build && node dist/src/setup.js",
