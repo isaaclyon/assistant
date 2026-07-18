@@ -13,7 +13,7 @@
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "deploy": "bash scripts/deploy.sh",
     "service:install": "npm run build && node dist/src/install-service.js",
-    "postinstall": "node scripts/patch-codex-conversion.mjs",
+    "postinstall": "node scripts/patch-codex-conversion.mjs && node scripts/patch-telegram-tool-activity.mjs",
     "start": "node dist/src/daemon.js",
     "telegram:setup": "npm run build && node dist/src/setup.js",
     "test": "vitest run --exclude '.worktrees/**'",
