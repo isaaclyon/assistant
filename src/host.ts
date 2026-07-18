@@ -9,7 +9,7 @@ import {
   initTheme,
 } from "@earendil-works/pi-coding-agent";
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 import {
   type BridgeConfig,
@@ -98,11 +98,34 @@ export async function startBridgeHost({
     sessionManager,
     sessionStartEvent,
   }) => {
+    // Only repo-local resources apply to this agent: extensions and skills
+    // discovered outside the bridge cwd (~/.pi/agent, ~/.agents, ancestor
+    // .agents dirs) are dropped so nothing gains capabilities on this
+    // always-on bridge without going through git.
+    const repoPrefix = cwd + sep;
+    const isRepoLocal = (path: string): boolean =>
+      path.startsWith(repoPrefix) || path === telegramExtensionPath;
     const services = await createAgentSessionServices({
       cwd,
       agentDir,
       resourceLoaderOptions: {
         additionalExtensionPaths: [telegramExtensionPath],
+        extensionsOverride: (base) => ({
+          ...base,
+          extensions: base.extensions.filter((extension) => {
+            if (isRepoLocal(extension.resolvedPath)) return true;
+            logger.warn(`Ignoring non-repo extension: ${extension.path}`);
+            return false;
+          }),
+        }),
+        skillsOverride: (base) => ({
+          ...base,
+          skills: base.skills.filter((skill) => {
+            if (isRepoLocal(skill.filePath)) return true;
+            logger.warn(`Ignoring non-repo skill: ${skill.name} (${skill.filePath})`);
+            return false;
+          }),
+        }),
       },
     });
     const extensions = services.resourceLoader.getExtensions();

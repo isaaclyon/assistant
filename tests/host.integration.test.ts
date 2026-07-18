@@ -692,4 +692,59 @@ describe("startBridgeHost", () => {
       inbox.close();
     }
   }, 20_000);
+
+  it("ignores extensions and skills discovered outside the bridge repo", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-telegram-host-global-filter-"));
+    // Mirror production: the agent dir is not inside the bridge repo cwd.
+    const cwd = join(root, "repo");
+    const agentDir = join(root, "agent");
+    const extensionPath = join(cwd, "telegram-extension.mjs");
+    await mkdir(cwd, { recursive: true });
+    await writeFile(extensionPath, "export default function() {}\n");
+    await mkdir(join(agentDir, "extensions"), { recursive: true });
+    await writeFile(
+      join(agentDir, "extensions", "global-extension.js"),
+      "export default function() {}\n",
+    );
+    await mkdir(join(agentDir, "skills", "global-skill"), { recursive: true });
+    await writeFile(
+      join(agentDir, "skills", "global-skill", "SKILL.md"),
+      "---\nname: global-skill\ndescription: must not load\n---\nbody\n",
+    );
+    // A repo-local extension must survive the filter.
+    await mkdir(join(cwd, ".pi", "extensions"), { recursive: true });
+    await writeFile(
+      join(cwd, ".pi", "extensions", "local-extension.js"),
+      "export default function() {}\n",
+    );
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const host = await startBridgeHost({
+      config: {
+        agentDir,
+        cwd,
+        sessionDir: join(root, "state", "sessions"),
+        stateDir: join(root, "state"),
+      },
+      logger,
+      telegramExtensionPath: extensionPath,
+    });
+
+    try {
+      expect(logger.warn).toHaveBeenCalledWith(
+        `Ignoring non-repo extension: ${join(agentDir, "extensions", "global-extension.js")}`,
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("Ignoring non-repo skill: global-skill"),
+      );
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        expect.stringContaining("local-extension"),
+      );
+    } finally {
+      await host.dispose();
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
+  }, 20_000);
 });
