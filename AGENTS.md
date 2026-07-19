@@ -9,11 +9,12 @@
 
 ## Extension & skill filtering (why the bridge can't see global Pi resources)
 
-`src/host.ts` filters extensions/skills to repo-local paths only: anything whose
-resolved path isn't under the bridge repo cwd (or the pinned telegram extension)
-is dropped with an `Ignoring non-repo <thing>: ...` warning. This is deliberate —
-the always-on bridge must not gain capabilities from `~/.pi/agent`, `~/.agents`,
-or ancestor `.agents` dirs without going through git.
+`src/host.ts` disables normal extension/skill discovery and passes Pi only the
+pinned dependencies plus canonicalized resources under this repository. This
+happens before extension imports or factories execute; symlinks that escape the
+repository are rejected with an `Ignoring non-repo <thing>: ...` warning. This is
+deliberate — the always-on bridge must not gain capabilities from `~/.pi/agent`,
+`~/.agents`, or ancestor `.agents` dirs without going through git.
 
 Consequence: global Pi extensions do **not** apply here. E.g. web access comes from
 the global `pi-web-access` extension (`~/.pi/agent/settings.json`), which the bridge
@@ -23,4 +24,6 @@ drops. To give the bridge a capability, add the extension **repo-locally** (unde
 ## CLAUDE.md / AGENTS.md
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md`; both Claude Code and other
-agents read the same content.
+development agents read the same content. The always-on Telegram runtime does not
+inherit this file; its single instruction source is `.pi/telegram/AGENTS.md` (see
+ADR-0009).
