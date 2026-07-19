@@ -116,9 +116,13 @@ All access goes through the tracked skill-local CLI, which takes one JSON
 request line on stdin and returns one bounded JSON line:
 
 ```bash
-printf '%s\n' '{"query":"coffee","limit":5}' \
-  | node .pi/skills/personal-memory/scripts/memory.mjs search
+node .pi/skills/personal-memory/scripts/memory.mjs search <<'EOF'
+{"query":"coffee","limit":5}
+EOF
 ```
+
+The quoted heredoc closes stdin automatically and keeps note content out of
+argv and the process list; avoid `printf '<json>' | …`, which does not.
 
 Subcommands: `add`, `read`, `update`, `delete`, `search`, `list`. See
 [`.pi/skills/personal-memory/references/memory-format.md`](.pi/skills/personal-memory/references/memory-format.md)

@@ -13,12 +13,15 @@ user text into shell commands.
 ## Invoking the CLI
 
 Run from the canonical repository cwd. The subcommand is the only argv; the
-request is exactly one JSON line sent through the command tool's stdin channel.
-User content must never appear in argv.
+request is exactly one JSON line delivered on stdin via a quoted heredoc, which
+closes stdin automatically and keeps user content out of argv and the process
+list. Write the JSON literally inside the heredoc — never interpolate it from
+shell variables or command substitution.
 
 ```bash
-node .pi/skills/personal-memory/scripts/memory.mjs <add|read|update|delete|search|list>
-# then send one JSON request line on stdin
+node .pi/skills/personal-memory/scripts/memory.mjs <add|read|update|delete|search|list> <<'EOF'
+{"query":"coffee","limit":5}
+EOF
 ```
 
 Success prints one `{"schemaVersion":1,"ok":true,"data":…}` line on stdout;
