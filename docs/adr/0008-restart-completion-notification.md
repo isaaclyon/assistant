@@ -30,4 +30,4 @@ an operational acknowledgment, not a general outbound delivery queue.
   is logged and retried on a later restart.
 - The acknowledgment targets the paired user, so it does not preserve a
   group/topic command target.
-- The marker contains no credentials or message content beyond a timestamp.
+- The presence-only marker contains no credentials or message content.

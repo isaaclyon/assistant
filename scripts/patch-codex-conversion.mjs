@@ -41,13 +41,3 @@ await patchFile(
         || join(agentDir, CODEX_CONVERSION_CONFIG_BASENAME);
 }`,
 );
-await patchFile(
-  join(packageRoot, "src", "adapter", "activation", "config.ts"),
-  `export function getCodexConversionConfigPath(agentDir: string = getAgentDir()): string {
-\treturn join(agentDir, CODEX_CONVERSION_CONFIG_BASENAME);
-}`,
-  `export function getCodexConversionConfigPath(agentDir: string = getAgentDir()): string {
-\treturn process.env["PI_CODEX_CONVERSION_CONFIG_PATH"]?.trim()
-\t\t|| join(agentDir, CODEX_CONVERSION_CONFIG_BASENAME);
-}`,
-);
