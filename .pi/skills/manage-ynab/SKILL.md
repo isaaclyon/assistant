@@ -31,6 +31,7 @@ Read the config with a short Node command or the available file tool. Do not ech
 - Use `--budget <budget-id>` explicitly on every budget-scoped command.
 - Treat outflows as negative amounts and inflows as positive amounts.
 - Use exact IDs in writes. Resolve friendly account and category names by listing them first.
+- When the user omits an account while logging a transaction, search recent transactions for the payee (and date/amount when available) before using the configured account fallback. If the payee has a clear historical account pattern, use the most frequently used matching account; if the history is split or inconclusive, use the configured fallback and say so. Do not infer an account from a card hint without checking for conflicts.
 - Prefer concise summaries over dumping raw JSON. Include the month/date and currency units.
 - Never use `ynab api` when a first-class command supports the operation, except to create a split receipt atomically as described below.
 - Do not create categories or payees; the YNAB API cannot create them. `--payee-name` may associate or create the transaction's payee behavior server-side.
@@ -55,7 +56,7 @@ For “how is my budget?” default to the current month and summarize: income/a
 
 ## Explicit transaction requests
 
-When the user explicitly types complete transaction details, create it directly without an extra confirmation. Ask only for missing or materially ambiguous details. Use the configured account and category defaults when the user omits them, and state which defaults were used in the result.
+When the user explicitly types complete transaction details, create it directly without an extra confirmation. Ask only for missing or materially ambiguous details. When the user omits the account, resolve it from payee history as described above, using the configured account fallback if needed. Resolve the category from the transaction context before using the configured category fallback. State which fallback defaults were used in the result.
 
 ```bash
 ynab transactions create \
@@ -92,7 +93,7 @@ Do not invent obscured values. Mark uncertain fields and ask about anything that
 - Start with the configured budget and account.
 - If the receipt's payment hint conflicts with the configured account, ask which account to use.
 - Search recent matching transactions by merchant, date, and amount to detect likely duplicates before proposing a write.
-- Resolve categories using existing YNAB category names. For a simple receipt, use the configured category if no more specific category is clearly requested.
+- Resolve categories using existing YNAB category names. Consider the payee, transaction description, receipt contents, and existing category names first; use the configured category only when there is no more specific or well-supported choice, and state when the fallback was used.
 - For an itemized receipt, propose splits only when line items map reasonably to distinct existing categories. Combine same-category items. Apply tax, tip, and discounts explicitly or proportionally, and ensure split amounts sum exactly to the negative receipt total to the cent.
 
 ### 3. Always confirm receipt-derived writes
