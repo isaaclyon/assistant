@@ -21,6 +21,24 @@ updated: "2026-07-19T03:30:00.000Z"
 Prefers light-roast coffee.
 ```
 
+## Happenings section
+
+Any managed note may include at most one strict, chronological Happenings
+section. Entries are ordinary Markdown list items with a date-only ISO date and
+an em dash:
+
+```markdown
+## Happenings
+
+- 2026-07-18 — Pearl got new tires.
+- 2026-07-19 — We drove Pearl to the mountains.
+```
+
+The section is historical context for its owning note, not an audit log. The
+CLI validates the section and preserves it as Markdown. `happening-add` adds a
+dated entry to an existing note with revision checking; `happenings` scans the
+vault and can filter globally by `from`, `to`, `query`, `types`, and `limit`.
+
 Type folders: `person`→`people`, `preference`→`preferences`, `event`→`events`,
 `list`→`lists`, `recipe`→`recipes`, `purchase`→`purchases`,
 `reference`→`references`. Unknown frontmatter keys (for example Obsidian
@@ -66,6 +84,12 @@ Exit codes: `0` success, `2` usage/validation, `3` expected operational failure
 
 // list — data: {memories:[metadata…]} sorted by updated desc
 {"types":["preference"]}
+
+// happening-add — data: updated note plus the added happening
+{"id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","ifRevision":"sha256:…","date":"2026-07-19","text":"Pearl got new tires."}
+
+// happenings — data: {results, truncated, scanTruncated, warnings, warningsTruncated}
+{"from":"2026-01-01","to":"2026-12-31","query":"tires","limit":50}
 ```
 
 Search is bounded lexical matching: query ≤ 512 characters, all tokens must

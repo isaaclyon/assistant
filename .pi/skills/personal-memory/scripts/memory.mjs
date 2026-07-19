@@ -8,7 +8,7 @@ import { errorEnvelope, successEnvelope } from "./protocol.mjs";
 import { createMarkdownMemorySearchBackend } from "./search.mjs";
 import { MemoryError, createMarkdownMemoryStore } from "./store.mjs";
 
-const COMMANDS = new Set(["add", "read", "update", "delete", "search", "list"]);
+const COMMANDS = new Set(["add", "read", "update", "delete", "search", "list", "happening-add", "happenings"]);
 const MAX_REQUEST_BYTES = 300 * 1024;
 const USAGE_CODES = new Set(["INVALID_COMMAND", "INVALID_INPUT", "INVALID_ID"]);
 const OPERATIONAL_CODES = new Set([
@@ -19,6 +19,7 @@ const OPERATIONAL_CODES = new Set([
   "UNSAFE_VAULT",
   "UNSAFE_ENTRY",
   "MALFORMED_NOTE",
+  "DUPLICATE_HAPPENING",
 ]);
 // scripts/ -> personal-memory/ -> skills/ -> .pi/ -> repo root
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
@@ -70,7 +71,7 @@ export async function runMemoryCli({
   if (argv.length !== 1 || !COMMANDS.has(command)) {
     return emitError(
       "INVALID_COMMAND",
-      "Usage: memory.mjs <add|read|update|delete|search|list> with one JSON request line on stdin",
+      "Usage: memory.mjs <add|read|update|delete|search|list|happening-add|happenings> with one JSON request line on stdin",
     );
   }
 
@@ -90,13 +91,14 @@ export async function runMemoryCli({
     // (symlink-resolved) root explicitly before scanning.
     const store = createMarkdownMemoryStore({ root, forbiddenRoots });
     let data;
-    if (command === "search") {
+    if (command === "search" || command === "happenings") {
       await store.verifyRoot();
-      data = await createMarkdownMemorySearchBackend({ root }).search(request);
+      const backend = createMarkdownMemorySearchBackend({ root });
+      data = await backend[command](request);
     } else if (command === "list") {
       data = { memories: await store.list(request) };
     } else {
-      data = await store[command](request);
+      data = await store[command === "happening-add" ? "addHappening" : command](request);
     }
     stdout.write(`${JSON.stringify(successEnvelope(data))}\n`);
     return 0;

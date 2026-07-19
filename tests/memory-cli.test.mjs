@@ -178,6 +178,94 @@ describe("personal memory CLI", () => {
     expect(warnings).toEqual([]);
   });
 
+  it("adds dated happenings to an entity note in chronological order", async () => {
+    const added = await addNote({ type: "reference", title: "Tesla Model Y Pearl", body: "Our car.\n" });
+
+    const later = await run("happening-add", {
+      id: added.id,
+      ifRevision: added.revision,
+      date: "2026-07-19",
+      text: "Pearl got new tires.",
+    });
+    expect(later.exitCode).toBe(0);
+    const laterData = parseLine(later.stdout).data;
+    expect(laterData.happening).toEqual({ date: "2026-07-19", text: "Pearl got new tires." });
+
+    const earlier = await run("happening-add", {
+      id: added.id,
+      ifRevision: laterData.revision,
+      date: "2026-06-01",
+      text: "Pearl entered our household.",
+    });
+    expect(earlier.exitCode).toBe(0);
+    expect(parseLine(earlier.stdout).data.body).toBe(
+      "Our car.\n\n## Happenings\n\n- 2026-06-01 — Pearl entered our household.\n- 2026-07-19 — Pearl got new tires.\n",
+    );
+  });
+
+  it("queries happenings globally with date and text filters", async () => {
+    const pearl = await addNote({ type: "reference", title: "Tesla Model Y Pearl", body: "Our car." });
+    const home = await addNote({ type: "reference", title: "Home", body: "Our home." });
+    const pearlAdded = await run("happening-add", {
+      id: pearl.id,
+      ifRevision: pearl.revision,
+      date: "2026-07-19",
+      text: "Pearl got new tires.",
+    });
+    const homeAdded = await run("happening-add", {
+      id: home.id,
+      ifRevision: home.revision,
+      date: "2024-06-01",
+      text: "Emma and Isaac moved out.",
+    });
+    expect(pearlAdded.exitCode).toBe(0);
+    expect(homeAdded.exitCode).toBe(0);
+
+    const queried = await run("happenings", {
+      from: "2026-01-01",
+      to: "2026-12-31",
+      query: "tires",
+    });
+    expect(queried.exitCode).toBe(0);
+    expect(parseLine(queried.stdout).data).toMatchObject({
+      results: [{
+        id: pearl.id,
+        title: "Tesla Model Y Pearl",
+        date: "2026-07-19",
+        text: "Pearl got new tires.",
+      }],
+      truncated: false,
+      warnings: [],
+    });
+  });
+
+  it("rejects duplicate and invalid happenings", async () => {
+    const added = await addNote({ type: "reference", title: "Pearl", body: "Our car." });
+    const request = {
+      id: added.id,
+      ifRevision: added.revision,
+      date: "2026-07-19",
+      text: "Got new tires.",
+    };
+    const first = await run("happening-add", request);
+    expect(first.exitCode).toBe(0);
+
+    const duplicate = await run("happening-add", {
+      ...request,
+      ifRevision: parseLine(first.stdout).data.revision,
+    });
+    expect(duplicate.exitCode).toBe(3);
+    expect(parseLine(duplicate.stderr).error.code).toBe("DUPLICATE_HAPPENING");
+
+    const invalid = await run("happening-add", {
+      ...request,
+      ifRevision: parseLine(first.stdout).data.revision,
+      date: "2026-02-30",
+    });
+    expect(invalid.exitCode).toBe(2);
+    expect(parseLine(invalid.stderr).error.code).toBe("INVALID_INPUT");
+  });
+
   it("refuses a symlinked vault root that resolves into a forbidden root", async () => {
     const linkPath = join(vault, "vault-link");
     await symlink(process.cwd(), linkPath);

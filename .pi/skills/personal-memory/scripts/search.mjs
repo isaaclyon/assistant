@@ -6,6 +6,8 @@ import {
   MEMORY_TYPE_FOLDERS,
   MemoryError,
   parseMarkdownMemoryNote,
+  parseHappenings,
+  validateHappeningDate,
 } from "./store.mjs";
 
 const UUID_NOTE_PATTERN = /^([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.md$/u;
@@ -15,6 +17,8 @@ const MAX_QUERY_LENGTH = 512;
 const DEFAULT_MAX_SCANNED_NOTES = 10_000;
 const DEFAULT_MAX_WARNINGS = 20;
 const MAX_SNIPPET_LENGTH = 240;
+const HAPPENINGS_DEFAULT_LIMIT = 50;
+const HAPPENINGS_MAX_LIMIT = 100;
 
 function invalid(message) {
   throw new MemoryError("INVALID_INPUT", message);
@@ -41,6 +45,36 @@ function validateRequest(request) {
   return { query: request.query, limit, types: [...new Set(types)] };
 }
 
+function validateHappeningsRequest(request) {
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    invalid("Happenings query is invalid");
+  }
+  const query = request.query ?? "";
+  if (typeof query !== "string" || query.length > MAX_QUERY_LENGTH) invalid("Happenings query is invalid");
+  const limit = request.limit ?? HAPPENINGS_DEFAULT_LIMIT;
+  if (!Number.isInteger(limit) || limit < 1 || limit > HAPPENINGS_MAX_LIMIT) invalid("Happenings limit is invalid");
+  const types = request.types ?? MEMORY_TYPES;
+  if (!Array.isArray(types) || types.some((type) => !MEMORY_TYPES.includes(type))) {
+    invalid("Happenings memory types are invalid");
+  }
+
+  const dates = {};
+  for (const key of ["from", "to"]) {
+    if (request[key] === undefined) {
+      dates[key] = null;
+      continue;
+    }
+    try {
+      dates[key] = validateHappeningDate(request[key]);
+    } catch {
+      invalid(`Happenings ${key} date is invalid`);
+    }
+  }
+  if (dates.from && dates.to && dates.from > dates.to) invalid("Happenings date range is invalid");
+  const queryTokens = [...new Set(tokenize(query))];
+  return { query, queryTokens, limit, types: [...new Set(types)], from: dates.from, to: dates.to };
+}
+
 function scoreNote(note, query, tokens) {
   const title = normalize(note.title);
   const tags = note.tags.map(normalize);
@@ -56,6 +90,21 @@ function scoreNote(note, query, tokens) {
     if (title.includes(token)) score += 20;
     if (tags.some((tag) => tag === token)) score += 10;
     if (body.includes(token)) score += 1;
+  }
+  return score;
+}
+
+function scoreHappening(note, happening, tokens) {
+  const title = normalize(note.title);
+  const tags = note.tags.map(normalize);
+  const text = normalize(happening.text);
+  const haystack = `${title}\n${tags.join("\n")}\n${text}`;
+  if (tokens.some((token) => !haystack.includes(token))) return null;
+  let score = 0;
+  for (const token of tokens) {
+    if (title.includes(token)) score += 20;
+    if (tags.some((tag) => tag === token)) score += 10;
+    if (text.includes(token)) score += 1;
   }
   return score;
 }
@@ -169,6 +218,85 @@ export function createMarkdownMemorySearchBackend(options) {
       }
 
       results.sort((a, b) => b.score - a.score || b.updated.localeCompare(a.updated) || a.id.localeCompare(b.id));
+      warningCandidates.sort((a, b) => a.relativePath.localeCompare(b.relativePath) || a.code.localeCompare(b.code));
+      return {
+        results: results.slice(0, limit),
+        truncated: results.length > limit,
+        scanTruncated,
+        warnings: warningCandidates.slice(0, maxWarnings),
+        warningsTruncated: warningCandidates.length > maxWarnings,
+      };
+    },
+
+    async happenings(request) {
+      const { queryTokens, limit, types, from, to } = validateHappeningsRequest(request);
+      const candidates = [];
+      const warningCandidates = [];
+      for (const type of types) {
+        const folder = MEMORY_TYPE_FOLDERS[type];
+        const directory = join(root, folder);
+        const directoryKind = await entryKind(directory);
+        if (directoryKind === "missing") continue;
+        if (directoryKind !== "directory") {
+          warningCandidates.push({ code: "UNSAFE_ENTRY", relativePath: folder });
+          continue;
+        }
+        let names;
+        try {
+          names = await readdir(directory);
+        } catch {
+          warningCandidates.push({ code: "IO_ERROR", relativePath: folder });
+          continue;
+        }
+        for (const name of names) {
+          const match = UUID_NOTE_PATTERN.exec(name);
+          if (match) candidates.push({ id: match[1], type, path: join(directory, name), relativePath: join(folder, name) });
+        }
+      }
+      candidates.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+      const scanTruncated = candidates.length > maxScannedNotes;
+      const results = [];
+      const seen = new Set();
+
+      for (const candidate of candidates.slice(0, maxScannedNotes)) {
+        if (seen.has(candidate.id)) {
+          warningCandidates.push({ code: "DUPLICATE_ID", relativePath: candidate.relativePath });
+          continue;
+        }
+        seen.add(candidate.id);
+        if (await entryKind(candidate.path) !== "file") {
+          warningCandidates.push({ code: "UNSAFE_ENTRY", relativePath: candidate.relativePath });
+          continue;
+        }
+        try {
+          const raw = await readFile(candidate.path, "utf8");
+          const note = parseMarkdownMemoryNote(raw, { id: candidate.id, type: candidate.type });
+          const happenings = parseHappenings(note.body).entries;
+          happenings.forEach((happening, index) => {
+            if (from && happening.date < from) return;
+            if (to && happening.date > to) return;
+            const score = scoreHappening(note, happening, queryTokens);
+            if (score === null) return;
+            results.push({
+              id: note.id,
+              relativePath: candidate.relativePath,
+              type: note.type,
+              title: note.title,
+              date: happening.date,
+              text: happening.text,
+              index,
+              score,
+            });
+          });
+        } catch (error) {
+          warningCandidates.push({
+            code: error instanceof MemoryError ? error.code : "IO_ERROR",
+            relativePath: candidate.relativePath,
+          });
+        }
+      }
+
+      results.sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title) || a.id.localeCompare(b.id) || a.index - b.index);
       warningCandidates.sort((a, b) => a.relativePath.localeCompare(b.relativePath) || a.code.localeCompare(b.code));
       return {
         results: results.slice(0, limit),

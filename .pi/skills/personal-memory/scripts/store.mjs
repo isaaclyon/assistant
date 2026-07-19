@@ -38,6 +38,9 @@ const MAX_NOTE_BYTES = 256 * 1024;
 const MAX_TITLE_LENGTH = 200;
 const MAX_TAGS = 32;
 const MAX_TAG_LENGTH = 64;
+const MAX_HAPPENING_TEXT_LENGTH = 2_000;
+const HAPPENINGS_HEADING = "## Happenings";
+const HAPPENING_DATE_PATTERN = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/u;
 
 export class MemoryError extends Error {
   constructor(code, message) {
@@ -119,6 +122,110 @@ function validateBody(body) {
     fail("INVALID_INPUT", "Memory body is invalid");
   }
   return body;
+}
+
+export function validateHappeningDate(date) {
+  if (typeof date !== "string" || !HAPPENING_DATE_PATTERN.test(date)) {
+    fail("INVALID_INPUT", "Happening date must be YYYY-MM-DD");
+  }
+  const [, yearSource, monthSource, daySource] = HAPPENING_DATE_PATTERN.exec(date);
+  const year = Number(yearSource);
+  const month = Number(monthSource);
+  const day = Number(daySource);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1]) {
+    fail("INVALID_INPUT", "Happening date must be a valid calendar date");
+  }
+  return date;
+}
+
+function validateHappeningText(text) {
+  if (
+    typeof text !== "string" ||
+    text.trim() !== text ||
+    text.length === 0 ||
+    text.length > MAX_HAPPENING_TEXT_LENGTH ||
+    /[\r\n\0]/u.test(text)
+  ) {
+    fail("INVALID_INPUT", "Happening text is invalid");
+  }
+  return text;
+}
+
+function headingKind(line) {
+  return /^(?:#|##)[ \t]+/u.test(line) ? "section" : null;
+}
+
+export function parseHappenings(body) {
+  validateBody(body);
+  const newline = body.includes("\r\n") ? "\r\n" : "\n";
+  const lines = body.split(/\n/u).map((line) => line.endsWith("\r") ? line.slice(0, -1) : line);
+  const sections = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index].trimEnd() !== HAPPENINGS_HEADING) continue;
+    if (sections.length > 0) fail("MALFORMED_NOTE", "Memory note has duplicate Happenings sections");
+    const start = index + 1;
+    let end = lines.length;
+    for (let cursor = start; cursor < lines.length; cursor += 1) {
+      if (headingKind(lines[cursor])) {
+        end = cursor;
+        break;
+      }
+    }
+    const entries = [];
+    let previousDate = "";
+    for (let cursor = start; cursor < end; cursor += 1) {
+      const line = lines[cursor];
+      if (line.trim() === "") continue;
+      const match = /^-[ \t]([0-9]{4}-[0-9]{2}-[0-9]{2})[ \t]—[ \t](.+?)[ \t]*$/u.exec(line);
+      if (!match) fail("MALFORMED_NOTE", "Memory note has malformed Happenings entries");
+      const date = match[1];
+      let text;
+      try {
+        validateHappeningDate(date);
+        text = validateHappeningText(match[2]);
+      } catch {
+        fail("MALFORMED_NOTE", "Memory note has malformed Happenings entries");
+      }
+      if (previousDate && date < previousDate) {
+        fail("MALFORMED_NOTE", "Memory note Happenings are not chronological");
+      }
+      previousDate = date;
+      entries.push({ date, text, line: cursor });
+    }
+    sections.push({ start, end, entries, newline });
+    index = end - 1;
+  }
+
+  return sections[0] ?? { start: null, end: null, entries: [], newline };
+}
+
+export function appendHappening(body, { date, text } = {}) {
+  validateBody(body);
+  validateHappeningDate(date);
+  validateHappeningText(text);
+  const parsed = parseHappenings(body);
+  if (parsed.entries.some((entry) => entry.date === date && entry.text === text)) {
+    fail("DUPLICATE_HAPPENING", "Happening is already recorded");
+  }
+  const line = `- ${date} — ${text}`;
+  const newline = parsed.newline;
+  if (parsed.start === null) {
+    const separator = body === "" ? "" : body.endsWith(`${newline}${newline}`) ? "" : body.endsWith(newline) ? newline : `${newline}${newline}`;
+    return `${body}${separator}${HAPPENINGS_HEADING}${newline}${newline}${line}${newline}`;
+  }
+
+  const lines = body.split(/\n/u).map((source) => source.endsWith("\r") ? source.slice(0, -1) : source);
+  const insertBefore = parsed.entries.find((entry) => entry.date > date);
+  const insertAt = insertBefore?.line ?? (parsed.entries.at(-1)?.line ?? parsed.start);
+  if (!insertBefore && parsed.entries.length > 0) {
+    lines.splice(insertAt + 1, 0, line);
+  } else {
+    lines.splice(insertAt, 0, line);
+  }
+  return lines.join(newline);
 }
 
 function validateTimestamp(value) {
@@ -210,6 +317,7 @@ export function parseMarkdownMemoryNote(raw, expected = {}) {
   if (expected.id && values.id !== expected.id) fail("MALFORMED_NOTE", "Memory note is malformed");
   if (expected.type && values.type !== expected.type) fail("MALFORMED_NOTE", "Memory note is malformed");
   validateBody(body);
+  parseHappenings(body);
   return { ...values, body, unknownFrontmatter: unknown.join(""), revision: digest(raw) };
 }
 
@@ -401,6 +509,37 @@ export function createMarkdownMemoryStore(options) {
       const location = await locate(id);
       const { note } = await readLocated(location);
       return publicNote(note, location.relativePath);
+    },
+
+    async addHappening({ id, ifRevision, date, text } = {}) {
+      validateId(id);
+      if (typeof ifRevision !== "string") fail("INVALID_INPUT", "Memory revision is required");
+      validateHappeningDate(date);
+      validateHappeningText(text);
+      const location = await locate(id);
+      const { note } = await readLocated(location);
+      if (note.revision !== ifRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
+      const updated = {
+        ...note,
+        body: appendHappening(note.body, { date, text }),
+        updated: now().toISOString(),
+      };
+      const raw = renderNote(updated);
+      const tempPath = await writeTemp(dirname(location.path), id, raw);
+      try {
+        const currentRaw = await readFile(location.path, "utf8");
+        if (digest(currentRaw) !== ifRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
+        await rename(tempPath, location.path);
+      } catch (error) {
+        await unlink(tempPath).catch(() => {});
+        if (error instanceof MemoryError) throw error;
+        fail("IO_ERROR", "Memory storage is unavailable");
+      }
+      const parsed = parseMarkdownMemoryNote(raw, { id, type: location.type });
+      return {
+        ...publicNote(parsed, location.relativePath),
+        happening: { date, text },
+      };
     },
 
     async update({ id, ifRevision, patch } = {}) {
