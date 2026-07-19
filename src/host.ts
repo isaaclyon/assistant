@@ -24,6 +24,7 @@ import {
   shouldRecoverTelegramOwnership,
 } from "./config.js";
 import { type InboundInbox, openInbox } from "./inbox.js";
+import { type JobScheduler, startJobScheduler } from "./jobs.js";
 import {
   resolveCodexExtensionPath,
   resolveTelegramExtensionPath,
@@ -305,12 +306,19 @@ export async function startBridgeHost({
 
   let ownershipMonitor: ReturnType<typeof setInterval> | undefined;
   let ownershipRecoveryPromise: Promise<void> | undefined;
+  let jobScheduler: JobScheduler | undefined;
   let stopping = false;
   let disposePromise: Promise<void> | undefined;
   const dispose = (): Promise<void> => {
     disposePromise ??= (async () => {
       stopping = true;
       if (ownershipMonitor) clearInterval(ownershipMonitor);
+      try {
+        await jobScheduler?.stop();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error(`Job scheduler shutdown failed: ${message}`);
+      }
       try {
         await ownershipRecoveryPromise;
       } catch {
@@ -456,6 +464,30 @@ export async function startBridgeHost({
       }, ownershipMonitorIntervalMs);
       ownershipMonitor.unref?.();
     }
+
+    // Scheduled jobs and webhook triggers inject prompts through the same RPC
+    // seam as /telegram-connect above; the fork's proactive push delivers the
+    // final reply to the paired chat because these turns have no Telegram turn.
+    const injectJobPrompt = async (prompt: string): Promise<void> => {
+      for (let attempt = 1; ; attempt += 1) {
+        await runtime.session.waitForIdle();
+        try {
+          await runtime.session.prompt(prompt, { source: "rpc" });
+          return;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (attempt >= 5 || !message.includes("already processing")) throw error;
+          await new Promise((resolveDelay) => setTimeout(resolveDelay, 2_000));
+        }
+      }
+    };
+    jobScheduler = await startJobScheduler({
+      stateDir: config.stateDir,
+      webhookHost: config.webhookHost,
+      webhookPort: config.webhookPort,
+      inject: injectJobPrompt,
+      logger,
+    });
 
     logger.info(`Pi Telegram bridge ready (session: ${runtime.session.sessionFile ?? "ephemeral"}).`);
 
