@@ -11,6 +11,8 @@ describe("renderServiceUnit", () => {
         cwd: "/home/test",
         sessionDir: "/home/test/.local/state/pi-telegram-bridge/sessions",
         stateDir: "/home/test/.local/state/pi-telegram-bridge",
+        webhookHost: "127.0.0.1",
+        webhookPort: 8776,
       },
       nodePath: "/opt/node/bin/node",
       projectDir: "/srv/pi bridge",

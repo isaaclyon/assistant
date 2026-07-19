@@ -8,6 +8,8 @@ export interface BridgeConfig {
   cwd: string;
   sessionDir: string;
   stateDir: string;
+  webhookHost: string;
+  webhookPort: number;
 }
 
 type BridgeEnvironment = Readonly<Record<string, string | undefined>>;
@@ -39,12 +41,22 @@ export function resolveBridgeConfig(
     home,
   );
 
+  const webhookPortRaw = env.PI_TELEGRAM_BRIDGE_WEBHOOK_PORT?.trim();
+  const webhookPort = webhookPortRaw ? Number.parseInt(webhookPortRaw, 10) : 8776;
+  if (!Number.isInteger(webhookPort) || webhookPort < 0 || webhookPort > 65_535) {
+    throw new Error(
+      `PI_TELEGRAM_BRIDGE_WEBHOOK_PORT must be a port number: ${webhookPortRaw}`,
+    );
+  }
+
   return {
     agentDir,
     codexConfigPath,
     cwd,
     sessionDir: join(stateDir, "sessions"),
     stateDir,
+    webhookHost: env.PI_TELEGRAM_BRIDGE_WEBHOOK_HOST?.trim() || "127.0.0.1",
+    webhookPort,
   };
 }
 

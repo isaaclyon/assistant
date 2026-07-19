@@ -46,7 +46,24 @@ describe("resolveBridgeConfig", () => {
       cwd: "/workspace",
       sessionDir: "/state/sessions",
       stateDir: "/state",
+      webhookHost: "127.0.0.1",
+      webhookPort: 8776,
     });
+  });
+
+  it("honors webhook listener overrides and rejects invalid ports", () => {
+    const config = resolveBridgeConfig(
+      {
+        PI_TELEGRAM_BRIDGE_WEBHOOK_HOST: "0.0.0.0",
+        PI_TELEGRAM_BRIDGE_WEBHOOK_PORT: "9000",
+      },
+      "/home/tester",
+    );
+    expect(config.webhookHost).toBe("0.0.0.0");
+    expect(config.webhookPort).toBe(9000);
+    expect(() =>
+      resolveBridgeConfig({ PI_TELEGRAM_BRIDGE_WEBHOOK_PORT: "not-a-port" }, "/home/tester"),
+    ).toThrow(/port number/);
   });
 });
 
