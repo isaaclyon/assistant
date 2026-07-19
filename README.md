@@ -95,10 +95,45 @@ Optional environment variables:
 | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi credentials, settings, and Telegram config |
 | `PI_TELEGRAM_CODEX_CONFIG` | `<stateDir>/pi-codex-conversion.json` | Telegram-only Codex conversion settings |
 | `PI_BIN` | `pi` | Pi executable used only by `telegram:setup` |
+| `PI_TELEGRAM_MEMORY_DIR` | `~/.local/share/pi-telegram-bridge/memory` | Personal memory vault (absolute, or relative to the user home) |
 
-Re-run `npm run service:install` after changing these variables so the generated unit captures the new paths.
+Re-run `npm run service:install` after changing these variables so the generated unit captures the new paths. The exception is `PI_TELEGRAM_MEMORY_DIR`: the memory CLI reads it on each invocation, so no service regeneration is needed.
 
 The Codex adapter defaults to normal mode for the bridge's `openai-codex` model, exposing `exec_command`, `write_stdin`, `apply_patch`, image viewing, and web search. Image generation is disabled. Its settings are independent of normal Pi sessions. The pinned extension receives this separate path through the version-checked patch in `scripts/patch-codex-conversion.mjs`; update that patch deliberately when changing the extension version.
+
+## Personal memory
+
+The assistant stores explicitly requested personal memories as plain Markdown
+in `~/.local/share/pi-telegram-bridge/memory` (override with
+`PI_TELEGRAM_MEMORY_DIR`). Supported V1 domains: people, preferences, events,
+lists, recipes, purchases, and references. The vault lives outside the
+checkout and releases, so it survives deployments; managed directories are
+created mode 0700 and notes mode 0600. Open the directory directly in Obsidian
+to browse or edit notes — human titles are in frontmatter, filenames are
+UUIDs.
+
+All access goes through the tracked skill-local CLI, which takes one JSON
+request line on stdin and returns one bounded JSON line:
+
+```bash
+printf '%s\n' '{"query":"coffee","limit":5}' \
+  | node .pi/skills/personal-memory/scripts/memory.mjs search
+```
+
+Subcommands: `add`, `read`, `update`, `delete`, `search`, `list`. See
+[`.pi/skills/personal-memory/references/memory-format.md`](.pi/skills/personal-memory/references/memory-format.md)
+for the protocol and note format, and [ADR-0011](docs/adr/0011-store-personal-memory-in-a-private-markdown-vault.md)
+for the architecture decision.
+
+Boundaries to know:
+
+- Memories are stored only on explicit request; secrets (credentials, tokens,
+  card numbers) are refused.
+- "Forget" permanently deletes the canonical note after a separate
+  confirmation. It does not erase Telegram/Pi conversation history, filesystem
+  backups, or third-party backups.
+- Backups of the vault are the user's responsibility; it is an ordinary
+  directory of Markdown files.
 
 ## Security and durability boundary
 

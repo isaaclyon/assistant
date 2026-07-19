@@ -21,7 +21,16 @@ The host explicitly loads the pinned, repo-installed Codex conversion dependency
 | Telegram Codex settings | `~/.local/state/pi-telegram-bridge/pi-codex-conversion.json` | Codex conversion extension |
 | Telegram token/pairing/offset | `~/.pi/agent/telegram.json` | pi-telegram |
 | Telegram polling ownership | `~/.pi/agent/locks.json` | pi-telegram |
+| Personal memory vault | `~/.local/share/pi-telegram-bridge/memory` (override: `PI_TELEGRAM_MEMORY_DIR`) | `personal-memory` skill CLI |
 | Process logs | user journal | systemd |
+
+The personal memory vault is user-owned plain Markdown outside the checkout and
+releases, so it survives deployment cleanup and can be opened directly in
+Obsidian. Only the tracked skill-local CLI
+(`.pi/skills/personal-memory/scripts/memory.mjs`) mutates it; there is no
+memory daemon, database, extension, or host wiring. Any future full-text index
+must be derived and disposable, rebuilt from the Markdown. See
+[ADR-0011](docs/adr/0011-store-personal-memory-in-a-private-markdown-vault.md).
 
 ## Startup
 
