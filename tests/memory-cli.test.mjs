@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -176,6 +176,25 @@ describe("personal memory CLI", () => {
     expect(results[0].snippet).toContain("synthetic tea");
     expect(truncated).toBe(false);
     expect(warnings).toEqual([]);
+  });
+
+  it("refuses a symlinked vault root that resolves into a forbidden root", async () => {
+    const linkPath = join(vault, "vault-link");
+    await symlink(process.cwd(), linkPath);
+    for (const command of ["search", "read"]) {
+      const { exitCode, stdout, stderr } = await run(
+        command,
+        command === "search"
+          ? { query: "synthetic" }
+          : { id: "2f5f167d-7a18-4457-8de7-f2f801f1e934" },
+        { vaultDir: linkPath },
+      );
+      expect(exitCode).toBe(3);
+      expect(stdout).toBe("");
+      const envelope = parseLine(stderr);
+      expect(envelope.error.code).toBe("UNSAFE_VAULT");
+      expect(envelope.error.message).not.toContain(linkPath);
+    }
   });
 
   it("refuses a vault inside a forbidden root with a sanitized exit-3 error", async () => {

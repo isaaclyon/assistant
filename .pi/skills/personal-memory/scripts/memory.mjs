@@ -85,11 +85,13 @@ export async function runMemoryCli({
   try {
     const root = resolveMemoryDirectory(env);
     const forbiddenRoots = [cwd, PROJECT_ROOT];
-    // Constructing the store enforces vault confinement for every command,
-    // including search, which otherwise bypasses the store.
+    // Constructing the store enforces lexical vault confinement; search
+    // bypasses the store's per-operation root checks, so verify the real
+    // (symlink-resolved) root explicitly before scanning.
     const store = createMarkdownMemoryStore({ root, forbiddenRoots });
     let data;
     if (command === "search") {
+      await store.verifyRoot();
       data = await createMarkdownMemorySearchBackend({ root }).search(request);
     } else if (command === "list") {
       data = { memories: await store.list(request) };

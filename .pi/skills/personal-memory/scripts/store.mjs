@@ -367,6 +367,11 @@ export function createMarkdownMemoryStore(options) {
   }
 
   return {
+    /** Reject a symlinked or forbidden vault root; false when it does not exist yet. */
+    async verifyRoot() {
+      return prepareRoot(false);
+    },
+
     async add(request) {
       const type = validateType(request?.type);
       const title = validateTitle(request?.title);
