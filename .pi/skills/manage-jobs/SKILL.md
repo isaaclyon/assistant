@@ -17,7 +17,7 @@ The host runs each due job by injecting its `prompt` as a new agent turn; the fi
 
 1. Read the current file first (it may not exist yet; start from the template below).
 2. Write the full new content to a temp file, then `mv` it over `jobs.json` (atomic — the host must never see a half-written file).
-3. Validate: run `npm run jobs:check` from the repository root and report the result to the user. If it prints a `lastLoadError`, the host rejected a previous load; fix and re-edit.
+3. Validate: the host hot-reloads within ~1 second and records the outcome in `jobs-state.json` next to `jobs.json`. Wait ~2 seconds, then read its `lastLoadError`: `null` means the file was accepted; a message means the host rejected the edit and kept the previous jobs — fix and re-edit. (On a dev machine with a build, `npm run jobs:check` validates the same rules directly.)
 4. Confirm to the user what was scheduled, including the schedule in plain words.
 
 ## Schema
