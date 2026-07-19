@@ -23,7 +23,7 @@ export const MEMORY_TYPES = Object.freeze([
   "reference",
 ]);
 
-const TYPE_FOLDERS = Object.freeze({
+export const MEMORY_TYPE_FOLDERS = Object.freeze({
   person: "people",
   preference: "preferences",
   event: "events",
@@ -168,7 +168,7 @@ function parseManagedValue(key, source) {
   return validateTimestamp(value);
 }
 
-function parseNote(raw, expected = {}) {
+export function parseMarkdownMemoryNote(raw, expected = {}) {
   if (Buffer.byteLength(raw) > MAX_NOTE_BYTES || !raw.startsWith("---\n")) {
     fail("MALFORMED_NOTE", "Memory note is malformed");
   }
@@ -308,7 +308,7 @@ export function createMarkdownMemoryStore(options) {
   }
 
   async function prepareTypeDirectory(type, create) {
-    const folder = TYPE_FOLDERS[type];
+    const folder = MEMORY_TYPE_FOLDERS[type];
     const path = join(root, folder);
     let exists = await assertDirectory(path, "UNSAFE_ENTRY");
     if (!exists && create) {
@@ -332,7 +332,7 @@ export function createMarkdownMemoryStore(options) {
       const directory = await prepareTypeDirectory(type, false);
       if (!directory) continue;
       const path = join(directory, `${id}.md`);
-      if (await assertRegularFile(path)) matches.push({ type, path, relativePath: join(TYPE_FOLDERS[type], `${id}.md`) });
+      if (await assertRegularFile(path)) matches.push({ type, path, relativePath: join(MEMORY_TYPE_FOLDERS[type], `${id}.md`) });
     }
     if (matches.length === 0) fail("NOT_FOUND", "Memory was not found");
     if (matches.length > 1) fail("DUPLICATE_ID", "Memory id is duplicated");
@@ -346,7 +346,7 @@ export function createMarkdownMemoryStore(options) {
     } catch {
       fail("IO_ERROR", "Memory storage is unavailable");
     }
-    return { raw, note: parseNote(raw, { id: location.relativePath.slice(-39, -3), type: location.type }) };
+    return { raw, note: parseMarkdownMemoryNote(raw, { id: location.relativePath.slice(-39, -3), type: location.type }) };
   }
 
   async function writeTemp(directory, id, raw) {
@@ -376,7 +376,7 @@ export function createMarkdownMemoryStore(options) {
       const timestamp = now().toISOString();
       await prepareRoot(true);
       const directory = await prepareTypeDirectory(type, true);
-      const relativePath = join(TYPE_FOLDERS[type], `${id}.md`);
+      const relativePath = join(MEMORY_TYPE_FOLDERS[type], `${id}.md`);
       const destination = join(root, relativePath);
       if (await assertRegularFile(destination)) fail("DUPLICATE_ID", "Memory id is duplicated");
       const raw = renderNote({ id, type, title, tags, created: timestamp, updated: timestamp, body, unknownFrontmatter: "" });
@@ -388,7 +388,7 @@ export function createMarkdownMemoryStore(options) {
         await unlink(tempPath).catch(() => {});
         fail("DUPLICATE_ID", "Memory id is duplicated");
       }
-      const note = parseNote(raw, { id, type });
+      const note = parseMarkdownMemoryNote(raw, { id, type });
       return publicMetadata(note, relativePath);
     },
 
@@ -425,7 +425,7 @@ export function createMarkdownMemoryStore(options) {
         if (error instanceof MemoryError) throw error;
         fail("IO_ERROR", "Memory storage is unavailable");
       }
-      const parsed = parseNote(raw, { id, type: location.type });
+      const parsed = parseMarkdownMemoryNote(raw, { id, type: location.type });
       return publicNote(parsed, location.relativePath);
     },
 
@@ -467,9 +467,9 @@ export function createMarkdownMemoryStore(options) {
           const path = join(directory, name);
           if (!(await assertRegularFile(path))) continue;
           const raw = await readFile(path, "utf8").catch(() => fail("IO_ERROR", "Memory storage is unavailable"));
-          const note = parseNote(raw, { id, type });
+          const note = parseMarkdownMemoryNote(raw, { id, type });
           seen.add(id);
-          results.push(publicMetadata(note, join(TYPE_FOLDERS[type], name)));
+          results.push(publicMetadata(note, join(MEMORY_TYPE_FOLDERS[type], name)));
         }
       }
       results.sort((a, b) => b.updated.localeCompare(a.updated) || a.id.localeCompare(b.id));
