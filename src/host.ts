@@ -2,13 +2,16 @@ import {
   type AgentSession,
   type AgentSessionRuntime,
   type CreateAgentSessionRuntimeFactory,
+  DefaultPackageManager,
   SessionManager,
+  SettingsManager,
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
   initTheme,
 } from "@earendil-works/pi-coding-agent";
-import { mkdir } from "node:fs/promises";
+import { readFileSync, realpathSync } from "node:fs";
+import { mkdir, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
 
 import {
@@ -90,6 +93,76 @@ export async function startBridgeHost({
   await mkdir(config.sessionDir, { recursive: true, mode: 0o700 });
   await ensureCodexConfig(config.codexConfigPath);
 
+  const telegramAgentsPath = join(config.cwd, ".pi", "telegram", "AGENTS.md");
+  const bridgeRealPath = await realpath(config.cwd);
+  const bridgeRealPrefix = bridgeRealPath + sep;
+  const isInsideBridge = (target: string): boolean =>
+    target === bridgeRealPath || target.startsWith(bridgeRealPrefix);
+  let lastTelegramAgentsContent: string | undefined;
+  const loadTelegramAgentsContent = (): string => {
+    try {
+      const target = realpathSync(telegramAgentsPath);
+      if (!isInsideBridge(target)) {
+        throw new Error(
+          `Telegram instructions resolve outside the bridge repository: ${telegramAgentsPath}`,
+        );
+      }
+      const content = readFileSync(target, "utf8");
+      lastTelegramAgentsContent = content;
+      return content;
+    } catch (error) {
+      if (lastTelegramAgentsContent === undefined) throw error;
+      logger.warn(
+        `Could not reload Telegram instructions from ${telegramAgentsPath}; keeping the last loaded version.`,
+      );
+      return lastTelegramAgentsContent;
+    }
+  };
+
+  const resourceManager = new DefaultPackageManager({
+    cwd: config.cwd,
+    agentDir: config.agentDir,
+    settingsManager: SettingsManager.create(config.cwd, config.agentDir),
+  });
+  const discoverRepoResources = async (): Promise<{
+    extensions: string[];
+    skills: string[];
+  }> => {
+    const resolved = await resourceManager.resolveExtensionSources(
+      [join(config.cwd, ".pi")],
+      { temporary: true },
+    );
+    const keepInsideBridge = async (
+      path: string,
+      kind: "extension" | "skill",
+    ): Promise<boolean> => {
+      try {
+        const target = await realpath(path);
+        if (isInsideBridge(target)) {
+          return true;
+        }
+      } catch {
+        // Missing or unreadable resources are excluded before Pi can load them.
+      }
+      logger.warn(`Ignoring non-repo ${kind}: ${path}`);
+      return false;
+    };
+    const extensions: string[] = [];
+    for (const resource of resolved.extensions) {
+      if (resource.enabled && (await keepInsideBridge(resource.path, "extension"))) {
+        extensions.push(resource.path);
+      }
+    }
+    const skills: string[] = [];
+    for (const resource of resolved.skills) {
+      if (resource.enabled && (await keepInsideBridge(resource.path, "skill"))) {
+        skills.push(resource.path);
+      }
+    }
+    return { extensions, skills };
+  };
+  let refreshRuntimeResources: () => Promise<void> = async () => {};
+
   // Open and register the durable inbox before the runtime starts its session:
   // the fork replays pending turns on session start, so the capability must be
   // live first. A registration failure must still release the database handle.
@@ -108,38 +181,40 @@ export async function startBridgeHost({
     sessionManager,
     sessionStartEvent,
   }) => {
-    // Only repo-local resources apply to this agent: extensions and skills
-    // discovered outside the bridge cwd (~/.pi/agent, ~/.agents, ancestor
-    // .agents dirs) are dropped so nothing gains capabilities on this
-    // always-on bridge without going through git.
-    const repoPrefix = cwd + sep;
-    const isRepoLocal = (path: string): boolean =>
-      path.startsWith(repoPrefix) ||
-      path === telegramExtensionPath ||
-      path === codexExtensionPath;
+    // ADR-0009: the always-on bridge loads one explicit runtime instruction
+    // file instead of inheriting developer or server-level AGENTS.md files.
+    // Resolve and canonicalize repo resources before Pi imports any extension.
+    // Post-load filtering is too late because extension modules and factories
+    // execute during loading.
+    const additionalExtensionPaths = [telegramExtensionPath, codexExtensionPath];
+    const additionalSkillPaths: string[] = [];
+    const refreshRepoResources = async (): Promise<void> => {
+      const discovered = await discoverRepoResources();
+      additionalExtensionPaths.splice(
+        2,
+        additionalExtensionPaths.length - 2,
+        ...discovered.extensions,
+      );
+      additionalSkillPaths.splice(0, additionalSkillPaths.length, ...discovered.skills);
+    };
+    await refreshRepoResources();
     const services = await createAgentSessionServices({
       cwd,
       agentDir,
       resourceLoaderOptions: {
-        additionalExtensionPaths: [telegramExtensionPath, codexExtensionPath],
-        extensionsOverride: (base) => ({
-          ...base,
-          extensions: base.extensions.filter((extension) => {
-            if (isRepoLocal(extension.resolvedPath)) return true;
-            logger.warn(`Ignoring non-repo extension: ${extension.path}`);
-            return false;
-          }),
-        }),
-        skillsOverride: (base) => ({
-          ...base,
-          skills: base.skills.filter((skill) => {
-            if (isRepoLocal(skill.filePath)) return true;
-            logger.warn(`Ignoring non-repo skill: ${skill.name} (${skill.filePath})`);
-            return false;
-          }),
+        additionalExtensionPaths,
+        additionalSkillPaths,
+        noExtensions: true,
+        noSkills: true,
+        noContextFiles: true,
+        agentsFilesOverride: () => ({
+          agentsFiles: [
+            { path: telegramAgentsPath, content: loadTelegramAgentsContent() },
+          ],
         }),
       },
     });
+    refreshRuntimeResources = refreshRepoResources;
     const extensions = services.resourceLoader.getExtensions();
     const telegramLoaded = extensions.extensions.some(
       (extension) =>
@@ -278,7 +353,10 @@ export async function startBridgeHost({
           return { cancelled: result.cancelled };
         },
         switchSession: (sessionPath, options) => runtime.switchSession(sessionPath, options),
-        reload: () => runtime.session.reload(),
+        reload: async () => {
+          await refreshRuntimeResources();
+          await runtime.session.reload();
+        },
       },
       shutdownHandler: () => {
         void runtime.session.waitForIdle().then(onShutdownRequest);

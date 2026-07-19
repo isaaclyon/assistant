@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -7,6 +7,24 @@ import { describe, expect, it, vi } from "vitest";
 import { TELEGRAM_LOCK_STALE_HEARTBEAT_MS } from "../src/config.js";
 import { startBridgeHost } from "../src/host.js";
 import { resolveTelegramExtensionPath } from "../src/package-paths.js";
+
+async function startTestBridgeHost(
+  options: Parameters<typeof startBridgeHost>[0],
+): ReturnType<typeof startBridgeHost> {
+  const agentsPath = join(
+    options.config.cwd,
+    ".pi",
+    "telegram",
+    "AGENTS.md",
+  );
+  await mkdir(dirname(agentsPath), { recursive: true });
+  try {
+    await writeFile(agentsPath, "test Telegram guidance\n", { flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  return startBridgeHost(options);
+}
 
 type RegisterTelegramHostNewSession = (
   provider: () => Promise<{ cancelled: boolean }>,
@@ -119,7 +137,7 @@ describe("startBridgeHost", () => {
     };
 
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-    const host = await startBridgeHost({
+    const host = await startTestBridgeHost({
       config: {
         agentDir,
         cwd: root,
@@ -255,7 +273,7 @@ describe("startBridgeHost", () => {
     );
 
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-    const host = await startBridgeHost({
+    const host = await startTestBridgeHost({
       config: {
         agentDir,
         cwd: root,
@@ -320,7 +338,7 @@ describe("startBridgeHost", () => {
     let ownerAlive = true;
 
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-    const host = await startBridgeHost({
+    const host = await startTestBridgeHost({
       config: {
         agentDir,
         cwd: root,
@@ -389,7 +407,7 @@ describe("startBridgeHost", () => {
     };
 
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-    const host = await startBridgeHost({
+    const host = await startTestBridgeHost({
       config: {
         agentDir,
         cwd: root,
@@ -447,7 +465,7 @@ describe("startBridgeHost", () => {
     };
 
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-    const host = await startBridgeHost({
+    const host = await startTestBridgeHost({
       config: {
         agentDir,
         cwd: root,
@@ -514,7 +532,7 @@ describe("startBridgeHost", () => {
     };
 
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-    const host = await startBridgeHost({
+    const host = await startTestBridgeHost({
       config: {
         agentDir,
         cwd: root,
@@ -556,7 +574,7 @@ describe("startBridgeHost", () => {
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
     try {
       await expect(
-        startBridgeHost({
+        startTestBridgeHost({
           config: {
             agentDir,
             cwd: root,
@@ -586,7 +604,7 @@ describe("startBridgeHost", () => {
     };
 
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-    const host = await startBridgeHost({
+    const host = await startTestBridgeHost({
       config: {
         agentDir: join(root, "agent"),
         cwd: root,
@@ -630,7 +648,7 @@ describe("startBridgeHost", () => {
     const bindInbox = vi.fn(() => unbindInbox);
 
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-    const host = await startBridgeHost({
+    const host = await startTestBridgeHost({
       config: {
         agentDir: join(root, "agent"),
         cwd: root,
@@ -735,18 +753,19 @@ describe("startBridgeHost", () => {
     }
   }, 20_000);
 
-  it("ignores extensions and skills discovered outside the bridge repo", async () => {
+  it("does not execute extensions or load skills outside the bridge repo", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-telegram-host-global-filter-"));
     // Mirror production: the agent dir is not inside the bridge repo cwd.
     const cwd = join(root, "repo");
     const agentDir = join(root, "agent");
     const extensionPath = join(cwd, "telegram-extension.mjs");
+    const sideEffectMarker = join(root, "global-extension-executed");
     await mkdir(cwd, { recursive: true });
     await writeFile(extensionPath, "export default function() {}\n");
     await mkdir(join(agentDir, "extensions"), { recursive: true });
     await writeFile(
       join(agentDir, "extensions", "global-extension.js"),
-      "export default function() {}\n",
+      `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(sideEffectMarker)}, "executed");\nexport default function() {}\n`,
     );
     await mkdir(join(agentDir, "skills", "global-skill"), { recursive: true });
     await writeFile(
@@ -759,10 +778,15 @@ describe("startBridgeHost", () => {
       join(cwd, ".pi", "extensions", "local-extension.js"),
       "export default function() {}\n",
     );
+    await mkdir(join(cwd, ".pi", "skills", "local-skill"), { recursive: true });
+    await writeFile(
+      join(cwd, ".pi", "skills", "local-skill", "SKILL.md"),
+      "---\nname: local-skill\ndescription: must load\n---\nbody\n",
+    );
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-    const host = await startBridgeHost({
+    const host = await startTestBridgeHost({
       config: {
         agentDir,
         cwd,
@@ -775,14 +799,260 @@ describe("startBridgeHost", () => {
     });
 
     try {
+      await expect(readFile(sideEffectMarker, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      expect(
+        host.runtime.services.resourceLoader
+          .getExtensions()
+          .extensions.map((extension) => extension.resolvedPath),
+      ).toContain(join(cwd, ".pi", "extensions", "local-extension.js"));
+      expect(
+        host.runtime.services.resourceLoader
+          .getExtensions()
+          .extensions.map((extension) => extension.resolvedPath),
+      ).not.toContain(join(agentDir, "extensions", "global-extension.js"));
+      expect(
+        host.runtime.services.resourceLoader
+          .getSkills()
+          .skills.map((skill) => skill.name),
+      ).toEqual(["local-skill"]);
+    } finally {
+      await host.dispose();
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
+  }, 20_000);
+
+  it("rejects repo-local resource symlinks that escape the bridge", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-telegram-host-symlink-filter-"));
+    const cwd = join(root, "repo");
+    const agentDir = join(root, "agent");
+    const extensionPath = join(cwd, "telegram-extension.mjs");
+    const escapedExtension = join(root, "escaped-extension.js");
+    const sideEffectMarker = join(root, "escaped-extension-executed");
+    const escapedSkillDir = join(root, "escaped-skill");
+    await mkdir(join(cwd, ".pi", "extensions"), { recursive: true });
+    await mkdir(join(cwd, ".pi", "skills"), { recursive: true });
+    await mkdir(escapedSkillDir, { recursive: true });
+    await writeFile(extensionPath, "export default function() {}\n");
+    await writeFile(
+      escapedExtension,
+      `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(sideEffectMarker)}, "executed");\nexport default function() {}\n`,
+    );
+    await writeFile(
+      join(escapedSkillDir, "SKILL.md"),
+      "---\nname: escaped-skill\ndescription: must not load\n---\nbody\n",
+    );
+    await symlink(escapedExtension, join(cwd, ".pi", "extensions", "escaped.js"));
+    await symlink(escapedSkillDir, join(cwd, ".pi", "skills", "escaped"));
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const host = await startTestBridgeHost({
+      config: {
+        agentDir,
+        cwd,
+        sessionDir: join(root, "state", "sessions"),
+        stateDir: join(root, "state"),
+        codexConfigPath: join(root, "state", "pi-codex-conversion.json"),
+      },
+      logger,
+      telegramExtensionPath: extensionPath,
+    });
+
+    try {
+      await expect(readFile(sideEffectMarker, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      expect(host.runtime.services.resourceLoader.getSkills().skills).toEqual([]);
       expect(logger.warn).toHaveBeenCalledWith(
-        `Ignoring non-repo extension: ${join(agentDir, "extensions", "global-extension.js")}`,
+        `Ignoring non-repo extension: ${join(cwd, ".pi", "extensions", "escaped.js")}`,
       );
       expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining("Ignoring non-repo skill: global-skill"),
+        `Ignoring non-repo skill: ${join(cwd, ".pi", "skills", "escaped", "SKILL.md")}`,
       );
-      expect(logger.warn).not.toHaveBeenCalledWith(
-        expect.stringContaining("local-extension"),
+    } finally {
+      await host.dispose();
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
+  }, 20_000);
+
+  it("loads only the bridge-specific Telegram agent instructions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-telegram-host-context-"));
+    const cwd = join(root, "repo");
+    const agentDir = join(root, "agent");
+    const extensionPath = join(cwd, "telegram-extension.mjs");
+    const telegramAgentsPath = join(cwd, ".pi", "telegram", "AGENTS.md");
+    await mkdir(dirname(telegramAgentsPath), { recursive: true });
+    await writeFile(join(root, "AGENTS.md"), "ancestor guidance\n");
+    await writeFile(join(cwd, "AGENTS.md"), "developer guidance\n");
+    await writeFile(telegramAgentsPath, "telegram guidance\n");
+    await writeFile(extensionPath, "export default function() {}\n");
+
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const host = await startTestBridgeHost({
+      config: {
+        agentDir,
+        cwd,
+        sessionDir: join(root, "state", "sessions"),
+        stateDir: join(root, "state"),
+        codexConfigPath: join(root, "state", "pi-codex-conversion.json"),
+      },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      telegramExtensionPath: extensionPath,
+    });
+
+    try {
+      expect(host.runtime.services.resourceLoader.getAgentsFiles()).toEqual({
+        agentsFiles: [
+          { path: telegramAgentsPath, content: "telegram guidance\n" },
+        ],
+      });
+    } finally {
+      await host.dispose();
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
+  }, 20_000);
+
+  it("rejects Telegram instructions that resolve outside the bridge", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-telegram-host-context-symlink-"));
+    const cwd = join(root, "repo");
+    const extensionPath = join(cwd, "telegram-extension.mjs");
+    const agentsPath = join(cwd, ".pi", "telegram", "AGENTS.md");
+    const externalAgentsPath = join(root, "external-AGENTS.md");
+    await mkdir(dirname(agentsPath), { recursive: true });
+    await writeFile(extensionPath, "export default function() {}\n");
+    await writeFile(externalAgentsPath, "external guidance\n");
+    await symlink(externalAgentsPath, agentsPath);
+
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+      await expect(
+        startBridgeHost({
+          config: {
+            agentDir: join(root, "agent"),
+            cwd,
+            sessionDir: join(root, "state", "sessions"),
+            stateDir: join(root, "state"),
+            codexConfigPath: join(root, "state", "pi-codex-conversion.json"),
+          },
+          logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+          telegramExtensionPath: extensionPath,
+        }),
+      ).rejects.toThrow("Telegram instructions resolve outside the bridge repository");
+    } finally {
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
+  }, 20_000);
+
+  it("reloads changed Telegram agent instructions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-telegram-host-context-reload-"));
+    const extensionPath = join(root, "telegram-extension.mjs");
+    const agentsPath = join(root, ".pi", "telegram", "AGENTS.md");
+    await writeFile(extensionPath, "export default function() {}\n");
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const host = await startTestBridgeHost({
+      config: {
+        agentDir: join(root, "agent"),
+        cwd: root,
+        sessionDir: join(root, "state", "sessions"),
+        stateDir: join(root, "state"),
+        codexConfigPath: join(root, "state", "pi-codex-conversion.json"),
+      },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      telegramExtensionPath: extensionPath,
+    });
+
+    try {
+      await writeFile(agentsPath, "updated Telegram guidance\n");
+      await host.runtime.session.reload();
+      expect(host.runtime.services.resourceLoader.getAgentsFiles()).toEqual({
+        agentsFiles: [
+          { path: agentsPath, content: "updated Telegram guidance\n" },
+        ],
+      });
+    } finally {
+      await host.dispose();
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
+  }, 20_000);
+
+  it("keeps trusted instructions if reload changes the file to an escaping symlink", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-telegram-host-context-reload-link-"));
+    const externalRoot = await mkdtemp(join(tmpdir(), "pi-telegram-host-external-context-"));
+    const extensionPath = join(root, "telegram-extension.mjs");
+    const agentsPath = join(root, ".pi", "telegram", "AGENTS.md");
+    const externalAgentsPath = join(externalRoot, "AGENTS.md");
+    await writeFile(extensionPath, "export default function() {}\n");
+    await writeFile(externalAgentsPath, "external guidance\n");
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const host = await startTestBridgeHost({
+      config: {
+        agentDir: join(root, "agent"),
+        cwd: root,
+        sessionDir: join(root, "state", "sessions"),
+        stateDir: join(root, "state"),
+        codexConfigPath: join(root, "state", "pi-codex-conversion.json"),
+      },
+      logger,
+      telegramExtensionPath: extensionPath,
+    });
+
+    try {
+      await rm(agentsPath);
+      await symlink(externalAgentsPath, agentsPath);
+      await host.runtime.session.reload();
+      expect(host.runtime.services.resourceLoader.getAgentsFiles()).toEqual({
+        agentsFiles: [
+          { path: agentsPath, content: "test Telegram guidance\n" },
+        ],
+      });
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("keeping the last loaded version"),
+      );
+    } finally {
+      await host.dispose();
+      await rm(externalRoot, { recursive: true, force: true });
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
+  }, 20_000);
+
+  it("keeps the last instructions if the file disappears during replacement", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-telegram-host-context-cache-"));
+    const extensionPath = join(root, "telegram-extension.mjs");
+    const agentsPath = join(root, ".pi", "telegram", "AGENTS.md");
+    await writeFile(extensionPath, "export default function() {}\n");
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const host = await startTestBridgeHost({
+      config: {
+        agentDir: join(root, "agent"),
+        cwd: root,
+        sessionDir: join(root, "state", "sessions"),
+        stateDir: join(root, "state"),
+        codexConfigPath: join(root, "state", "pi-codex-conversion.json"),
+      },
+      logger,
+      telegramExtensionPath: extensionPath,
+    });
+
+    try {
+      await rm(agentsPath);
+      await expect(host.runtime.newSession()).resolves.toEqual({ cancelled: false });
+      expect(host.runtime.services.resourceLoader.getAgentsFiles()).toEqual({
+        agentsFiles: [
+          { path: agentsPath, content: "test Telegram guidance\n" },
+        ],
+      });
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("keeping the last loaded version"),
       );
     } finally {
       await host.dispose();

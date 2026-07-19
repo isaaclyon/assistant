@@ -12,7 +12,7 @@ systemd user service
               └── @howaboua/pi-codex-conversion (Codex tools/prompt adapter)
 ```
 
-The Pi runtime uses this repository as its working directory by default. Pi therefore loads both the server-level `/home/isaaclyon/AGENTS.md` and this repo's local architecture/agent guidance, while its tools remain free to work elsewhere on the server. Conversation sessions are isolated under `~/.local/state/pi-telegram-bridge/sessions`.
+The Pi runtime uses this repository as its working directory by default, while its tools remain free to work elsewhere on the server when requested. The host disables hierarchical AGENTS discovery and loads only `.pi/telegram/AGENTS.md` for the Telegram runtime; the root `AGENTS.md` remains developer guidance. Conversation sessions are isolated under `~/.local/state/pi-telegram-bridge/sessions`.
 
 ## Initial setup
 
