@@ -9,3 +9,7 @@ export function resolveTelegramExtensionPath(): string {
 export function resolveCodexExtensionPath(): string {
   return require.resolve("@howaboua/pi-codex-conversion/dist/index.js");
 }
+
+export function resolveRetryExtensionPath(): string {
+  return require.resolve("@narumitw/pi-retry/src/retry.ts");
+}

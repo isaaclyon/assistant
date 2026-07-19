@@ -27,6 +27,7 @@ import { type InboundInbox, openInbox } from "./inbox.js";
 import { type JobScheduler, startJobScheduler } from "./jobs.js";
 import {
   resolveCodexExtensionPath,
+  resolveRetryExtensionPath,
   resolveTelegramExtensionPath,
 } from "./package-paths.js";
 import {
@@ -87,6 +88,7 @@ export async function startBridgeHost({
   bindInbox = bindTelegramInboundInbox,
 }: BridgeHostOptions): Promise<BridgeHost> {
   const codexExtensionPath = resolveCodexExtensionPath();
+  const retryExtensionPath = resolveRetryExtensionPath();
   process.env.PI_CODING_AGENT_DIR = config.agentDir;
   process.env.PI_CODEX_CONVERSION_CONFIG_PATH = config.codexConfigPath;
   initTheme();
@@ -187,13 +189,17 @@ export async function startBridgeHost({
     // Resolve and canonicalize repo resources before Pi imports any extension.
     // Post-load filtering is too late because extension modules and factories
     // execute during loading.
-    const additionalExtensionPaths = [telegramExtensionPath, codexExtensionPath];
+    const additionalExtensionPaths = [
+      telegramExtensionPath,
+      codexExtensionPath,
+      retryExtensionPath,
+    ];
     const additionalSkillPaths: string[] = [];
     const refreshRepoResources = async (): Promise<void> => {
       const discovered = await discoverRepoResources();
       additionalExtensionPaths.splice(
-        2,
-        additionalExtensionPaths.length - 2,
+        3,
+        additionalExtensionPaths.length - 3,
         ...discovered.extensions,
       );
       additionalSkillPaths.splice(0, additionalSkillPaths.length, ...discovered.skills);
@@ -241,6 +247,19 @@ export async function startBridgeHost({
       );
       throw new Error(
         `Codex conversion extension failed to load from ${codexExtensionPath}${loadError ? `: ${loadError.error}` : ""}`,
+      );
+    }
+    const retryLoaded = extensions.extensions.some(
+      (extension) =>
+        extension.path === retryExtensionPath ||
+        extension.resolvedPath === retryExtensionPath,
+    );
+    if (!retryLoaded) {
+      const loadError = extensions.errors.find(
+        (error) => error.path === retryExtensionPath,
+      );
+      throw new Error(
+        `Retry extension failed to load from ${retryExtensionPath}${loadError ? `: ${loadError.error}` : ""}`,
       );
     }
     const result = await createAgentSessionFromServices({

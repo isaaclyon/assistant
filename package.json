@@ -14,7 +14,7 @@
     "deploy": "bash scripts/deploy.sh",
     "jobs:check": "node dist/src/jobs-check.js",
     "service:install": "npm run build && node dist/src/install-service.js",
-    "postinstall": "node scripts/patch-codex-conversion.mjs && node scripts/patch-telegram-tool-activity.mjs && node scripts/patch-telegram-new-session-dedup.mjs",
+    "postinstall": "node scripts/patch-codex-conversion.mjs && node scripts/patch-telegram-tool-activity.mjs && node scripts/patch-telegram-new-session-dedup.mjs && node scripts/patch-telegram-agent-settled.mjs",
     "start": "node dist/src/daemon.js",
     "telegram:setup": "npm run build && node dist/src/setup.js",
     "test": "vitest run --exclude '.worktrees/**'",
@@ -28,6 +28,7 @@
     "@earendil-works/pi-tui": "0.80.10",
     "@howaboua/pi-codex-conversion": "2.2.13",
     "@llblab/pi-telegram": "https://codeload.github.com/isaaclyon/pi-telegram/tar.gz/a575e08b252bfd6e98be6d64e35c232bf3d1fa8b",
+    "@narumitw/pi-retry": "0.22.0",
     "croner": "^10.0.1"
   },
   "devDependencies": {
