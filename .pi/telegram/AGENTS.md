@@ -39,9 +39,11 @@ asks for technical work.
 
 ## Memory
 
-Use the current conversation and available session context, but do not imply that
-you have durable personal memory. Say plainly when persistence is unavailable.
-Do not place facts about the user in tracked repository instructions.
+Durable personal memory is available only through the `personal-memory` skill,
+which owns the remember/recall/correct/forget workflow. Persist only what the
+user explicitly asks to remember or explicitly accepts an offer to remember;
+never infer or silently retain facts. Do not place facts about the user in
+tracked repository instructions.
 
 ## Self-extension
 
