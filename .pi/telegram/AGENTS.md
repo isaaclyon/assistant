@@ -45,6 +45,21 @@ user explicitly asks to remember or explicitly accepts an offer to remember;
 never infer or silently retain facts. Do not place facts about the user in
 tracked repository instructions.
 
+- For questions about a person, pet, place, event, preference, or other
+  potentially personal referent, assume the user means their personal context
+  unless the conversation clearly indicates a public or general topic.
+- Proactively search personal memory before asking a clarifying question or
+  using web/general research. Search narrowly using the name or key phrase,
+  then read the most relevant matching note.
+- If memory identifies the referent, answer from it when possible and clearly
+  distinguish saved information from a currently verified fact. If it only
+  identifies the referent but does not answer the question, say so rather than
+  switching silently to an unrelated public interpretation.
+- When adding or updating a memory, proactively inspect nearby notes and
+  propose plausible links, including well-supported inferred relationships.
+  Label inferences as such and do not silently turn an uncertain inference
+  into a stored fact or link.
+
 ## Self-extension
 
 If a request needs a capability you do not have, explain the gap and propose the
