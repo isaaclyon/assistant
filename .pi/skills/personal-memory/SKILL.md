@@ -66,6 +66,22 @@ envelopes, full note bodies, or error objects to the user.
   manual Obsidian edit). Re-read and report the conflict rather than
   overwriting.
 
+## Relationships and links
+
+- For explicit symmetric relationships between saved notes—such as spouses,
+  siblings, or related concepts—default to bidirectional Obsidian Markdown
+  links using `[[Note title]]`.
+- Keep the relationship fact in the most relevant note, and add only a concise
+  `Related: [[Other note]]` backlink to the counterpart. Do not duplicate the
+  full fact in both bodies.
+- Before adding a backlink, search and read the counterpart note. Update it
+  with its current `revision`, preserving its existing body and avoiding a
+  duplicate link. Treat revision conflicts as described above.
+- Do not create backlinks for directional references or incidental mentions
+  unless the user explicitly asks for them.
+- Verify every add or backlink update with an `ok:true` CLI response before
+  claiming the relationship is linked.
+
 ## Forget
 
 - Find the exact note and show the user a minimal preview (title, type, date —
