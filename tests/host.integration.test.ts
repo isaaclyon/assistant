@@ -6,7 +6,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { TELEGRAM_LOCK_STALE_HEARTBEAT_MS } from "../src/config.js";
 import { startBridgeHost } from "../src/host.js";
-import { resolveTelegramExtensionPath } from "../src/package-paths.js";
+import {
+  resolveRetryExtensionPath,
+  resolveTelegramExtensionPath,
+} from "../src/package-paths.js";
 
 async function startTestBridgeHost(
   options: Parameters<typeof startBridgeHost>[0],
@@ -827,6 +830,11 @@ describe("startBridgeHost", () => {
           .getExtensions()
           .extensions.map((extension) => extension.resolvedPath),
       ).toContain(join(cwd, ".pi", "extensions", "local-extension.js"));
+      expect(
+        host.runtime.services.resourceLoader
+          .getExtensions()
+          .extensions.map((extension) => extension.resolvedPath),
+      ).toContain(resolveRetryExtensionPath());
       expect(
         host.runtime.services.resourceLoader
           .getExtensions()
