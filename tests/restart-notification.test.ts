@@ -12,10 +12,10 @@ describe("restart notification", () => {
   it("persists a pending notification before the bridge exits", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "pi-telegram-restart-"));
 
-    markRestartPending(stateDir, () => 123);
+    markRestartPending(stateDir);
 
     await expect(readFile(join(stateDir, "restart-pending.json"), "utf8")).resolves
-      .toBe('{"requestedAtMs":123}\n');
+      .toBe("");
   });
 
   it("notifies the paired Telegram user and clears the marker after success", async () => {
@@ -28,7 +28,7 @@ describe("restart notification", () => {
       join(agentDir, "telegram.json"),
       JSON.stringify({ botToken: "test-token", allowedUserId: 42 }),
     );
-    markRestartPending(stateDir, () => 123);
+    markRestartPending(stateDir);
     const fetchImpl = vi.fn(async () =>
       new Response(JSON.stringify({ ok: true }), { status: 200 }),
     );
@@ -60,7 +60,7 @@ describe("restart notification", () => {
       join(agentDir, "telegram.json"),
       JSON.stringify({ botToken: "test-token", allowedUserId: 42 }),
     );
-    markRestartPending(stateDir, () => 123);
+    markRestartPending(stateDir);
 
     await expect(
       notifyPendingRestart({
@@ -72,6 +72,6 @@ describe("restart notification", () => {
       }),
     ).rejects.toThrow(/Telegram restart confirmation failed/);
     await expect(readFile(join(stateDir, "restart-pending.json"), "utf8")).resolves
-      .toContain("123");
+      .toBe("");
   });
 });

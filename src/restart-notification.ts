@@ -17,15 +17,11 @@ export interface NotifyPendingRestartOptions {
   fetchImpl?: typeof fetch;
 }
 
-export function markRestartPending(
-  stateDir: string,
-  nowMs: () => number = Date.now,
-): void {
-  writeFileSync(
-    join(stateDir, RESTART_PENDING_FILE),
-    `${JSON.stringify({ requestedAtMs: nowMs() })}\n`,
-    { encoding: "utf8", mode: 0o600 },
-  );
+export function markRestartPending(stateDir: string): void {
+  writeFileSync(join(stateDir, RESTART_PENDING_FILE), "", {
+    encoding: "utf8",
+    mode: 0o600,
+  });
 }
 
 export async function notifyPendingRestart({
@@ -34,23 +30,14 @@ export async function notifyPendingRestart({
   fetchImpl = fetch,
 }: NotifyPendingRestartOptions): Promise<boolean> {
   const markerPath = join(stateDir, RESTART_PENDING_FILE);
-  let marker: unknown;
   try {
-    marker = JSON.parse(await readFile(markerPath, "utf8"));
+    await readFile(markerPath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw new Error(`Could not read restart notification marker: ${markerPath}`, {
       cause: error,
     });
   }
-  if (
-    typeof marker !== "object" ||
-    marker === null ||
-    typeof (marker as { requestedAtMs?: unknown }).requestedAtMs !== "number"
-  ) {
-    throw new Error(`Invalid restart notification marker: ${markerPath}`);
-  }
-
   const configPath = join(agentDir, "telegram.json");
   let config: TelegramConfigFile;
   try {

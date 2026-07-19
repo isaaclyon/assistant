@@ -1,6 +1,6 @@
 # Pi Telegram Bridge Host
 
-A small, systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](https://github.com/isaaclyon/pi-telegram/commit/c1692633dc9838bdf64b1b792f6d6249c3b13d53). It keeps one persistent Pi session available through a private Telegram bot and adds a narrow host-backed Telegram `/new` lifecycle bridge.
+A small, systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](https://github.com/isaaclyon/pi-telegram/commit/a575e08b252bfd6e98be6d64e35c232bf3d1fa8b). It keeps one persistent Pi session available through a private Telegram bot and adds a narrow host-backed Telegram `/new` lifecycle bridge.
 
 ## Runtime shape
 
@@ -104,7 +104,7 @@ The Codex adapter defaults to normal mode for the bridge's `openai-codex` model,
 
 The bot controls a Pi process with the current user's filesystem and command permissions. Keep the bot token private and pair only the intended Telegram account.
 
-This host provides process restart and persistent Pi sessions. Accepted inbound turns are also made crash-durable by a SQLite inbox at `<stateDir>/inbox.db` (`src/inbox.ts`): a turn is persisted the instant it is accepted, removed once Pi owns it, and replayed on startup, giving at-least-once execution across a host crash. Idempotency is keyed on a stable per-turn identity (chat plus source message id). The host and the pinned fork rendezvous on a shared process-global registry (`src/telegram-inbox-capability.ts`) — the same pattern as the session-replacement capability — so the compiled host never imports the source-only fork; binding is inert against a fork build that does not read it. Durable *outbound* delivery remains out of scope for ordinary assistant replies, but `/restart` has a small durable startup acknowledgment so operators can tell whether the process returned successfully. See [ADR-0003](docs/adr/0003-durable-inbound-inbox.md) and [ADR-0007](docs/adr/0007-restart-completion-notification.md).
+This host provides process restart and persistent Pi sessions. Accepted inbound turns are also made crash-durable by a SQLite inbox at `<stateDir>/inbox.db` (`src/inbox.ts`): a turn is persisted the instant it is accepted, removed once Pi owns it, and replayed on startup, giving at-least-once execution across a host crash. Idempotency is keyed on a stable per-turn identity (chat plus source message id). The host and the pinned fork rendezvous on a shared process-global registry (`src/telegram-capabilities.ts`) — the same pattern as the session-replacement capability — so the compiled host never imports the source-only fork; binding is inert against a fork build that does not read it. Durable *outbound* delivery remains out of scope for ordinary assistant replies, but `/restart` has a small durable startup acknowledgment so operators can tell whether the process returned successfully. See [ADR-0003](docs/adr/0003-durable-inbound-inbox.md) and [ADR-0008](docs/adr/0008-restart-completion-notification.md).
 
 ## Development
 
