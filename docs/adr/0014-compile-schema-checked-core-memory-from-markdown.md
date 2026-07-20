@@ -2,7 +2,7 @@
 status: accepted
 relates-to: ADR-0009, ADR-0011, ADR-0012
 supersedes-in-part: ADR-0011
-superseded-in-part-by: ADR-0015
+superseded-in-part-by: ADR-0015, ADR-0016, ADR-0017
 ---
 
 # Compile schema-checked core memory from Markdown
@@ -49,5 +49,6 @@ directly import the same renderer behind an explicit host-bound runtime marker.
   vault is empty or test-only at adoption time.
 - `#core` remains ordinary user-owned note data. Runtime injection is not part
   of this phase and requires the explicit bridge boundary described above.
-- Lifecycle statuses, generated projections, indexing, Git automation, and
-  session provenance validation remain deferred until they unlock behavior.
+- Generated projections, indexing, and Git automation remain deferred until
+  they unlock behavior. Lifecycle behavior is defined by ADR-0016 and session
+  provenance validation by ADR-0017.

@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { parseDocument } from "yaml";
 
 import {
+  MEMORY_STATUSES,
   MEMORY_TYPES,
   createMarkdownMemoryStore,
 } from "../.pi/skills/personal-memory/scripts/store.mjs";
@@ -60,13 +61,14 @@ describe("Markdown personal memory store", () => {
     expect(added).toMatchObject({
       id: "11111111-1111-4111-8111-111111111111",
       type: "preference",
+      status: "active",
       title: "Coffee preference",
       tags: ["coffee", "food"],
       relativePath: "preferences/11111111-1111-4111-8111-111111111111.md",
     });
     expect(added.revision).toMatch(/^sha256:[0-9a-f]{64}$/);
     await expect(readFile(join(root, added.relativePath), "utf8")).resolves.toBe(
-      `---\nschema: 1\nid: "11111111-1111-4111-8111-111111111111"\ntype: "preference"\ntitle: "Coffee preference"\ntags: ["coffee","food"]\ncreated: "2026-07-19T03:30:00.000Z"\nupdated: "2026-07-19T03:30:00.000Z"\n---\nPrefers light-roast coffee.\n`,
+      `---\nschema: 1\nid: "11111111-1111-4111-8111-111111111111"\ntype: "preference"\nstatus: "active"\ntitle: "Coffee preference"\ntags: ["coffee","food"]\ncreated: "2026-07-19T03:30:00.000Z"\nupdated: "2026-07-19T03:30:00.000Z"\n---\nPrefers light-roast coffee.\n`,
     );
     await expect(store.read({ id: added.id })).resolves.toMatchObject({
       ...added,
@@ -190,6 +192,50 @@ describe("Markdown personal memory store", () => {
     await expect(store.read({ id: added.id })).resolves.toMatchObject({ body: "" });
   });
 
+  it("treats legacy notes without status as active and writes status on update", async () => {
+    const { root, store } = await fixture();
+    const added = await store.add({ type: "reference", title: "Legacy note", body: "Body" });
+    const path = join(root, added.relativePath);
+    await writeFile(path, (await readFile(path, "utf8")).replace('status: "active"\n', ""));
+
+    const legacy = await store.read({ id: added.id });
+    expect(legacy.status).toBe("active");
+
+    await store.update({ id: added.id, ifRevision: legacy.revision, patch: { title: "Updated legacy note" } });
+    expect(await readFile(path, "utf8")).toMatch(/^status: (?:"active"|active)$/mu);
+  });
+
+  it("updates lifecycle status and hides inactive notes unless explicitly requested", async () => {
+    const { store } = await fixture();
+    const archived = await store.add({ type: "reference", title: "Archived", body: "Old" });
+    const superseded = await store.add({ type: "preference", title: "Superseded", body: "Old" });
+
+    const archivedUpdate = await store.update({
+      id: archived.id,
+      ifRevision: archived.revision,
+      patch: { status: "archived" },
+    });
+    const supersededUpdate = await store.update({
+      id: superseded.id,
+      ifRevision: superseded.revision,
+      patch: { status: "superseded" },
+    });
+
+    expect(archivedUpdate.status).toBe("archived");
+    expect(supersededUpdate.status).toBe("superseded");
+    await expect(store.read({ id: archived.id })).resolves.toMatchObject({ status: "archived" });
+    await expect(store.list()).resolves.toEqual([]);
+    await expect(store.list({ statuses: ["archived", "superseded"] })).resolves.toEqual([
+      expect.objectContaining({ id: archived.id, status: "archived" }),
+      expect.objectContaining({ id: superseded.id, status: "superseded" }),
+    ]);
+    await expectMemoryError(
+      store.update({ id: archived.id, ifRevision: archivedUpdate.revision, patch: { status: "deleted" } }),
+      "INVALID_INPUT",
+    );
+    await expectMemoryError(store.list({ statuses: ["deleted"] }), "INVALID_INPUT");
+  });
+
   it("rejects stale revisions and leaves the prior note unchanged", async () => {
     const { root, store } = await fixture();
     const added = await store.add({ type: "event", title: "Example event", body: "At noon." });
@@ -252,6 +298,7 @@ describe("Markdown personal memory store", () => {
       "purchase",
       "reference",
     ]);
+    expect(MEMORY_STATUSES).toEqual(["active", "superseded", "archived"]);
     await expectMemoryError(store.add({ type: "secret", title: "No", body: "No" }), "INVALID_INPUT");
     await expectMemoryError(store.add({ type: "person", title: "x".repeat(201), body: "No" }), "INVALID_INPUT");
     await expectMemoryError(store.add({ type: "person", title: "Valid", tags: Array(33).fill("tag"), body: "No" }), "INVALID_INPUT");

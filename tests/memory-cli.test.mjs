@@ -1,10 +1,15 @@
-import { mkdtemp, readdir, rm, symlink } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { runMemoryCli } from "../.pi/skills/personal-memory/scripts/memory.mjs";
+import { commitMemoryMutation } from "../.pi/skills/personal-memory/scripts/git.mjs";
+
+const execFileAsync = promisify(execFile);
 
 function collector() {
   return {
@@ -25,7 +30,11 @@ afterEach(async () => {
   await rm(vault, { recursive: true, force: true });
 });
 
-async function run(command, request, { raw, vaultDir = vault, cwd } = {}) {
+async function run(
+  command,
+  request,
+  { raw, vaultDir = vault, cwd, stateDir, gitAutocommit = false, gitEnvironment = {} } = {},
+) {
   const stdout = collector();
   const stderr = collector();
   const input = raw ?? (request === undefined ? "" : `${JSON.stringify(request)}\n`);
@@ -34,10 +43,26 @@ async function run(command, request, { raw, vaultDir = vault, cwd } = {}) {
     stdin: Readable.from(input === "" ? [] : [input]),
     stdout,
     stderr,
-    env: { PI_TELEGRAM_MEMORY_DIR: vaultDir },
+    env: {
+      PI_TELEGRAM_MEMORY_DIR: vaultDir,
+      ...(stateDir ? { PI_TELEGRAM_BRIDGE_STATE_DIR: stateDir } : {}),
+      ...(gitAutocommit ? { PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT: "1" } : {}),
+      ...gitEnvironment,
+    },
     cwd: cwd ?? process.cwd(),
   });
   return { exitCode, stdout: stdout.text, stderr: stderr.text };
+}
+
+async function initializeGit(root = vault) {
+  await execFileAsync("git", ["init", "-q"], { cwd: root });
+  await execFileAsync("git", ["config", "user.name", "Memory Test"], { cwd: root });
+  await execFileAsync("git", ["config", "user.email", "memory@example.invalid"], { cwd: root });
+}
+
+async function gitLog(root = vault) {
+  const { stdout } = await execFileAsync("git", ["log", "--format=%s"], { cwd: root });
+  return stdout.trim().split("\n").filter(Boolean);
 }
 
 function parseLine(text) {
@@ -112,6 +137,227 @@ describe("personal memory CLI", () => {
     expect(envelope.data.body).toBeUndefined();
   });
 
+  it("does not discover or invoke Git while auto-commit is disabled", async () => {
+    const bin = join(vault, "bin");
+    const marker = join(vault, "git-ran");
+    await mkdir(bin);
+    await writeFile(
+      join(bin, "git"),
+      `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexit 1\n`,
+      { mode: 0o700 },
+    );
+
+    const result = await run("add", {
+      type: "preference",
+      title: "Synthetic beverage",
+      tags: [],
+      body: "Prefers synthetic tea.",
+    }, { gitEnvironment: { PATH: bin } });
+
+    expect(result.exitCode).toBe(0);
+    await expect(readdir(vault)).resolves.not.toContain("git-ran");
+  });
+
+  it("commits each enabled mutation locally without including unrelated files", async () => {
+    await initializeGit();
+    await writeFile(join(vault, "tracked-draft.md"), "original\n");
+    await execFileAsync("git", ["add", "--", "tracked-draft.md"], { cwd: vault });
+    await execFileAsync("git", ["commit", "-m", "initial"], { cwd: vault });
+    await writeFile(join(vault, "tracked-draft.md"), "edited outside memory CLI\n");
+    await execFileAsync("git", ["config", "commit.gpgsign", "true"], { cwd: vault });
+    await execFileAsync("git", ["config", "gpg.program", "/path/that/does/not/exist"], { cwd: vault });
+    const hookMarker = join(vault, "post-commit-ran");
+    const hook = join(vault, ".git", "hooks", "post-commit");
+    await writeFile(hook, `#!/bin/sh\ntouch ${JSON.stringify(hookMarker)}\n`, { mode: 0o700 });
+    const prepareHookMarker = join(vault, "prepare-commit-msg-ran");
+    const prepareHook = join(vault, ".git", "hooks", "prepare-commit-msg");
+    await writeFile(
+      prepareHook,
+      `#!/bin/sh\ntouch ${JSON.stringify(prepareHookMarker)}\n`,
+      { mode: 0o700 },
+    );
+    await writeFile(join(vault, "private-draft.md"), "not part of the managed mutation\n");
+
+    const addedResult = await run("add", {
+      type: "preference",
+      title: "Synthetic beverage",
+      tags: ["synthetic"],
+      body: "Prefers synthetic tea.",
+    }, { gitAutocommit: true });
+    expect(addedResult.exitCode).toBe(0);
+    const added = parseLine(addedResult.stdout).data;
+    expect(added.git).toEqual({ committed: true });
+
+    const updatedResult = await run("update", {
+      id: added.id,
+      ifRevision: added.revision,
+      patch: { body: "Prefers synthetic coffee." },
+    }, { gitAutocommit: true });
+    const updated = parseLine(updatedResult.stdout).data;
+    expect(updated.git).toEqual({ committed: true });
+
+    const happeningResult = await run("happening-add", {
+      id: added.id,
+      ifRevision: updated.revision,
+      date: "2026-07-20",
+      text: "Tried synthetic coffee.",
+    }, { gitAutocommit: true });
+    const happened = parseLine(happeningResult.stdout).data;
+    expect(happened.git).toEqual({ committed: true });
+
+    const deletedResult = await run("delete", {
+      id: added.id,
+      ifRevision: happened.revision,
+      confirmId: added.id,
+    }, { gitAutocommit: true });
+    expect(parseLine(deletedResult.stdout).data).toEqual({
+      id: added.id,
+      deleted: true,
+      git: { committed: true },
+    });
+    expect(await gitLog()).toEqual([
+      `memory: delete ${added.id}`,
+      `memory: update ${added.id}`,
+      `memory: update ${added.id}`,
+      `memory: add ${added.id}`,
+      "initial",
+    ]);
+    const { stdout: status } = await execFileAsync("git", ["status", "--short"], { cwd: vault });
+    expect(status).toBe(" M tracked-draft.md\n?? private-draft.md\n");
+    await expect(readdir(vault)).resolves.not.toContain("post-commit-ran");
+    await expect(readdir(vault)).resolves.not.toContain("prepare-commit-msg-ran");
+  });
+
+  it("ignores inherited Git repository and index routing variables", async () => {
+    await initializeGit();
+    const alternate = await mkdtemp(join(tmpdir(), "memory-alternate-git-"));
+    await initializeGit(alternate);
+    await writeFile(join(alternate, "staged.md"), "staged elsewhere\n");
+    await execFileAsync("git", ["add", "--", "staged.md"], { cwd: alternate });
+    try {
+      const result = await run("add", {
+        type: "preference",
+        title: "Synthetic beverage",
+        tags: [],
+        body: "Prefers synthetic tea.",
+      }, {
+        gitAutocommit: true,
+        gitEnvironment: {
+          GIT_DIR: join(alternate, ".git"),
+          GIT_WORK_TREE: alternate,
+          GIT_INDEX_FILE: join(alternate, ".git", "index"),
+        },
+      });
+      expect(result.exitCode).toBe(0);
+      expect(parseLine(result.stdout).data.git).toEqual({ committed: true });
+      expect(await gitLog()).toHaveLength(1);
+      const { stdout: alternateStatus } = await execFileAsync(
+        "git",
+        ["status", "--short"],
+        { cwd: alternate },
+      );
+      expect(alternateStatus).toBe("A  staged.md\n");
+    } finally {
+      await rm(alternate, { recursive: true, force: true });
+    }
+  });
+
+  it("requires the configured vault to be the exact Git worktree root", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "memory-parent-git-"));
+    const nestedVault = join(parent, "memory");
+    await mkdir(nestedVault);
+    await initializeGit(parent);
+    try {
+      const result = await run("add", {
+        type: "preference",
+        title: "Synthetic beverage",
+        tags: [],
+        body: "Prefers synthetic tea.",
+      }, { vaultDir: nestedVault, gitAutocommit: true });
+      expect(result.exitCode).toBe(3);
+      expect(parseLine(result.stderr).error).toEqual({
+        code: "GIT_AUTOCOMMIT_UNAVAILABLE",
+        message: "Memory Git auto-commit is unavailable",
+      });
+      expect(await readdir(nestedVault)).toEqual([]);
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses an enabled mutation while the Git index contains staged changes", async () => {
+    await initializeGit();
+    await writeFile(join(vault, "staged.md"), "staged\n");
+    await execFileAsync("git", ["add", "--", "staged.md"], { cwd: vault });
+    const alternateIndex = join(vault, ".git", "alternate-index");
+    await execFileAsync("git", ["read-tree", "--empty"], {
+      cwd: vault,
+      env: { ...process.env, GIT_INDEX_FILE: alternateIndex },
+    });
+
+    const result = await run("add", {
+      type: "preference",
+      title: "Synthetic beverage",
+      tags: [],
+      body: "Prefers synthetic tea.",
+    }, {
+      gitAutocommit: true,
+      gitEnvironment: { GIT_INDEX_FILE: alternateIndex },
+    });
+
+    expect(result.exitCode).toBe(3);
+    expect(parseLine(result.stderr).error.code).toBe("GIT_AUTOCOMMIT_UNAVAILABLE");
+    expect(await readdir(vault)).toEqual(expect.not.arrayContaining(["preferences"]));
+  });
+
+  it("preserves delete validation ordering when Git auto-commit is enabled", async () => {
+    await initializeGit();
+    const result = await run("delete", {
+      id: "2f5f167d-7a18-4457-8de7-f2f801f1e934",
+    }, { gitAutocommit: true });
+    expect(result.exitCode).toBe(3);
+    expect(parseLine(result.stderr).error.code).toBe("CONFIRMATION_REQUIRED");
+  });
+
+  it("reports post-write Git failure without disguising a persisted mutation as a failure", async () => {
+    await initializeGit();
+    await execFileAsync("git", ["config", "user.name", ""], { cwd: vault });
+    await execFileAsync("git", ["config", "user.email", ""], { cwd: vault });
+
+    const result = await run("add", {
+      type: "preference",
+      title: "Synthetic beverage",
+      tags: [],
+      body: "Prefers synthetic tea.",
+    }, { gitAutocommit: true });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    const data = parseLine(result.stdout).data;
+    expect(data.git).toEqual({ committed: false, code: "GIT_COMMIT_FAILED" });
+    expect(await readdir(join(vault, "preferences"))).toEqual([`${data.id}.md`]);
+  });
+
+  it("bounds Git execution that stalls after a memory mutation", async () => {
+    const bin = join(vault, "bin");
+    await mkdir(bin);
+    await writeFile(join(bin, "git"), "#!/bin/sh\nexec sleep 5\n", { mode: 0o700 });
+    const started = Date.now();
+
+    const result = await commitMemoryMutation(
+      vault,
+      {
+        action: "update",
+        id: "2f5f167d-7a18-4457-8de7-f2f801f1e934",
+        relativePath: "preferences/2f5f167d-7a18-4457-8de7-f2f801f1e934.md",
+      },
+      { env: { ...process.env, PATH: bin }, timeoutMs: 25 },
+    );
+
+    expect(result).toEqual({ committed: false, code: "GIT_COMMIT_FAILED" });
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
   it("reads a note back including its body", async () => {
     const added = await addNote();
     const { exitCode, stdout } = await run("read", { id: added.id });
@@ -182,6 +428,26 @@ describe("personal memory CLI", () => {
     expect(warnings).toEqual([]);
   });
 
+  it("updates status and requires explicit filters to recall inactive notes", async () => {
+    const added = await addNote();
+    const updated = await run("update", {
+      id: added.id,
+      ifRevision: added.revision,
+      patch: { status: "archived" },
+    });
+    expect(updated.exitCode).toBe(0);
+    expect(parseLine(updated.stdout).data.status).toBe("archived");
+
+    expect(parseLine((await run("list", {})).stdout).data.memories).toEqual([]);
+    expect(parseLine((await run("search", { query: "synthetic" })).stdout).data.results).toEqual([]);
+    expect(parseLine((await run("list", { statuses: ["archived"] })).stdout).data.memories).toEqual([
+      expect.objectContaining({ id: added.id, status: "archived" }),
+    ]);
+    expect(
+      parseLine((await run("search", { query: "synthetic", statuses: ["archived"] })).stdout).data.results,
+    ).toEqual([expect.objectContaining({ id: added.id, status: "archived" })]);
+  });
+
   it("returns the exact core projection through the CLI", async () => {
     await addNote({ body: "Prefers synthetic tea. #core" });
 
@@ -212,6 +478,28 @@ describe("personal memory CLI", () => {
         core: { valid: true },
       },
     });
+  });
+
+  it("validates source footnotes against the configured bridge session directory", async () => {
+    const timestamp = "2026-07-19T03:30:00.000Z";
+    const stateDir = join(vault, "bridge-state");
+    const sessionDir = join(stateDir, "sessions");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, "2026-07-19T03-30-00-000Z_session-1.jsonl"),
+      [
+        JSON.stringify({ type: "session", version: 3, id: "session-1", timestamp, cwd: "/repo" }),
+        JSON.stringify({ type: "message", id: "abcdef12", parentId: null, timestamp, message: {} }),
+      ].join("\n") + "\n",
+    );
+    await addNote({
+      body: `Sourced fact.[^source]\n\n[^source]: Pi session \`session-1\`, entry \`abcdef12\`, \`${timestamp}\`.`,
+    });
+
+    const result = await run("lint", {}, { stateDir });
+
+    expect(result.exitCode).toBe(0);
+    expect(parseLine(result.stdout).data.valid).toBe(true);
   });
 
   it("adds dated happenings to an entity note in chronological order", async () => {

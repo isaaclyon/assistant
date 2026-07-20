@@ -96,8 +96,19 @@ Optional environment variables:
 | `PI_TELEGRAM_CODEX_CONFIG` | `<stateDir>/pi-codex-conversion.json` | Telegram-only Codex conversion settings |
 | `PI_BIN` | `pi` | Pi executable used only by `telegram:setup` |
 | `PI_TELEGRAM_MEMORY_DIR` | `~/.local/share/pi-telegram-bridge/memory` | Personal memory vault (absolute, or relative to the user home) |
+| `PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT` | `0` | Set to `1` to commit agent-mediated memory mutations locally |
 
-Re-run `npm run service:install` after changing these variables so the generated unit captures the new paths. The exception is `PI_TELEGRAM_MEMORY_DIR`: the memory CLI reads it on each invocation, so no service regeneration is needed.
+The service reads an optional durable environment file at
+`~/.config/pi-telegram-bridge/environment`. Put persistent memory overrides
+there so deployments retain them:
+
+```text
+PI_TELEGRAM_MEMORY_DIR=/home/isaaclyon/.local/share/pi-telegram-bridge/memory
+PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT=1
+```
+
+Keep the file mode `0600` and restart the service after changing it. Shell
+invocations of the memory CLI may still set these variables directly.
 
 The Codex adapter defaults to normal mode for the bridge's `openai-codex` model, exposing `exec_command`, `write_stdin`, `apply_patch`, image viewing, and web search. Image generation is disabled. Its settings are independent of normal Pi sessions. The pinned extension receives this separate path through the version-checked patch in `scripts/patch-codex-conversion.mjs`; update that patch deliberately when changing the extension version.
 
@@ -112,6 +123,17 @@ created mode 0700 and notes mode 0600. Open the directory directly in Obsidian
 to browse or edit notes — human titles are in frontmatter, filenames are
 UUIDs. Managed notes require `schema: 1` and accept normal YAML frontmatter;
 CLI updates preserve its meaning and comments but may normalize formatting.
+Lifecycle status is `active`, `superseded`, or `archived`; normal queries and
+core memory use active notes unless inactive statuses are explicitly requested.
+Legacy notes without status remain active and gain the field on their next CLI
+mutation.
+
+When `PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT=1`, the vault must itself be the Git
+worktree root and have no staged changes. Successful agent-mediated mutations
+create a local commit containing only the affected note, with no automatic
+push. Other unstaged Obsidian edits are left alone. A post-write Git failure is
+reported separately because the canonical note has already changed. Deleting a
+note does not erase it from Git history.
 
 All access goes through the tracked skill-local CLI, which takes one JSON
 request line on stdin and returns one bounded JSON line:
@@ -126,16 +148,21 @@ The quoted heredoc closes stdin automatically and keeps note content out of
 argv and the process list; avoid `printf '<json>' | …`, which does not.
 
 Subcommands: `add`, `read`, `update`, `delete`, `search`, `list`,
-`happening-add`, `happenings`, `lint`, `core`. `lint` validates the whole vault;
-`core` previews a deterministic, title-prefixed projection of Markdown leaf
+`happening-add`, `happenings`, `lint`, `core`. `lint` validates the whole vault,
+including reserved `[^source]` footnotes against bridge session IDs, entry IDs,
+and timestamps. `core` previews a deterministic, title-prefixed projection of Markdown leaf
 blocks marked `#core`, capped at 4,000 Unicode code points without truncation.
 The always-on bridge recompiles and appends that projection to the system prompt
 before every Telegram agent turn; ordinary Pi sessions in this repository do
 not receive it. See
 [`.pi/skills/personal-memory/references/memory-format.md`](.pi/skills/personal-memory/references/memory-format.md)
-for the protocol and note format, and [ADR-0011](docs/adr/0011-store-personal-memory-in-a-private-markdown-vault.md)
-and [ADR-0014](docs/adr/0014-compile-schema-checked-core-memory-from-markdown.md)
-and [ADR-0015](docs/adr/0015-inject-core-memory-only-in-the-bridge-runtime.md)
+for the protocol and note format, and
+[ADR-0011](docs/adr/0011-store-personal-memory-in-a-private-markdown-vault.md),
+[ADR-0014](docs/adr/0014-compile-schema-checked-core-memory-from-markdown.md),
+[ADR-0015](docs/adr/0015-inject-core-memory-only-in-the-bridge-runtime.md),
+[ADR-0016](docs/adr/0016-filter-personal-memory-by-lifecycle-status.md),
+[ADR-0017](docs/adr/0017-validate-personal-memory-session-provenance.md), and
+[ADR-0018](docs/adr/0018-commit-agent-mediated-memory-mutations-locally.md)
 for the architecture decisions.
 
 Boundaries to know:
@@ -144,7 +171,7 @@ Boundaries to know:
   card numbers) are refused.
 - "Forget" permanently deletes the canonical note after a separate
   confirmation. It does not erase Telegram/Pi conversation history, filesystem
-  backups, or third-party backups.
+  backups, Git history, or third-party backups.
 - Backups of the vault are the user's responsibility; it is an ordinary
   directory of Markdown files.
 

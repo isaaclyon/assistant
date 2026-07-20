@@ -2,6 +2,7 @@ import { lstat, readFile, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import {
+  MEMORY_STATUSES,
   MEMORY_TYPES,
   MEMORY_TYPE_FOLDERS,
   MAX_MEMORY_NOTE_BYTES,
@@ -43,7 +44,11 @@ function validateRequest(request) {
   if (!Array.isArray(types) || types.some((type) => !MEMORY_TYPES.includes(type))) {
     invalid("Memory search types are invalid");
   }
-  return { query: request.query, limit, types: [...new Set(types)] };
+  const statuses = request.statuses ?? ["active"];
+  if (!Array.isArray(statuses) || statuses.some((status) => !MEMORY_STATUSES.includes(status))) {
+    invalid("Memory search statuses are invalid");
+  }
+  return { query: request.query, limit, types: [...new Set(types)], statuses: [...new Set(statuses)] };
 }
 
 function validateHappeningsRequest(request) {
@@ -57,6 +62,10 @@ function validateHappeningsRequest(request) {
   const types = request.types ?? MEMORY_TYPES;
   if (!Array.isArray(types) || types.some((type) => !MEMORY_TYPES.includes(type))) {
     invalid("Happenings memory types are invalid");
+  }
+  const statuses = request.statuses ?? ["active"];
+  if (!Array.isArray(statuses) || statuses.some((status) => !MEMORY_STATUSES.includes(status))) {
+    invalid("Happenings memory statuses are invalid");
   }
 
   const dates = {};
@@ -73,7 +82,15 @@ function validateHappeningsRequest(request) {
   }
   if (dates.from && dates.to && dates.from > dates.to) invalid("Happenings date range is invalid");
   const queryTokens = [...new Set(tokenize(query))];
-  return { query, queryTokens, limit, types: [...new Set(types)], from: dates.from, to: dates.to };
+  return {
+    query,
+    queryTokens,
+    limit,
+    types: [...new Set(types)],
+    statuses: [...new Set(statuses)],
+    from: dates.from,
+    to: dates.to,
+  };
 }
 
 function scoreNote(note, query, tokens) {
@@ -159,7 +176,7 @@ export function createMarkdownMemorySearchBackend(options) {
 
   return {
     async search(request) {
-      const { query, limit, types } = validateRequest(request);
+      const { query, limit, types, statuses } = validateRequest(request);
       const queryTokens = [...new Set(tokenize(query))];
       if (queryTokens.length === 0) invalid("Memory search query is invalid");
 
@@ -205,6 +222,7 @@ export function createMarkdownMemorySearchBackend(options) {
           const note = parseMarkdownMemoryNote(raw, { id: candidate.id, type: candidate.type });
           if (seen.has(note.id)) continue;
           seen.add(note.id);
+          if (!statuses.includes(note.status)) continue;
           const score = scoreNote(note, query, queryTokens);
           if (score === null) continue;
           results.push({
@@ -212,6 +230,7 @@ export function createMarkdownMemorySearchBackend(options) {
             id: note.id,
             relativePath: candidate.relativePath,
             type: note.type,
+            status: note.status,
             title: note.title,
             tags: note.tags,
             created: note.created,
@@ -240,7 +259,7 @@ export function createMarkdownMemorySearchBackend(options) {
     },
 
     async happenings(request) {
-      const { queryTokens, limit, types, from, to } = validateHappeningsRequest(request);
+      const { queryTokens, limit, types, statuses, from, to } = validateHappeningsRequest(request);
       const candidates = [];
       const warningCandidates = [];
       for (const type of types) {
@@ -282,6 +301,7 @@ export function createMarkdownMemorySearchBackend(options) {
           const note = parseMarkdownMemoryNote(raw, { id: candidate.id, type: candidate.type });
           if (seen.has(note.id)) continue;
           seen.add(note.id);
+          if (!statuses.includes(note.status)) continue;
           const happenings = parseHappenings(note.body).entries;
           happenings.forEach((happening, index) => {
             if (from && happening.date < from) return;
@@ -292,6 +312,7 @@ export function createMarkdownMemorySearchBackend(options) {
               id: note.id,
               relativePath: candidate.relativePath,
               type: note.type,
+              status: note.status,
               title: note.title,
               date: happening.date,
               text: happening.text,

@@ -16,6 +16,7 @@ describe("renderServiceUnit", () => {
       },
       nodePath: "/opt/node/bin/node",
       projectDir: "/srv/pi bridge",
+      environmentFilePath: "/home/test/.config/pi-telegram-bridge/environment",
     });
 
     expect(unit).toContain(
@@ -26,6 +27,13 @@ describe("renderServiceUnit", () => {
     expect(unit).toContain('Environment="PI_TELEGRAM_BRIDGE_CWD=/home/test"');
     expect(unit).toContain(
       'Environment="PI_TELEGRAM_CODEX_CONFIG=/home/test/.config/telegram-codex.json"',
+    );
+    expect(unit).toContain(
+      'EnvironmentFile=-"/home/test/.config/pi-telegram-bridge/environment"',
+    );
+    expect(unit).not.toContain("PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT=");
+    expect(unit.indexOf("EnvironmentFile=")).toBeGreaterThan(
+      unit.indexOf("PI_TELEGRAM_CODEX_CONFIG="),
     );
     expect(unit).toContain("UMask=0077");
   });

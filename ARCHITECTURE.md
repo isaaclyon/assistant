@@ -21,6 +21,7 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 | Telegram Codex settings | `~/.local/state/pi-telegram-bridge/pi-codex-conversion.json` | Codex conversion extension |
 | Telegram token/pairing/offset | `~/.pi/agent/telegram.json` | pi-telegram |
 | Telegram polling ownership | `~/.pi/agent/locks.json` | pi-telegram |
+| Bridge environment overrides | `~/.config/pi-telegram-bridge/environment` | User/systemd |
 | Personal memory vault | `~/.local/share/pi-telegram-bridge/memory` (override: `PI_TELEGRAM_MEMORY_DIR`) | `personal-memory` skill CLI |
 | Process logs | user journal | systemd |
 
@@ -35,10 +36,25 @@ host's token-guarded process-local runtime marker is bound; ordinary Pi sessions
 in this repository do not receive it. Compilation errors are logged by Pi and
 the turn continues without core memory. There is no generated file, memory
 daemon, database, or cache. Any future full-text index must be derived and
-disposable, rebuilt from the Markdown. See
+disposable, rebuilt from the Markdown. Notes have active, superseded, or
+archived lifecycle status. Normal retrieval and core compilation select active
+notes; inactive notes remain available to
+explicitly filtered queries and stable-ID reads. See
 [ADR-0011](docs/adr/0011-store-personal-memory-in-a-private-markdown-vault.md)
 and [ADR-0014](docs/adr/0014-compile-schema-checked-core-memory-from-markdown.md)
-and [ADR-0015](docs/adr/0015-inject-core-memory-only-in-the-bridge-runtime.md).
+and [ADR-0015](docs/adr/0015-inject-core-memory-only-in-the-bridge-runtime.md)
+and [ADR-0016](docs/adr/0016-filter-personal-memory-by-lifecycle-status.md).
+Vault lint also validates reserved source footnotes against the bridge's
+append-only Pi session IDs, entry IDs, and timestamps without reading session
+message content into its report. This validation is not part of per-turn core
+compilation; see
+[ADR-0017](docs/adr/0017-validate-personal-memory-session-provenance.md).
+When explicitly enabled, the CLI requires the vault itself to be a clean-index
+Git worktree and commits only the note changed by each agent-mediated mutation.
+The bridge reads this opt-in from a user-owned environment file outside release
+deployment, and Git children discard ambient repository-routing variables,
+hooks, signing, and unbounded execution. It never pushes; see
+[ADR-0018](docs/adr/0018-commit-agent-mediated-memory-mutations-locally.md).
 
 ## Startup
 

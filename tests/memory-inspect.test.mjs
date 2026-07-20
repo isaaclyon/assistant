@@ -41,7 +41,7 @@ describe("personal memory inspection", () => {
       type: "preference",
       title: "Response style",
       body: [
-        `Prefers concise replies with [[${person.id}|Emma]] and [the reference](https://example.com). [^source] #core`,
+        `Prefers concise replies with [[${person.id}|Emma]] and [the reference](https://example.com). [^citation] #core`,
         "",
         "`#core` and [linked #core](https://example.com) are not markers.",
         "",
@@ -58,7 +58,7 @@ describe("personal memory inspection", () => {
         "hidden #core",
         "```",
         "",
-        "[^source]: Citation metadata #core",
+        "[^citation]: Citation metadata #core",
       ].join("\n"),
     });
 
@@ -74,6 +74,32 @@ describe("personal memory inspection", () => {
         "- Response style: Important preference",
     );
     expect(compiled.characters).toBe(Array.from(compiled.text).length);
+  });
+
+  it("includes only active notes in core memory", async () => {
+    const { root, store } = await fixture();
+    await store.add({ type: "preference", title: "Active", body: "Current preference. #core" });
+    await store.add({
+      type: "preference",
+      status: "superseded",
+      title: "Superseded",
+      body: "Old preference. #core",
+    });
+    await store.add({
+      type: "reference",
+      status: "archived",
+      title: "Archived",
+      body: "Historical context with [[aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa]]. #core",
+    });
+
+    const compiled = await compileCoreMemory({ root });
+    const report = await lintMemoryVault({ root });
+
+    expect(compiled.text).toContain("Current preference.");
+    expect(compiled.text).not.toContain("Old preference.");
+    expect(compiled.text).not.toContain("Historical context.");
+    expect(report.errors).toContainEqual(expect.objectContaining({ code: "BROKEN_LINK", affectsCore: false }));
+    expect(report.core.valid).toBe(true);
   });
 
   it("reports non-core lint errors without disabling a valid core projection", async () => {
@@ -143,6 +169,116 @@ describe("personal memory inspection", () => {
     expect(report.errors.map(({ code, relativePath }) => [code, relativePath])).toEqual([
       ["INVALID_FILENAME", "people/not-a-uuid.md"],
       ["BROKEN_LINK", added.relativePath],
+    ]);
+  });
+
+  it("validates source footnotes against Pi session entries without affecting core", async () => {
+    const { sandbox, root, store } = await fixture();
+    const sessionRoot = join(sandbox, "sessions");
+    const timestamp = "2026-07-19T03:30:00.000Z";
+    await mkdir(sessionRoot);
+    await writeFile(
+      join(sessionRoot, "2026-07-19T03-30-00-000Z_session-1.jsonl"),
+      [
+        JSON.stringify({ type: "session", version: 3, id: "session-1", timestamp, cwd: "/repo" }),
+        JSON.stringify({
+          type: "message",
+          id: "abcdef12",
+          parentId: null,
+          timestamp,
+          message: { role: "user", content: "Synthetic evidence" },
+        }),
+      ].join("\n") + "\n",
+    );
+    await store.add({
+      type: "reference",
+      title: "Sourced fact",
+      body: [
+        "A sourced fact.[^source] #core",
+        "",
+        `[^source]: Pi session \`session-1\`, entry \`abcdef12\`, \`${timestamp}\`.`,
+        "[^citation]: An ordinary Markdown footnote.",
+        "[^source-a-b]: Also an ordinary Markdown footnote.",
+      ].join("\n"),
+    });
+
+    const report = await lintMemoryVault({ root, sessionRoot });
+    const compiled = await compileCoreMemory({ root, sessionRoot: join(sandbox, "missing") });
+
+    expect(report.valid).toBe(true);
+    expect(compiled.text).toContain("A sourced fact.");
+  });
+
+  it("bounds source session scans and rejects duplicate referenced entry IDs", async () => {
+    const { sandbox, root, store } = await fixture();
+    const sessionRoot = join(sandbox, "sessions");
+    const timestamp = "2026-07-19T03:30:00.000Z";
+    await mkdir(sessionRoot);
+    await writeFile(
+      join(sessionRoot, "2026-07-19T03-30-00-000Z_duplicate-session.jsonl"),
+      [
+        JSON.stringify({ type: "session", version: 3, id: "duplicate-session", timestamp, cwd: "/repo" }),
+        JSON.stringify({ type: "message", id: "abcdef12", parentId: null, timestamp, message: {} }),
+        JSON.stringify({ type: "message", id: "abcdef12", parentId: null, timestamp, message: {} }),
+      ].join("\n") + "\n",
+    );
+    await store.add({
+      type: "reference",
+      title: "Duplicate source",
+      body: `Claim.[^source]\n\n[^source]: Pi session \`duplicate-session\`, entry \`abcdef12\`, \`${timestamp}\`.`,
+    });
+
+    const duplicate = await lintMemoryVault({ root, sessionRoot });
+    const limited = await lintMemoryVault({ root, sessionRoot, maxScannedSessionBytes: 32 });
+
+    expect(duplicate.errors).toContainEqual(expect.objectContaining({
+      code: "SOURCE_SESSION_INVALID",
+      affectsCore: false,
+    }));
+    expect(limited.errors).toContainEqual(expect.objectContaining({
+      code: "SOURCE_SESSION_SCAN_LIMIT_EXCEEDED",
+      affectsCore: false,
+    }));
+  });
+
+  it("reports malformed and unresolved source footnotes with sanitized findings", async () => {
+    const { sandbox, root, store } = await fixture();
+    const sessionRoot = join(sandbox, "sessions");
+    const timestamp = "2026-07-19T03:30:00.000Z";
+    await mkdir(sessionRoot);
+    await writeFile(
+      join(sessionRoot, "2026-07-19T03-30-00-000Z_session-1.jsonl"),
+      [
+        JSON.stringify({ type: "session", version: 3, id: "session-1", timestamp, cwd: "/repo" }),
+        JSON.stringify({ type: "message", id: "abcdef12", parentId: null, timestamp, message: {} }),
+      ].join("\n") + "\n",
+    );
+    const added = await store.add({
+      type: "reference",
+      title: "Broken sources",
+      body: [
+        "Malformed.[^source-malformed]",
+        "Missing definition.[^source-undefined]",
+        "Missing session.[^source-session]",
+        "Missing entry.[^source-entry]",
+        "Wrong timestamp.[^source-time]",
+        "",
+        "[^source-malformed]: Session details unavailable.",
+        `[^source-session]: Pi session \`missing-session\`, entry \`abcdef12\`, \`${timestamp}\`.`,
+        `[^source-entry]: Pi session \`session-1\`, entry \`deadbeef\`, \`${timestamp}\`.`,
+        "[^source-time]: Pi session `session-1`, entry `abcdef12`, `2026-07-20T03:30:00.000Z`.",
+      ].join("\n"),
+    });
+
+    const report = await lintMemoryVault({ root, sessionRoot });
+
+    expect(report.core.valid).toBe(true);
+    expect(report.errors.map(({ code, relativePath, affectsCore }) => ({ code, relativePath, affectsCore }))).toEqual([
+      { code: "MALFORMED_SOURCE_ANCHOR", relativePath: added.relativePath, affectsCore: false },
+      { code: "SOURCE_DEFINITION_MISSING", relativePath: added.relativePath, affectsCore: false },
+      { code: "SOURCE_ENTRY_NOT_FOUND", relativePath: added.relativePath, affectsCore: false },
+      { code: "SOURCE_SESSION_NOT_FOUND", relativePath: added.relativePath, affectsCore: false },
+      { code: "SOURCE_TIMESTAMP_MISMATCH", relativePath: added.relativePath, affectsCore: false },
     ]);
   });
 

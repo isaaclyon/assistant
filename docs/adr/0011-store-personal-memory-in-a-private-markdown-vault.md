@@ -1,7 +1,7 @@
 ---
 status: accepted
 relates-to: ADR-0005, ADR-0009
-superseded-in-part-by: ADR-0014
+superseded-in-part-by: ADR-0014, ADR-0018
 ---
 
 # Store personal memory in a private Markdown vault
