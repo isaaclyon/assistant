@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import {
   MEMORY_TYPES,
   MEMORY_TYPE_FOLDERS,
+  MAX_MEMORY_NOTE_BYTES,
   MemoryError,
   parseMarkdownMemoryNote,
   parseHappenings,
@@ -121,11 +122,20 @@ function snippet(body, tokens) {
   return compact.slice(start, start + MAX_SNIPPET_LENGTH);
 }
 
+function warnDuplicateCandidates(candidates, warnings) {
+  const seen = new Set();
+  for (const candidate of candidates) {
+    if (seen.has(candidate.id)) warnings.push({ code: "DUPLICATE_ID", relativePath: candidate.relativePath });
+    else seen.add(candidate.id);
+  }
+}
+
 async function entryKind(path) {
   try {
     const stats = await lstat(path);
     if (stats.isSymbolicLink()) return "unsafe";
     if (stats.isDirectory()) return "directory";
+    if (stats.isFile() && stats.size > MAX_MEMORY_NOTE_BYTES) return "oversized";
     return stats.isFile() ? "file" : "unsafe";
   } catch (error) {
     if (error && typeof error === "object" && error.code === "ENOENT") return "missing";
@@ -179,25 +189,26 @@ export function createMarkdownMemorySearchBackend(options) {
       }
       candidates.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
       const scanTruncated = candidates.length > maxScannedNotes;
+      const scannedCandidates = candidates.slice(0, maxScannedNotes);
+      warnDuplicateCandidates(scannedCandidates, warningCandidates);
       const results = [];
       const seen = new Set();
 
-      for (const candidate of candidates.slice(0, maxScannedNotes)) {
-        if (seen.has(candidate.id)) {
-          warningCandidates.push({ code: "DUPLICATE_ID", relativePath: candidate.relativePath });
-          continue;
-        }
-        seen.add(candidate.id);
-        if (await entryKind(candidate.path) !== "file") {
-          warningCandidates.push({ code: "UNSAFE_ENTRY", relativePath: candidate.relativePath });
+      for (const candidate of scannedCandidates) {
+        const kind = await entryKind(candidate.path);
+        if (kind !== "file") {
+          warningCandidates.push({ code: kind === "oversized" ? "MALFORMED_NOTE" : "UNSAFE_ENTRY", relativePath: candidate.relativePath });
           continue;
         }
         try {
           const raw = await readFile(candidate.path, "utf8");
           const note = parseMarkdownMemoryNote(raw, { id: candidate.id, type: candidate.type });
+          if (seen.has(note.id)) continue;
+          seen.add(note.id);
           const score = scoreNote(note, query, queryTokens);
           if (score === null) continue;
           results.push({
+            schema: note.schema,
             id: note.id,
             relativePath: candidate.relativePath,
             type: note.type,
@@ -255,22 +266,22 @@ export function createMarkdownMemorySearchBackend(options) {
       }
       candidates.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
       const scanTruncated = candidates.length > maxScannedNotes;
+      const scannedCandidates = candidates.slice(0, maxScannedNotes);
+      warnDuplicateCandidates(scannedCandidates, warningCandidates);
       const results = [];
       const seen = new Set();
 
-      for (const candidate of candidates.slice(0, maxScannedNotes)) {
-        if (seen.has(candidate.id)) {
-          warningCandidates.push({ code: "DUPLICATE_ID", relativePath: candidate.relativePath });
-          continue;
-        }
-        seen.add(candidate.id);
-        if (await entryKind(candidate.path) !== "file") {
-          warningCandidates.push({ code: "UNSAFE_ENTRY", relativePath: candidate.relativePath });
+      for (const candidate of scannedCandidates) {
+        const kind = await entryKind(candidate.path);
+        if (kind !== "file") {
+          warningCandidates.push({ code: kind === "oversized" ? "MALFORMED_NOTE" : "UNSAFE_ENTRY", relativePath: candidate.relativePath });
           continue;
         }
         try {
           const raw = await readFile(candidate.path, "utf8");
           const note = parseMarkdownMemoryNote(raw, { id: candidate.id, type: candidate.type });
+          if (seen.has(note.id)) continue;
+          seen.add(note.id);
           const happenings = parseHappenings(note.body).entries;
           happenings.forEach((happening, index) => {
             if (from && happening.date < from) return;

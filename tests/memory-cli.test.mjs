@@ -44,7 +44,11 @@ function parseLine(text) {
   const lines = text.split("\n");
   expect(lines).toHaveLength(2);
   expect(lines[1]).toBe("");
-  return JSON.parse(lines[0]);
+  try {
+    return JSON.parse(lines[0]);
+  } catch {
+    throw new Error("Expected one JSON response line");
+  }
 }
 
 async function addNote(overrides = {}) {
@@ -178,6 +182,38 @@ describe("personal memory CLI", () => {
     expect(warnings).toEqual([]);
   });
 
+  it("returns the exact core projection through the CLI", async () => {
+    await addNote({ body: "Prefers synthetic tea. #core" });
+
+    const result = await run("core", {});
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(parseLine(result.stdout).data).toMatchObject({
+      text: expect.stringContaining("- Synthetic beverage: Prefers synthetic tea."),
+      characters: expect.any(Number),
+      budget: 4_000,
+      warning: false,
+    });
+  });
+
+  it("emits a complete lint report on stdout and exits 3 when invalid", async () => {
+    await addNote({ body: "Related: [[Missing title]]" });
+
+    const result = await run("lint", {});
+
+    expect(result.exitCode).toBe(3);
+    expect(result.stderr).toBe("");
+    expect(parseLine(result.stdout)).toMatchObject({
+      ok: true,
+      data: {
+        valid: false,
+        errors: [expect.objectContaining({ code: "INVALID_LINK", affectsCore: false })],
+        core: { valid: true },
+      },
+    });
+  });
+
   it("adds dated happenings to an entity note in chronological order", async () => {
     const added = await addNote({ type: "reference", title: "Tesla Model Y Pearl", body: "Our car.\n" });
 
@@ -269,12 +305,13 @@ describe("personal memory CLI", () => {
   it("refuses a symlinked vault root that resolves into a forbidden root", async () => {
     const linkPath = join(vault, "vault-link");
     await symlink(process.cwd(), linkPath);
-    for (const command of ["search", "read"]) {
+    for (const command of ["search", "read", "lint", "core"]) {
+      let request = {};
+      if (command === "search") request = { query: "synthetic" };
+      else if (command === "read") request = { id: "2f5f167d-7a18-4457-8de7-f2f801f1e934" };
       const { exitCode, stdout, stderr } = await run(
         command,
-        command === "search"
-          ? { query: "synthetic" }
-          : { id: "2f5f167d-7a18-4457-8de7-f2f801f1e934" },
+        request,
         { vaultDir: linkPath },
       );
       expect(exitCode).toBe(3);

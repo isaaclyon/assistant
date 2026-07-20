@@ -110,7 +110,8 @@ lists, recipes, purchases, and references. The vault lives outside the
 checkout and releases, so it survives deployments; managed directories are
 created mode 0700 and notes mode 0600. Open the directory directly in Obsidian
 to browse or edit notes — human titles are in frontmatter, filenames are
-UUIDs.
+UUIDs. Managed notes require `schema: 1` and accept normal YAML frontmatter;
+CLI updates preserve its meaning and comments but may normalize formatting.
 
 All access goes through the tracked skill-local CLI, which takes one JSON
 request line on stdin and returns one bounded JSON line:
@@ -124,10 +125,18 @@ EOF
 The quoted heredoc closes stdin automatically and keeps note content out of
 argv and the process list; avoid `printf '<json>' | …`, which does not.
 
-Subcommands: `add`, `read`, `update`, `delete`, `search`, `list`. See
+Subcommands: `add`, `read`, `update`, `delete`, `search`, `list`,
+`happening-add`, `happenings`, `lint`, `core`. `lint` validates the whole vault;
+`core` previews a deterministic, title-prefixed projection of Markdown leaf
+blocks marked `#core`, capped at 4,000 Unicode code points without truncation.
+The always-on bridge recompiles and appends that projection to the system prompt
+before every Telegram agent turn; ordinary Pi sessions in this repository do
+not receive it. See
 [`.pi/skills/personal-memory/references/memory-format.md`](.pi/skills/personal-memory/references/memory-format.md)
 for the protocol and note format, and [ADR-0011](docs/adr/0011-store-personal-memory-in-a-private-markdown-vault.md)
-for the architecture decision.
+and [ADR-0014](docs/adr/0014-compile-schema-checked-core-memory-from-markdown.md)
+and [ADR-0015](docs/adr/0015-inject-core-memory-only-in-the-bridge-runtime.md)
+for the architecture decisions.
 
 Boundaries to know:
 

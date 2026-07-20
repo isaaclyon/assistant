@@ -12,10 +12,10 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { parseDocument } from "yaml";
 
 import {
   MEMORY_TYPES,
-  MemoryError,
   createMarkdownMemoryStore,
 } from "../.pi/skills/personal-memory/scripts/store.mjs";
 
@@ -66,7 +66,7 @@ describe("Markdown personal memory store", () => {
     });
     expect(added.revision).toMatch(/^sha256:[0-9a-f]{64}$/);
     await expect(readFile(join(root, added.relativePath), "utf8")).resolves.toBe(
-      `---\nid: "11111111-1111-4111-8111-111111111111"\ntype: "preference"\ntitle: "Coffee preference"\ntags: ["coffee","food"]\ncreated: "2026-07-19T03:30:00.000Z"\nupdated: "2026-07-19T03:30:00.000Z"\n---\nPrefers light-roast coffee.\n`,
+      `---\nschema: 1\nid: "11111111-1111-4111-8111-111111111111"\ntype: "preference"\ntitle: "Coffee preference"\ntags: ["coffee","food"]\ncreated: "2026-07-19T03:30:00.000Z"\nupdated: "2026-07-19T03:30:00.000Z"\n---\nPrefers light-roast coffee.\n`,
     );
     await expect(store.read({ id: added.id })).resolves.toMatchObject({
       ...added,
@@ -108,6 +108,88 @@ describe("Markdown personal memory store", () => {
     expect(updated.revision).not.toBe(current.revision);
   });
 
+  it("accepts full YAML frontmatter and preserves its meaning and comments on update", async () => {
+    const { root, store } = await fixture();
+    const added = await store.add({
+      type: "person",
+      title: "Synthetic person",
+      tags: ["example"],
+      body: "Original body.\n",
+    });
+    const path = join(root, added.relativePath);
+    const raw = await readFile(path, "utf8");
+    const manuallyEdited = raw
+      .replace('tags: ["example"]', "tags:\n  - example # keep tag comment")
+      .replace(
+        "---\nOriginal body.",
+        "aliases:\n  - Example Person\n# keep this comment\nkept: |+\n  first line\n\n\n---\nOriginal body.",
+      );
+    await writeFile(
+      path,
+      manuallyEdited,
+      { mode: 0o600 },
+    );
+    const beforeHeader = /^---\n([\s\S]*?)^---\n/mu.exec(manuallyEdited)[1];
+    const preservedValue = parseDocument(beforeHeader).get("kept");
+
+    const current = await store.read({ id: added.id });
+    expect(current.tags).toEqual(["example"]);
+    const updated = await store.update({
+      id: added.id,
+      ifRevision: current.revision,
+      patch: { title: "Updated synthetic person", tags: ["renamed"] },
+    });
+
+    expect(updated.title).toBe("Updated synthetic person");
+    expect(updated.tags).toEqual(["renamed"]);
+    const updatedRaw = await readFile(path, "utf8");
+    expect(updatedRaw).toContain("aliases:");
+    expect(updatedRaw).toContain("Example Person");
+    expect(updatedRaw).toContain("# keep this comment");
+    expect(updatedRaw).toContain("# keep tag comment");
+    const afterHeader = /^---\n([\s\S]*?)^---\n/mu.exec(updatedRaw)[1];
+    expect(parseDocument(afterHeader).get("kept")).toBe(preservedValue);
+  });
+
+  it("validates Happenings before persisting a new note", async () => {
+    const { root, store } = await fixture();
+
+    await expectMemoryError(
+      store.add({ type: "reference", title: "Malformed", body: "## Happenings\n\n- invalid\n" }),
+      "MALFORMED_NOTE",
+    );
+    await expect(readFile(join(root, "references", "11111111-1111-4111-8111-111111111111.md"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("validates Happenings before replacing an existing note", async () => {
+    const { root, store } = await fixture();
+    const added = await store.add({ type: "reference", title: "Valid", body: "Original body.\n" });
+    const path = join(root, added.relativePath);
+    const before = await readFile(path, "utf8");
+
+    await expectMemoryError(
+      store.update({
+        id: added.id,
+        ifRevision: added.revision,
+        patch: { body: "## Happenings\n\n- invalid\n" },
+      }),
+      "MALFORMED_NOTE",
+    );
+    expect(await readFile(path, "utf8")).toBe(before);
+  });
+
+  it("accepts a valid frontmatter-only note ending at the closing delimiter", async () => {
+    const { root, store } = await fixture();
+    const added = await store.add({ type: "reference", title: "Empty note", body: "" });
+    const path = join(root, added.relativePath);
+    const raw = await readFile(path, "utf8");
+    await writeFile(path, raw.trimEnd(), { mode: 0o600 });
+
+    await expect(store.read({ id: added.id })).resolves.toMatchObject({ body: "" });
+  });
+
   it("rejects stale revisions and leaves the prior note unchanged", async () => {
     const { root, store } = await fixture();
     const added = await store.add({ type: "event", title: "Example event", body: "At noon." });
@@ -127,6 +209,9 @@ describe("Markdown personal memory store", () => {
     const added = await store.add({ type: "reference", title: "Example reference", body: "Body" });
     const path = join(root, added.relativePath);
     const raw = await readFile(path, "utf8");
+    await writeFile(path, raw.replace("schema: 1\n", ""));
+    await expectMemoryError(store.read({ id: added.id }), "MALFORMED_NOTE");
+
     await writeFile(path, raw.replace("title:", "title: \"duplicate\"\ntitle:"));
 
     await expectMemoryError(store.read({ id: added.id }), "MALFORMED_NOTE");
@@ -182,6 +267,24 @@ describe("Markdown personal memory store", () => {
         forbiddenRoots: [forbidden],
       }),
     ).toThrow(expect.objectContaining({ name: "MemoryError", code: "UNSAFE_VAULT" }));
+    await expect(lstat(join(forbidden, "memory"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects a missing vault beneath a symlinked forbidden parent before writing", async () => {
+    const { sandbox } = await fixture();
+    const forbidden = join(sandbox, "repo");
+    const linkedParent = join(sandbox, "linked-parent");
+    await mkdir(forbidden, { mode: 0o700 });
+    await symlink(forbidden, linkedParent, "dir");
+    const store = createMarkdownMemoryStore({
+      root: join(linkedParent, "memory"),
+      forbiddenRoots: [forbidden],
+    });
+
+    await expectMemoryError(
+      store.add({ type: "person", title: "No", body: "No" }),
+      "UNSAFE_VAULT",
+    );
     await expect(lstat(join(forbidden, "memory"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 

@@ -27,10 +27,18 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 The personal memory vault is user-owned plain Markdown outside the checkout and
 releases, so it survives deployment cleanup and can be opened directly in
 Obsidian. Only the tracked skill-local CLI
-(`.pi/skills/personal-memory/scripts/memory.mjs`) mutates it; there is no
-memory daemon, database, extension, or host wiring. Any future full-text index
-must be derived and disposable, rebuilt from the Markdown. See
-[ADR-0011](docs/adr/0011-store-personal-memory-in-a-private-markdown-vault.md).
+(`.pi/skills/personal-memory/scripts/memory.mjs`) mutates it and exposes
+schema-checked lint and bounded `#core` preview operations. Core output is
+disposable derived state compiled directly from notes. A repo-local extension
+appends it to the system prompt at each `before_agent_start`, but only while the
+host's token-guarded process-local runtime marker is bound; ordinary Pi sessions
+in this repository do not receive it. Compilation errors are logged by Pi and
+the turn continues without core memory. There is no generated file, memory
+daemon, database, or cache. Any future full-text index must be derived and
+disposable, rebuilt from the Markdown. See
+[ADR-0011](docs/adr/0011-store-personal-memory-in-a-private-markdown-vault.md)
+and [ADR-0014](docs/adr/0014-compile-schema-checked-core-memory-from-markdown.md)
+and [ADR-0015](docs/adr/0015-inject-core-memory-only-in-the-bridge-runtime.md).
 
 ## Startup
 
@@ -38,10 +46,11 @@ must be derived and disposable, rebuilt from the Markdown. See
 2. Continue the most recent session in the bridge-only session directory.
 3. Point Codex conversion at its bridge-only settings file.
 4. Build an `AgentSessionRuntime` with the upstream Telegram extension path and repo-local Codex extension.
-5. Bind extensions in RPC mode, emitting `session_start`.
+5. Bind the process-local bridge runtime marker, then bind extensions in RPC mode, emitting `session_start`.
 6. Let pi-telegram resume an owned/stale lock, or invoke `/telegram-connect` when no owner exists.
-7. Monitor polling ownership every five seconds. A live external Pi owner is respected; when it exits, the host reconnects automatically.
-8. Wait for SIGINT, SIGTERM, or an extension shutdown request.
+7. Compile and append core memory before each agent start.
+8. Monitor polling ownership every five seconds. A live external Pi owner is respected; when it exits, the host reconnects automatically.
+9. Wait for SIGINT, SIGTERM, or an extension shutdown request.
 
 ## Deployment
 
