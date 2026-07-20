@@ -4,11 +4,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { resolveMemoryDirectory } from "./config.mjs";
+import { compileCoreMemory, lintMemoryVault } from "./inspect.mjs";
 import { errorEnvelope, successEnvelope } from "./protocol.mjs";
 import { createMarkdownMemorySearchBackend } from "./search.mjs";
 import { MemoryError, createMarkdownMemoryStore } from "./store.mjs";
 
-const COMMANDS = new Set(["add", "read", "update", "delete", "search", "list", "happening-add", "happenings"]);
+const COMMANDS = new Set(["add", "read", "update", "delete", "search", "list", "happening-add", "happenings", "lint", "core"]);
 const MAX_REQUEST_BYTES = 300 * 1024;
 const USAGE_CODES = new Set(["INVALID_COMMAND", "INVALID_INPUT", "INVALID_ID"]);
 const OPERATIONAL_CODES = new Set([
@@ -20,6 +21,7 @@ const OPERATIONAL_CODES = new Set([
   "UNSAFE_ENTRY",
   "MALFORMED_NOTE",
   "DUPLICATE_HAPPENING",
+  "CORE_INVALID",
 ]);
 // scripts/ -> personal-memory/ -> skills/ -> .pi/ -> repo root
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
@@ -71,7 +73,7 @@ export async function runMemoryCli({
   if (argv.length !== 1 || !COMMANDS.has(command)) {
     return emitError(
       "INVALID_COMMAND",
-      "Usage: memory.mjs <add|read|update|delete|search|list|happening-add|happenings> with one JSON request line on stdin",
+      "Usage: memory.mjs <add|read|update|delete|search|list|happening-add|happenings|lint|core> with one JSON request line on stdin",
     );
   }
 
@@ -91,7 +93,11 @@ export async function runMemoryCli({
     // (symlink-resolved) root explicitly before scanning.
     const store = createMarkdownMemoryStore({ root, forbiddenRoots });
     let data;
-    if (command === "search" || command === "happenings") {
+    if (command === "lint" || command === "core") {
+      if (Object.keys(request).length > 0) throw new MemoryError("INVALID_INPUT", "Request must be empty");
+      const options = { root, forbiddenRoots };
+      data = command === "lint" ? await lintMemoryVault(options) : await compileCoreMemory(options);
+    } else if (command === "search" || command === "happenings") {
       await store.verifyRoot();
       const backend = createMarkdownMemorySearchBackend({ root });
       data = await backend[command](request);
@@ -101,7 +107,7 @@ export async function runMemoryCli({
       data = await store[command === "happening-add" ? "addHappening" : command](request);
     }
     stdout.write(`${JSON.stringify(successEnvelope(data))}\n`);
-    return 0;
+    return command === "lint" && !data.valid ? 3 : 0;
   } catch (error) {
     if (error instanceof MemoryError) return emitError(error.code, error.message);
     return emitError("IO_ERROR", "Memory storage is unavailable");

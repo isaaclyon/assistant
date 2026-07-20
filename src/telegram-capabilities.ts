@@ -94,6 +94,17 @@ export function bindBridgeRestart(request: () => void): () => void {
   );
 }
 
+/** Marks this process as the always-on bridge runtime for repo-local hooks. */
+export function bindBridgeRuntimeMarker(): () => void {
+  return bindRegistry(
+    Symbol.for("pi-telegram-bridge.runtime-registry"),
+    "runtime",
+    {},
+    "Bridge runtime registry is occupied by an incompatible value.",
+    "Bridge runtime marker is already registered",
+  );
+}
+
 /**
  * The subset of the durable inbox handed across the ADR-0003 capability
  * boundary. The pinned pi-telegram fork records and reads turns but never owns

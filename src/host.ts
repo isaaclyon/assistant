@@ -33,6 +33,7 @@ import {
 import {
   type InboundInboxCapability,
   bindBridgeRestart,
+  bindBridgeRuntimeMarker,
   bindTelegramHostNewSession,
   bindTelegramInboundInbox,
 } from "./telegram-capabilities.js";
@@ -283,6 +284,16 @@ export async function startBridgeHost({
     throw error;
   }
 
+  let unbindRuntimeMarker: () => void;
+  try {
+    unbindRuntimeMarker = bindBridgeRuntimeMarker();
+  } catch (error) {
+    await runtime.dispose();
+    unregisterInbox();
+    inbox.close();
+    throw error;
+  }
+
   // Publish the restart trigger for the repo-local /restart command. Deferring
   // to waitForIdle mirrors the shutdownHandler below so disposal never races an
   // in-flight turn; the daemon exits non-zero on this reason so systemd restarts.
@@ -293,6 +304,7 @@ export async function startBridgeHost({
     });
   } catch (error) {
     await runtime.dispose();
+    unbindRuntimeMarker();
     unregisterInbox();
     inbox.close();
     throw error;
@@ -318,6 +330,7 @@ export async function startBridgeHost({
   } catch (error) {
     await runtime.dispose();
     unbindRestart();
+    unbindRuntimeMarker();
     unregisterInbox();
     inbox.close();
     throw error;
@@ -349,6 +362,7 @@ export async function startBridgeHost({
       } finally {
         unregisterTelegramHost();
         unbindRestart();
+        unbindRuntimeMarker();
         unregisterInbox();
         inbox.close();
       }

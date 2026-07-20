@@ -121,6 +121,46 @@ describe("Markdown memory search safety and bounds", () => {
     expect(page.warningsTruncated).toBe(true);
   });
 
+  it("returns a valid note when a malformed duplicate sorts first", async () => {
+    const { backend, root, store } = await fixture();
+    const added = await store.add({
+      type: "preference",
+      title: "Valid duplicate",
+      body: "needle\n\n## Happenings\n\n- 2026-07-19 — Found the needle.\n",
+    });
+    const raw = await readFile(join(root, added.relativePath), "utf8");
+    await mkdir(join(root, "people"), { recursive: true, mode: 0o700 });
+    await writeFile(
+      join(root, "people", `${added.id}.md`),
+      raw
+        .replace('type: "preference"', 'type: "person"')
+        .replace('title: "Valid duplicate"', 'title: "duplicate"\ntitle: "Valid duplicate"'),
+    );
+
+    const search = await backend.search({ query: "needle" });
+    const happenings = await backend.happenings({ query: "needle" });
+
+    expect(search.results).toEqual([expect.objectContaining({ id: added.id, relativePath: added.relativePath })]);
+    expect(happenings.results).toEqual([expect.objectContaining({ id: added.id, relativePath: added.relativePath })]);
+    for (const page of [search, happenings]) {
+      expect(page.warnings).toContainEqual(expect.objectContaining({ code: "MALFORMED_NOTE" }));
+      expect(page.warnings).toContainEqual(expect.objectContaining({ code: "DUPLICATE_ID" }));
+    }
+  });
+
+  it("rejects oversized notes before reading them", async () => {
+    const { backend, root, store } = await fixture();
+    const added = await store.add({ type: "reference", title: "Oversized", body: "needle" });
+    const path = join(root, added.relativePath);
+    const raw = await readFile(path, "utf8");
+    await writeFile(path, `${raw}${"x".repeat(256 * 1024)}`);
+
+    const page = await backend.search({ query: "needle" });
+
+    expect(page.results).toEqual([]);
+    expect(page.warnings).toEqual([{ code: "MALFORMED_NOTE", relativePath: added.relativePath }]);
+  });
+
   it("scans candidates in path order and reports the scan cap", async () => {
     const { root, store } = await fixture();
     await store.add({ type: "reference", title: "First needle", body: "needle" });

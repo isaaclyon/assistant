@@ -19,14 +19,15 @@ list. Write the JSON literally inside the heredoc — never interpolate it from
 shell variables or command substitution.
 
 ```bash
-node .pi/skills/personal-memory/scripts/memory.mjs <add|read|update|delete|search|list> <<'EOF'
+node .pi/skills/personal-memory/scripts/memory.mjs <add|read|update|delete|search|list|happening-add|happenings|lint|core> <<'EOF'
 {"query":"coffee","limit":5}
 EOF
 ```
 
 Success prints one `{"schemaVersion":1,"ok":true,"data":…}` line on stdout;
 failure prints `{"schemaVersion":1,"ok":false,"error":{code,message}}` on
-stderr. Request and response shapes are in
+stderr. `lint` is the exception: an invalid vault still prints its complete
+`ok:true` report on stdout and exits `3`. Request and response shapes are in
 [references/memory-format.md](references/memory-format.md).
 
 Only claim something was remembered, updated, or forgotten after observing
@@ -78,9 +79,9 @@ envelopes, full note bodies, or error objects to the user.
   evidence and confidence briefly.
 - For explicit symmetric relationships between saved notes—such as spouses,
   siblings, or related concepts—default to bidirectional Obsidian Markdown
-  links using `[[Note title]]`.
+  links using `[[UUID|Note title]]` so links survive title changes.
 - Keep the relationship fact in the most relevant note, and add only a concise
-  `Related: [[Other note]]` backlink to the counterpart. Do not duplicate the
+  `Related: [[UUID|Other note]]` backlink to the counterpart. Do not duplicate the
   full fact in both bodies.
 - Before adding a backlink, search and read the counterpart note. Update it
   with its current `revision`, preserving its existing body and avoiding a
@@ -125,6 +126,20 @@ section stays parseable and revision-safe. Use `happenings` for global queries
 with optional `from`, `to`, `query`, `types`, and `limit` filters. Existing
 notes are not migrated automatically; stable facts remain stable facts, while
 new dated occurrences belong in `## Happenings`.
+
+## Core memory
+
+Use `#core` only on a compact fact or preference that is broadly useful across
+conversations. It selects the containing Markdown leaf block, not a whole note
+or section. The memory agent may add or remove markers as part of an ordinary
+confirmed memory update; no separate promotion operation exists.
+
+After changing a core block, run `core` with `{}` to verify the exact projection
+and 4,000-code-point budget. Run `lint` with `{}` for a complete vault report;
+an invalid report is still emitted as `ok:true` on stdout but exits `3`. Do not
+paste the raw projection or note contents into chat unless the user explicitly
+asks to preview them. A valid change is included automatically from the next
+Telegram agent start; ordinary local Pi sessions do not receive it.
 
 ## Hard rules
 

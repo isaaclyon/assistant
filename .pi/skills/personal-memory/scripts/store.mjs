@@ -12,6 +12,7 @@ import {
   unlink,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { parseDocument } from "yaml";
 
 export const MEMORY_TYPES = Object.freeze([
   "person",
@@ -32,9 +33,10 @@ export const MEMORY_TYPE_FOLDERS = Object.freeze({
   purchase: "purchases",
   reference: "references",
 });
-const MANAGED_KEYS = new Set(["id", "type", "title", "tags", "created", "updated"]);
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const MAX_NOTE_BYTES = 256 * 1024;
+const NOTE_SCHEMA_VERSION = 1;
+const MANAGED_KEYS = new Set(["schema", "id", "type", "title", "tags", "created", "updated"]);
+export const MEMORY_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+export const MAX_MEMORY_NOTE_BYTES = 256 * 1024;
 const MAX_TITLE_LENGTH = 200;
 const MAX_TAGS = 32;
 const MAX_TAG_LENGTH = 64;
@@ -71,8 +73,46 @@ function assertOutsideForbidden(candidate, forbiddenRoots) {
   }
 }
 
+async function canonicalizeRoots(paths) {
+  return Promise.all(paths.map(async (path) => {
+    try {
+      return await realpath(path);
+    } catch {
+      return resolve(path);
+    }
+  }));
+}
+
+async function assertSafeCreationParent(path, forbiddenRoots) {
+  let parent = dirname(path);
+  while (true) {
+    let stat;
+    try {
+      stat = await lstat(parent);
+    } catch (error) {
+      if (!isMissing(error)) fail("UNSAFE_VAULT", "Memory directory is not in a safe location");
+      const next = dirname(parent);
+      if (next === parent) fail("UNSAFE_VAULT", "Memory directory is not in a safe location");
+      parent = next;
+      continue;
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      fail("UNSAFE_VAULT", "Memory directory is not in a safe location");
+    }
+    let canonicalParent;
+    try {
+      canonicalParent = await realpath(parent);
+    } catch {
+      fail("UNSAFE_VAULT", "Memory directory is not in a safe location");
+    }
+    const candidate = resolve(canonicalParent, relative(parent, path));
+    assertOutsideForbidden(candidate, await canonicalizeRoots(forbiddenRoots));
+    return;
+  }
+}
+
 function validateId(id) {
-  if (typeof id !== "string" || !UUID_PATTERN.test(id)) {
+  if (typeof id !== "string" || !MEMORY_ID_PATTERN.test(id)) {
     fail("INVALID_ID", "Memory id is invalid");
   }
   return id;
@@ -202,7 +242,7 @@ export function parseHappenings(body) {
   return sections[0] ?? { start: null, end: null, entries: [], newline };
 }
 
-export function appendHappening(body, { date, text } = {}) {
+function appendHappening(body, { date, text } = {}) {
   validateBody(body);
   validateHappeningDate(date);
   validateHappeningText(text);
@@ -213,7 +253,9 @@ export function appendHappening(body, { date, text } = {}) {
   const line = `- ${date} — ${text}`;
   const newline = parsed.newline;
   if (parsed.start === null) {
-    const separator = body === "" ? "" : body.endsWith(`${newline}${newline}`) ? "" : body.endsWith(newline) ? newline : `${newline}${newline}`;
+    let separator = `${newline}${newline}`;
+    if (body === "" || body.endsWith(`${newline}${newline}`)) separator = "";
+    else if (body.endsWith(newline)) separator = newline;
     return `${body}${separator}${HAPPENINGS_HEADING}${newline}${newline}${line}${newline}`;
   }
 
@@ -243,105 +285,121 @@ function digest(raw) {
   return `sha256:${createHash("sha256").update(raw).digest("hex")}`;
 }
 
-function parseManagedValue(key, source) {
-  let value;
+export function parseMarkdownMemoryNote(raw, expected = {}) {
+  if (typeof raw !== "string" || Buffer.byteLength(raw) > MAX_MEMORY_NOTE_BYTES) {
+    fail("MALFORMED_NOTE", "Memory note is malformed");
+  }
+  if (!raw.startsWith("---\n") && !raw.startsWith("---\r\n")) {
+    fail("MALFORMED_NOTE", "Memory note is malformed");
+  }
+  const frontmatter = /^---\r?\n([\s\S]*?)^---(?:\r?\n|$)/mu.exec(raw);
+  if (!frontmatter) fail("MALFORMED_NOTE", "Memory note is malformed");
+  const document = parseDocument(frontmatter[1], { prettyErrors: false, uniqueKeys: true });
+  if (document.errors.length > 0 || document.warnings.length > 0) {
+    fail("MALFORMED_NOTE", "Memory note is malformed");
+  }
+  let values;
   try {
-    value = JSON.parse(source);
+    values = document.toJS({ maxAliasCount: 100 });
   } catch {
     fail("MALFORMED_NOTE", "Memory note is malformed");
   }
-  if (key === "id") return validateId(value);
-  if (key === "type") {
-    try {
-      return validateType(value);
-    } catch {
-      fail("MALFORMED_NOTE", "Memory note is malformed");
-    }
-  }
-  if (key === "title") {
-    try {
-      return validateTitle(value);
-    } catch {
-      fail("MALFORMED_NOTE", "Memory note is malformed");
-    }
-  }
-  if (key === "tags") {
-    try {
-      return validateTags(value);
-    } catch {
-      fail("MALFORMED_NOTE", "Memory note is malformed");
-    }
-  }
-  return validateTimestamp(value);
-}
-
-export function parseMarkdownMemoryNote(raw, expected = {}) {
-  if (Buffer.byteLength(raw) > MAX_NOTE_BYTES || !raw.startsWith("---\n")) {
+  if (!values || typeof values !== "object" || Array.isArray(values)) {
     fail("MALFORMED_NOTE", "Memory note is malformed");
   }
-  const closing = raw.indexOf("\n---\n", 4);
-  if (closing < 0) fail("MALFORMED_NOTE", "Memory note is malformed");
-  const header = raw.slice(4, closing);
-  const body = raw.slice(closing + 5);
-  const values = {};
-  const unknown = [];
-  let managedContinuation = false;
-
-  for (const match of header.matchAll(/[^\n]*(?:\n|$)/gu)) {
-    const line = match[0];
-    if (line === "") continue;
-    const plain = line.endsWith("\n") ? line.slice(0, -1) : line;
-    const keyMatch = /^([A-Za-z][A-Za-z0-9_-]*):[ \t]*(.*)$/u.exec(plain);
-    if (keyMatch) {
-      const [, key, source] = keyMatch;
-      if (MANAGED_KEYS.has(key)) {
-        if (Object.hasOwn(values, key)) fail("MALFORMED_NOTE", "Memory note is malformed");
-        values[key] = parseManagedValue(key, source);
-        managedContinuation = true;
-      } else {
-        unknown.push(line);
-        managedContinuation = false;
-      }
-      continue;
-    }
-    if (/^[ \t]+/u.test(plain) && managedContinuation) {
-      fail("MALFORMED_NOTE", "Memory note is malformed");
-    }
-    unknown.push(line);
-    if (plain === "" || plain.startsWith("#")) managedContinuation = false;
-  }
-
   for (const key of MANAGED_KEYS) {
     if (!Object.hasOwn(values, key)) fail("MALFORMED_NOTE", "Memory note is malformed");
   }
+  try {
+    if (values.schema !== NOTE_SCHEMA_VERSION) fail("MALFORMED_NOTE", "Memory note is malformed");
+    values.id = validateId(values.id);
+    values.type = validateType(values.type);
+    values.title = validateTitle(values.title);
+    values.tags = validateTags(values.tags);
+    values.created = validateTimestamp(values.created);
+    values.updated = validateTimestamp(values.updated);
+  } catch {
+    fail("MALFORMED_NOTE", "Memory note is malformed");
+  }
   if (expected.id && values.id !== expected.id) fail("MALFORMED_NOTE", "Memory note is malformed");
   if (expected.type && values.type !== expected.type) fail("MALFORMED_NOTE", "Memory note is malformed");
+  const body = raw.slice(frontmatter[0].length);
   validateBody(body);
   parseHappenings(body);
-  return { ...values, body, unknownFrontmatter: unknown.join(""), revision: digest(raw) };
+  return {
+    ...values,
+    body,
+    frontmatterDocument: document,
+    frontmatterValues: Object.fromEntries([...MANAGED_KEYS].map((key) => [key, values[key]])),
+    revision: digest(raw),
+  };
 }
 
 function renderNote(note) {
-  const managed = [
-    `id: ${JSON.stringify(note.id)}`,
-    `type: ${JSON.stringify(note.type)}`,
-    `title: ${JSON.stringify(note.title)}`,
-    `tags: ${JSON.stringify(note.tags)}`,
-    `created: ${JSON.stringify(note.created)}`,
-    `updated: ${JSON.stringify(note.updated)}`,
-  ].join("\n");
-  let unknown = "\n";
-  if (note.unknownFrontmatter) {
-    unknown = `\n${note.unknownFrontmatter.replace(/^\n/u, "")}`;
-    if (!note.unknownFrontmatter.endsWith("\n")) unknown += "\n";
+  parseHappenings(note.body);
+  const managed = {
+    schema: NOTE_SCHEMA_VERSION,
+    id: note.id,
+    type: note.type,
+    title: note.title,
+    tags: note.tags,
+    created: note.created,
+    updated: note.updated,
+  };
+  let header;
+  if (note.frontmatterDocument) {
+    const document = note.frontmatterDocument.clone();
+    for (const [key, value] of Object.entries(managed)) {
+      if (JSON.stringify(note.frontmatterValues?.[key]) === JSON.stringify(value)) continue;
+      const sourceNode = document.get(key, true);
+      document.set(key, document.createNode(value));
+      const targetNode = document.get(key, true);
+      if (!sourceNode || !targetNode || typeof sourceNode !== "object" || typeof targetNode !== "object") continue;
+      const properties = ["comment", "commentBefore", "spaceBefore", "anchor", "flow", "type", "format"];
+      for (const property of properties) {
+        if (sourceNode[property] !== undefined) targetNode[property] = sourceNode[property];
+      }
+      if (!Array.isArray(sourceNode.items) || !Array.isArray(targetNode.items)) continue;
+      const matchedSourceItems = new Set();
+      const sourceIndexes = targetNode.items.map((targetItem) => {
+        const index = sourceNode.items.findIndex(
+          (sourceItem, sourceIndex) => !matchedSourceItems.has(sourceIndex) && sourceItem?.value === targetItem?.value,
+        );
+        if (index >= 0) matchedSourceItems.add(index);
+        return index;
+      });
+      for (const [targetIndex, targetItem] of targetNode.items.entries()) {
+        if (sourceIndexes[targetIndex] < 0 && sourceNode.items[targetIndex] && !matchedSourceItems.has(targetIndex)) {
+          sourceIndexes[targetIndex] = targetIndex;
+          matchedSourceItems.add(targetIndex);
+        }
+        const sourceItem = sourceNode.items[sourceIndexes[targetIndex]];
+        if (!sourceItem || !targetItem || typeof sourceItem !== "object" || typeof targetItem !== "object") continue;
+        for (const property of properties) {
+          if (sourceItem[property] !== undefined) targetItem[property] = sourceItem[property];
+        }
+      }
+    }
+    header = document.toString({ lineWidth: 0 });
+  } else {
+    header = [
+      `schema: ${NOTE_SCHEMA_VERSION}`,
+      `id: ${JSON.stringify(note.id)}`,
+      `type: ${JSON.stringify(note.type)}`,
+      `title: ${JSON.stringify(note.title)}`,
+      `tags: ${JSON.stringify(note.tags)}`,
+      `created: ${JSON.stringify(note.created)}`,
+      `updated: ${JSON.stringify(note.updated)}`,
+    ].join("\n");
   }
-  const raw = `---\n${managed}${unknown}---\n${note.body}`;
-  if (Buffer.byteLength(raw) > MAX_NOTE_BYTES) fail("INVALID_INPUT", "Memory note is too large");
+  const raw = `---\n${header}${header.endsWith("\n") ? "" : "\n"}---\n${note.body}`;
+  if (Buffer.byteLength(raw) > MAX_MEMORY_NOTE_BYTES) fail("INVALID_INPUT", "Memory note is too large");
   return raw;
 }
 
 function publicMetadata(note, relativePath) {
   return {
+    schema: note.schema,
     id: note.id,
     type: note.type,
     title: note.title,
@@ -378,7 +436,7 @@ async function assertRegularFile(path) {
     fail("IO_ERROR", "Memory storage is unavailable");
   }
   if (stat.isSymbolicLink() || !stat.isFile()) fail("UNSAFE_ENTRY", "Memory storage entry is unsafe");
-  if (stat.size > MAX_NOTE_BYTES) fail("MALFORMED_NOTE", "Memory note is malformed");
+  if (stat.size > MAX_MEMORY_NOTE_BYTES) fail("MALFORMED_NOTE", "Memory note is malformed");
   return true;
 }
 
@@ -395,6 +453,7 @@ export function createMarkdownMemoryStore(options) {
   async function prepareRoot(create) {
     let exists = await assertDirectory(root, "UNSAFE_VAULT");
     if (!exists && create) {
+      await assertSafeCreationParent(root, forbiddenRoots);
       try {
         await mkdir(root, { recursive: true, mode: 0o700 });
       } catch {
@@ -411,7 +470,7 @@ export function createMarkdownMemoryStore(options) {
     } catch {
       fail("IO_ERROR", "Memory storage is unavailable");
     }
-    assertOutsideForbidden(canonical, forbiddenRoots);
+    assertOutsideForbidden(canonical, await canonicalizeRoots(forbiddenRoots));
     return true;
   }
 
@@ -492,7 +551,7 @@ export function createMarkdownMemoryStore(options) {
       const relativePath = join(MEMORY_TYPE_FOLDERS[type], `${id}.md`);
       const destination = join(root, relativePath);
       if (await assertRegularFile(destination)) fail("DUPLICATE_ID", "Memory id is duplicated");
-      const raw = renderNote({ id, type, title, tags, created: timestamp, updated: timestamp, body, unknownFrontmatter: "" });
+      const raw = renderNote({ schema: NOTE_SCHEMA_VERSION, id, type, title, tags, created: timestamp, updated: timestamp, body });
       const tempPath = await writeTemp(directory, id, raw);
       try {
         await link(tempPath, destination);
@@ -605,7 +664,7 @@ export function createMarkdownMemoryStore(options) {
           fail("IO_ERROR", "Memory storage is unavailable");
         }
         for (const name of names) {
-          if (!UUID_PATTERN.test(name.slice(0, -3)) || !name.endsWith(".md")) continue;
+          if (!MEMORY_ID_PATTERN.test(name.slice(0, -3)) || !name.endsWith(".md")) continue;
           const id = name.slice(0, -3);
           if (seen.has(id)) fail("DUPLICATE_ID", "Memory id is duplicated");
           const path = join(directory, name);

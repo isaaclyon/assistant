@@ -11,6 +11,10 @@ import {
   resolveTelegramExtensionPath,
 } from "../src/package-paths.js";
 
+const BRIDGE_RUNTIME_REGISTRY = Symbol.for(
+  "pi-telegram-bridge.runtime-registry",
+);
+
 async function startTestBridgeHost(
   options: Parameters<typeof startBridgeHost>[0],
 ): ReturnType<typeof startBridgeHost> {
@@ -155,6 +159,9 @@ describe("startBridgeHost", () => {
     });
 
     try {
+      expect(
+        (globalThis as Record<PropertyKey, unknown>)[BRIDGE_RUNTIME_REGISTRY],
+      ).toMatchObject({ version: 1, runtime: {} });
       expect(() =>
         registerTelegramHostNewSession(async () => ({ cancelled: false })),
       ).toThrow(/already registered/);
@@ -209,6 +216,9 @@ describe("startBridgeHost", () => {
       if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
     }
+    expect(
+      (globalThis as Record<PropertyKey, unknown>)[BRIDGE_RUNTIME_REGISTRY],
+    ).toEqual({ version: 1 });
     const unregister = registerTelegramHostNewSession(async () => ({ cancelled: false }));
     unregister();
   }, 20_000);

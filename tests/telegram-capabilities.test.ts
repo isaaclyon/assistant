@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { bindBridgeRestart } from "../src/telegram-capabilities.js";
+import {
+  bindBridgeRestart,
+  bindBridgeRuntimeMarker,
+} from "../src/telegram-capabilities.js";
 
 const RESTART_REGISTRY = Symbol.for("pi-telegram-bridge.restart-registry");
+const RUNTIME_REGISTRY = Symbol.for("pi-telegram-bridge.runtime-registry");
 
 function readRegistry(): { request?: unknown } | undefined {
   const value = (globalThis as Record<PropertyKey, unknown>)[RESTART_REGISTRY];
@@ -31,5 +35,16 @@ describe("bindBridgeRestart", () => {
     unbind();
     // Rebinding after unbind must succeed, then clean up for other tests.
     bindBridgeRestart(vi.fn())();
+  });
+});
+
+describe("bindBridgeRuntimeMarker", () => {
+  it("marks only the lifetime of the bridge host runtime", () => {
+    const unbind = bindBridgeRuntimeMarker();
+    const registry = (globalThis as Record<PropertyKey, unknown>)[RUNTIME_REGISTRY];
+
+    expect(registry).toMatchObject({ version: 1, runtime: {} });
+    unbind();
+    expect(registry).toEqual({ version: 1 });
   });
 });
