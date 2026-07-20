@@ -24,10 +24,21 @@ if (!(await hasConfiguredTelegramToken(telegramConfigPath))) {
 
 const userUnitDir = join(homedir(), ".config", "systemd", "user");
 const unitPath = join(userUnitDir, "pi-telegram-bridge.service");
+const environmentFilePath = join(
+  homedir(),
+  ".config",
+  "pi-telegram-bridge",
+  "environment",
+);
 await mkdir(userUnitDir, { recursive: true, mode: 0o700 });
 await writeFile(
   unitPath,
-  renderServiceUnit({ config, nodePath: process.execPath, projectDir }),
+  renderServiceUnit({
+    config,
+    environmentFilePath,
+    nodePath: process.execPath,
+    projectDir,
+  }),
   { mode: 0o600 },
 );
 

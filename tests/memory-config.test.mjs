@@ -2,8 +2,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_BRIDGE_STATE_RELATIVE_PATH,
   DEFAULT_MEMORY_RELATIVE_PATH,
+  resolveBridgeSessionDirectory,
   resolveMemoryDirectory,
+  resolveMemoryGitAutocommit,
 } from "../.pi/skills/personal-memory/scripts/config.mjs";
 import {
   errorEnvelope,
@@ -33,6 +36,27 @@ describe("personal memory script configuration", () => {
         "/home/tester",
       ),
     ).toBe("/home/tester/vaults/personal");
+  });
+
+  it("resolves the bridge session directory from bridge state", () => {
+    expect(resolveBridgeSessionDirectory({}, "/home/tester")).toBe(
+      join("/home/tester", DEFAULT_BRIDGE_STATE_RELATIVE_PATH, "sessions"),
+    );
+    expect(
+      resolveBridgeSessionDirectory(
+        { PI_TELEGRAM_BRIDGE_STATE_DIR: "state/telegram" },
+        "/home/tester",
+      ),
+    ).toBe("/home/tester/state/telegram/sessions");
+  });
+
+  it("requires an explicit valid Git auto-commit opt-in", () => {
+    expect(resolveMemoryGitAutocommit({})).toBe(false);
+    expect(resolveMemoryGitAutocommit({ PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT: "0" })).toBe(false);
+    expect(resolveMemoryGitAutocommit({ PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT: "1" })).toBe(true);
+    expect(() =>
+      resolveMemoryGitAutocommit({ PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT: "yes" }),
+    ).toThrow(/must be 0 or 1/);
   });
 });
 

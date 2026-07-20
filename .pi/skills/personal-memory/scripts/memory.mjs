@@ -3,7 +3,12 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { resolveMemoryDirectory } from "./config.mjs";
+import {
+  resolveBridgeSessionDirectory,
+  resolveMemoryDirectory,
+  resolveMemoryGitAutocommit,
+} from "./config.mjs";
+import { commitMemoryMutation, prepareMemoryGitAutocommit } from "./git.mjs";
 import { compileCoreMemory, lintMemoryVault } from "./inspect.mjs";
 import { errorEnvelope, successEnvelope } from "./protocol.mjs";
 import { createMarkdownMemorySearchBackend } from "./search.mjs";
@@ -22,7 +27,10 @@ const OPERATIONAL_CODES = new Set([
   "MALFORMED_NOTE",
   "DUPLICATE_HAPPENING",
   "CORE_INVALID",
+  "GIT_AUTOCOMMIT_UNAVAILABLE",
 ]);
+const MUTATING_COMMANDS = new Set(["add", "update", "delete", "happening-add"]);
+const GIT_ACTIONS = { add: "add", delete: "delete" };
 // scripts/ -> personal-memory/ -> skills/ -> .pi/ -> repo root
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 
@@ -92,10 +100,20 @@ export async function runMemoryCli({
     // bypasses the store's per-operation root checks, so verify the real
     // (symlink-resolved) root explicitly before scanning.
     const store = createMarkdownMemoryStore({ root, forbiddenRoots });
+    let gitRoot;
+    if (MUTATING_COMMANDS.has(command) && resolveMemoryGitAutocommit(env)) {
+      if (!(await store.verifyRoot())) {
+        throw new MemoryError(
+          "GIT_AUTOCOMMIT_UNAVAILABLE",
+          "Memory Git auto-commit is unavailable",
+        );
+      }
+      gitRoot = await prepareMemoryGitAutocommit(root, { env });
+    }
     let data;
     if (command === "lint" || command === "core") {
       if (Object.keys(request).length > 0) throw new MemoryError("INVALID_INPUT", "Request must be empty");
-      const options = { root, forbiddenRoots };
+      const options = { root, forbiddenRoots, sessionRoot: resolveBridgeSessionDirectory(env) };
       data = command === "lint" ? await lintMemoryVault(options) : await compileCoreMemory(options);
     } else if (command === "search" || command === "happenings") {
       await store.verifyRoot();
@@ -104,7 +122,22 @@ export async function runMemoryCli({
     } else if (command === "list") {
       data = { memories: await store.list(request) };
     } else {
-      data = await store[command === "happening-add" ? "addHappening" : command](request);
+      let operation = command;
+      if (command === "happening-add") operation = "addHappening";
+      else if (command === "delete" && gitRoot) operation = "deleteWithLocation";
+      data = await store[operation](request);
+    }
+    if (gitRoot) {
+      const action = GIT_ACTIONS[command] ?? "update";
+      const { relativePath, ...publicData } = data;
+      data = {
+        ...publicData,
+        git: await commitMemoryMutation(
+          gitRoot,
+          { action, id: data.id, relativePath },
+          { env },
+        ),
+      };
     }
     stdout.write(`${JSON.stringify(successEnvelope(data))}\n`);
     return command === "lint" && !data.valid ? 3 : 0;

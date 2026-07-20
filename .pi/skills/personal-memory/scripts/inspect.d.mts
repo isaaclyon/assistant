@@ -9,4 +9,5 @@ export interface CompiledCoreMemory {
 export function compileCoreMemory(options: {
   root: string;
   forbiddenRoots?: string[];
+  sessionRoot?: string;
 }): Promise<CompiledCoreMemory>;

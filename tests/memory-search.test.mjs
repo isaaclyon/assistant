@@ -89,6 +89,29 @@ describe.each(backendFactories)("%s memory search contract", (_name, makeFixture
     expect(page.results[0].type).toBe("event");
     expect(page.truncated).toBe(true);
   });
+
+  it("hides inactive notes by default and supports explicit status filters", async () => {
+    const { backend, store } = await makeFixture();
+    const active = await store.add({ type: "reference", title: "Tea active", body: "Tea" });
+    const archived = await store.add({
+      type: "reference",
+      status: "archived",
+      title: "Tea archived",
+      body: "Tea\n\n## Happenings\n\n- 2026-07-19 — Drank tea.\n",
+    });
+
+    await expect(backend.search({ query: "tea" })).resolves.toMatchObject({
+      results: [expect.objectContaining({ id: active.id, status: "active" })],
+    });
+    await expect(backend.search({ query: "tea", statuses: ["archived"] })).resolves.toMatchObject({
+      results: [expect.objectContaining({ id: archived.id, status: "archived" })],
+    });
+    await expect(backend.happenings({ query: "tea" })).resolves.toMatchObject({ results: [] });
+    await expect(backend.happenings({ query: "tea", statuses: ["archived"] })).resolves.toMatchObject({
+      results: [expect.objectContaining({ id: archived.id, status: "archived" })],
+    });
+    await expect(backend.search({ query: "tea", statuses: ["deleted"] })).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  });
 });
 
 describe("Markdown memory search safety and bounds", () => {

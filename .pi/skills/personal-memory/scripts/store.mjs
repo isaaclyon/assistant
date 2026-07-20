@@ -23,6 +23,7 @@ export const MEMORY_TYPES = Object.freeze([
   "purchase",
   "reference",
 ]);
+export const MEMORY_STATUSES = Object.freeze(["active", "superseded", "archived"]);
 
 export const MEMORY_TYPE_FOLDERS = Object.freeze({
   person: "people",
@@ -34,7 +35,8 @@ export const MEMORY_TYPE_FOLDERS = Object.freeze({
   reference: "references",
 });
 const NOTE_SCHEMA_VERSION = 1;
-const MANAGED_KEYS = new Set(["schema", "id", "type", "title", "tags", "created", "updated"]);
+const REQUIRED_MANAGED_KEYS = new Set(["schema", "id", "type", "title", "tags", "created", "updated"]);
+const MANAGED_KEYS = new Set([...REQUIRED_MANAGED_KEYS, "status"]);
 export const MEMORY_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const MAX_MEMORY_NOTE_BYTES = 256 * 1024;
 const MAX_TITLE_LENGTH = 200;
@@ -121,6 +123,16 @@ function validateId(id) {
 function validateType(type) {
   if (!MEMORY_TYPES.includes(type)) fail("INVALID_INPUT", "Memory type is invalid");
   return type;
+}
+
+function validateStatus(status) {
+  if (!MEMORY_STATUSES.includes(status)) fail("INVALID_INPUT", "Memory status is invalid");
+  return status;
+}
+
+function validateStatuses(statuses = ["active"]) {
+  if (!Array.isArray(statuses)) fail("INVALID_INPUT", "Memory statuses are invalid");
+  return [...new Set(statuses.map(validateStatus))];
 }
 
 function validateTitle(title) {
@@ -307,13 +319,15 @@ export function parseMarkdownMemoryNote(raw, expected = {}) {
   if (!values || typeof values !== "object" || Array.isArray(values)) {
     fail("MALFORMED_NOTE", "Memory note is malformed");
   }
-  for (const key of MANAGED_KEYS) {
+  const hasStatus = Object.hasOwn(values, "status");
+  for (const key of REQUIRED_MANAGED_KEYS) {
     if (!Object.hasOwn(values, key)) fail("MALFORMED_NOTE", "Memory note is malformed");
   }
   try {
     if (values.schema !== NOTE_SCHEMA_VERSION) fail("MALFORMED_NOTE", "Memory note is malformed");
     values.id = validateId(values.id);
     values.type = validateType(values.type);
+    values.status = validateStatus(Object.hasOwn(values, "status") ? values.status : "active");
     values.title = validateTitle(values.title);
     values.tags = validateTags(values.tags);
     values.created = validateTimestamp(values.created);
@@ -330,7 +344,9 @@ export function parseMarkdownMemoryNote(raw, expected = {}) {
     ...values,
     body,
     frontmatterDocument: document,
-    frontmatterValues: Object.fromEntries([...MANAGED_KEYS].map((key) => [key, values[key]])),
+    frontmatterValues: Object.fromEntries(
+      [...MANAGED_KEYS].map((key) => [key, key === "status" && !hasStatus ? undefined : values[key]]),
+    ),
     revision: digest(raw),
   };
 }
@@ -341,6 +357,7 @@ function renderNote(note) {
     schema: NOTE_SCHEMA_VERSION,
     id: note.id,
     type: note.type,
+    status: note.status,
     title: note.title,
     tags: note.tags,
     created: note.created,
@@ -386,6 +403,7 @@ function renderNote(note) {
       `schema: ${NOTE_SCHEMA_VERSION}`,
       `id: ${JSON.stringify(note.id)}`,
       `type: ${JSON.stringify(note.type)}`,
+      `status: ${JSON.stringify(note.status)}`,
       `title: ${JSON.stringify(note.title)}`,
       `tags: ${JSON.stringify(note.tags)}`,
       `created: ${JSON.stringify(note.created)}`,
@@ -402,6 +420,7 @@ function publicMetadata(note, relativePath) {
     schema: note.schema,
     id: note.id,
     type: note.type,
+    status: note.status,
     title: note.title,
     tags: [...note.tags],
     created: note.created,
@@ -533,6 +552,21 @@ export function createMarkdownMemoryStore(options) {
     }
   }
 
+  async function deleteWithLocation({ id, ifRevision, confirmId } = {}) {
+    validateId(id);
+    if (confirmId !== id) fail("CONFIRMATION_REQUIRED", "Forgetting requires confirmation");
+    if (typeof ifRevision !== "string") fail("INVALID_INPUT", "Memory revision is required");
+    const location = await locate(id);
+    const { note } = await readLocated(location);
+    if (note.revision !== ifRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
+    try {
+      await unlink(location.path);
+    } catch {
+      fail("IO_ERROR", "Memory storage is unavailable");
+    }
+    return { id, deleted: true, relativePath: location.relativePath };
+  }
+
   return {
     /** Reject a symlinked or forbidden vault root; false when it does not exist yet. */
     async verifyRoot() {
@@ -541,6 +575,7 @@ export function createMarkdownMemoryStore(options) {
 
     async add(request) {
       const type = validateType(request?.type);
+      const status = validateStatus(Object.hasOwn(request ?? {}, "status") ? request.status : "active");
       const title = validateTitle(request?.title);
       const tags = validateTags(request?.tags);
       const body = validateBody(request?.body ?? "");
@@ -551,7 +586,7 @@ export function createMarkdownMemoryStore(options) {
       const relativePath = join(MEMORY_TYPE_FOLDERS[type], `${id}.md`);
       const destination = join(root, relativePath);
       if (await assertRegularFile(destination)) fail("DUPLICATE_ID", "Memory id is duplicated");
-      const raw = renderNote({ schema: NOTE_SCHEMA_VERSION, id, type, title, tags, created: timestamp, updated: timestamp, body });
+      const raw = renderNote({ schema: NOTE_SCHEMA_VERSION, id, type, status, title, tags, created: timestamp, updated: timestamp, body });
       const tempPath = await writeTemp(directory, id, raw);
       try {
         await link(tempPath, destination);
@@ -605,13 +640,14 @@ export function createMarkdownMemoryStore(options) {
       if (typeof ifRevision !== "string" || !patch || typeof patch !== "object" || Array.isArray(patch)) {
         fail("INVALID_INPUT", "Memory update is invalid");
       }
-      const allowed = new Set(["title", "tags", "body"]);
+      const allowed = new Set(["status", "title", "tags", "body"]);
       if (Object.keys(patch).some((key) => !allowed.has(key))) fail("INVALID_INPUT", "Memory update is invalid");
       const location = await locate(id);
       const { note } = await readLocated(location);
       if (note.revision !== ifRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
       const updated = {
         ...note,
+        status: Object.hasOwn(patch, "status") ? validateStatus(patch.status) : note.status,
         title: Object.hasOwn(patch, "title") ? validateTitle(patch.title) : note.title,
         tags: Object.hasOwn(patch, "tags") ? validateTags(patch.tags) : note.tags,
         body: Object.hasOwn(patch, "body") ? validateBody(patch.body) : note.body,
@@ -632,24 +668,17 @@ export function createMarkdownMemoryStore(options) {
       return publicNote(parsed, location.relativePath);
     },
 
-    async delete({ id, ifRevision, confirmId } = {}) {
-      validateId(id);
-      if (confirmId !== id) fail("CONFIRMATION_REQUIRED", "Forgetting requires confirmation");
-      if (typeof ifRevision !== "string") fail("INVALID_INPUT", "Memory revision is required");
-      const location = await locate(id);
-      const { note } = await readLocated(location);
-      if (note.revision !== ifRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
-      try {
-        await unlink(location.path);
-      } catch {
-        fail("IO_ERROR", "Memory storage is unavailable");
-      }
-      return { id, deleted: true };
+    async delete(request) {
+      const { id, deleted } = await deleteWithLocation(request);
+      return { id, deleted };
     },
 
-    async list({ types = MEMORY_TYPES } = {}) {
+    deleteWithLocation,
+
+    async list({ types = MEMORY_TYPES, statuses = ["active"] } = {}) {
       if (!Array.isArray(types)) fail("INVALID_INPUT", "Memory types are invalid");
       const selected = types.map(validateType);
+      const selectedStatuses = validateStatuses(statuses);
       if (!(await prepareRoot(false))) return [];
       const results = [];
       const seen = new Set();
@@ -672,6 +701,7 @@ export function createMarkdownMemoryStore(options) {
           const raw = await readFile(path, "utf8").catch(() => fail("IO_ERROR", "Memory storage is unavailable"));
           const note = parseMarkdownMemoryNote(raw, { id, type });
           seen.add(id);
+          if (!selectedStatuses.includes(note.status)) continue;
           results.push(publicMetadata(note, join(MEMORY_TYPE_FOLDERS[type], name)));
         }
       }

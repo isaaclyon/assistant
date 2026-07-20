@@ -34,6 +34,12 @@ Only claim something was remembered, updated, or forgotten after observing
 `ok:true` for that operation. Summarize results concisely; never dump raw JSON
 envelopes, full note bodies, or error objects to the user.
 
+When Git auto-commit is enabled, mutating responses include `git.committed`.
+If it is `false`, the memory mutation still succeeded: tell the user it was
+saved but remains uncommitted, and do not retry the mutation. A
+`GIT_AUTOCOMMIT_UNAVAILABLE` error happens before mutation and means nothing was
+changed.
+
 ## Remember
 
 - Persist only when the user explicitly asks to remember/save something or
@@ -71,6 +77,19 @@ envelopes, full note bodies, or error objects to the user.
   manual Obsidian edit). Re-read and report the conflict rather than
   overwriting.
 
+## Lifecycle status
+
+- New and legacy memories default to `active`. Use `superseded` when a retained
+  note has been replaced by newer knowledge, and `archived` when it is retained
+  only as historical reference. Status changes use the ordinary revision-checked
+  `update` patch and do not require deletion confirmation.
+- Normal search, list, and happenings queries return only active notes. Request
+  explicit `statuses` when the user asks for inactive history or when locating
+  a note to reactivate, correct, or forget. Direct reads by ID work for every
+  status.
+- Only active notes contribute `#core` blocks. Use Markdown links to explain
+  what supersedes what; there is no structured supersession target.
+
 ## Relationships and links
 
 - After adding or updating a note, inspect existing memories for plausible
@@ -93,6 +112,18 @@ envelopes, full note bodies, or error objects to the user.
 - Verify every add or backlink update with an `ok:true` CLI response before
   claiming the relationship is linked.
 
+## Session provenance
+
+- For a claim backed by an exact Pi session entry, use a reserved `source` or
+  `source-<alphanumeric>` Markdown footnote in the format documented in
+  [references/memory-format.md](references/memory-format.md). Never invent a
+  session ID, entry ID, or timestamp.
+- After adding or changing a source footnote, run `lint` and only claim the
+  source is linked after the vault is valid. Provenance errors do not disable
+  core memory, but the source must not be presented as verified.
+- Ordinary footnotes remain ordinary Markdown and must not use a reserved
+  source label unless they follow the Pi provenance contract.
+
 ## Forget
 
 - Find the exact note and show the user a minimal preview (title, type, date —
@@ -101,7 +132,7 @@ envelopes, full note bodies, or error objects to the user.
   `confirmId` equal to the note's `id`.
 - Deletion permanently removes the canonical note only. When material, explain
   that it does not erase Telegram/Pi conversation history, filesystem backups,
-  or third-party backups.
+  Git history, or third-party backups.
 
 ## Lists, events, and recipes
 
@@ -129,10 +160,11 @@ new dated occurrences belong in `## Happenings`.
 
 ## Core memory
 
-Use `#core` only on a compact fact or preference that is broadly useful across
-conversations. It selects the containing Markdown leaf block, not a whole note
-or section. The memory agent may add or remove markers as part of an ordinary
-confirmed memory update; no separate promotion operation exists.
+Use `#core` only on a compact fact or preference in an active note that is
+broadly useful across conversations. It selects the containing Markdown leaf
+block, not a whole note or section. The memory agent may add or remove markers
+as part of an ordinary confirmed memory update; no separate promotion operation
+exists.
 
 After changing a core block, run `core` with `{}` to verify the exact projection
 and 4,000-code-point budget. Run `lint` with `{}` for a complete vault report;
@@ -146,3 +178,5 @@ Telegram agent start; ordinary local Pi sessions do not receive it.
 - Never place personal facts in tracked repository files or instructions.
 - Never interpolate user text into shell commands; requests go through stdin.
 - Never claim persistence without an observed successful CLI response.
+- Never claim a local Git commit unless `git.committed` is `true`; the CLI never
+  pushes memory commits.

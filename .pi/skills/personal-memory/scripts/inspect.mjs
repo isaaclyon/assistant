@@ -1,8 +1,11 @@
+import { createReadStream } from "node:fs";
 import { lstat, opendir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { lexer } from "marked";
 
+import { resolveBridgeSessionDirectory } from "./config.mjs";
 import {
   MEMORY_ID_PATTERN,
   MEMORY_TYPE_FOLDERS,
@@ -18,6 +21,8 @@ const CORE_MEMORY_WARNING_AT = 3_600;
 const MAX_ISSUES = 100;
 const MAX_SCANNED_NOTES = 1_000;
 const MAX_SCANNED_BYTES = 16 * 1024 * 1024;
+const MAX_SCANNED_SESSION_BYTES = 64 * 1024 * 1024;
+const MAX_SCANNED_SESSION_ENTRIES = 100_000;
 // scripts/ -> personal-memory/ -> skills/ -> .pi/ -> repo root
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 const CORE_PREAMBLE =
@@ -26,6 +31,10 @@ const CORE_PREAMBLE =
 const CORE_MARKER = /(^|[^\p{L}\p{N}_/-])#core(?=$|[^\p{L}\p{N}_/-])/gu;
 const WIKI_LINK = /\[\[([^\]\n]+)\]\]/gu;
 const FOOTNOTE_REFERENCE = /\[\^[^\]\n]+\]/gu;
+const SOURCE_LABEL = /^source(?:-[A-Za-z0-9]+)?$/u;
+const SAFE_SOURCE_ID = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/u;
+const SOURCE_DEFINITION = /^ {0,3}\[\^([^\]\r\n]+)\]:[ \t]*(.*)$/u;
+const SOURCE_ANCHOR = /^Pi session `([^`]+)`, entry `([^`]+)`, `([^`]+)`\.$/u;
 
 function compareText(a, b) {
   if (a < b) return -1;
@@ -182,6 +191,180 @@ function extractBlocks(body) {
   }
 }
 
+function sourceLabels(tokens) {
+  const labels = new Set();
+  const visit = (inline) => {
+    for (const token of inline ?? []) {
+      if (token.type === "codespan" || token.type === "image") continue;
+      if (Array.isArray(token.tokens)) {
+        visit(token.tokens);
+        continue;
+      }
+      if (token.type !== "text") continue;
+      for (const match of (token.text ?? token.raw ?? "").matchAll(FOOTNOTE_REFERENCE)) {
+        const label = match[0].slice(2, -1);
+        if (SOURCE_LABEL.test(label)) labels.add(label);
+      }
+    }
+  };
+  visit(tokens);
+  return labels;
+}
+
+function parseSourceFootnotes(body) {
+  let tokens;
+  try {
+    tokens = lexer(body);
+  } catch {
+    return { anchors: [], codes: [] };
+  }
+  const referenced = new Set();
+  for (const block of leafBlocks(tokens)) {
+    for (const label of sourceLabels(block.tokens)) referenced.add(label);
+  }
+  const definitions = new Map();
+  const malformed = new Set();
+  const visitBlocks = (blocks) => {
+    for (const token of blocks ?? []) {
+      if (token.type === "paragraph") {
+        for (const line of (token.raw ?? "").split(/\r?\n/u)) {
+          const definition = SOURCE_DEFINITION.exec(line);
+          if (!definition || !SOURCE_LABEL.test(definition[1])) continue;
+          const [, label, value] = definition;
+          if (definitions.has(label)) malformed.add(label);
+          definitions.set(label, value);
+        }
+      } else if (token.type === "blockquote") {
+        visitBlocks(token.tokens);
+      } else if (token.type === "list") {
+        for (const item of token.items ?? []) visitBlocks(item.tokens);
+      }
+    }
+  };
+  visitBlocks(tokens);
+
+  const anchors = [];
+  for (const [label, value] of definitions) {
+    const match = SOURCE_ANCHOR.exec(value);
+    if (!match || !SAFE_SOURCE_ID.test(match[1]) || !SAFE_SOURCE_ID.test(match[2])) {
+      malformed.add(label);
+      continue;
+    }
+    const timestamp = new Date(match[3]);
+    if (Number.isNaN(timestamp.valueOf()) || timestamp.toISOString() !== match[3]) {
+      malformed.add(label);
+      continue;
+    }
+    anchors.push({ sessionId: match[1], entryId: match[2], timestamp: match[3] });
+  }
+  const codes = [...malformed].map(() => "MALFORMED_SOURCE_ANCHOR");
+  for (const label of referenced) {
+    if (!definitions.has(label)) codes.push("SOURCE_DEFINITION_MISSING");
+  }
+  return { anchors, codes };
+}
+
+async function readSessionEntries(path, expectedSessionId, expectedEntryIds, budget) {
+  const entries = new Map();
+  let headerFound = false;
+  let scanLimited = false;
+  const input = createReadStream(path);
+  input.on("data", (chunk) => {
+    budget.bytes += chunk.length;
+    if (budget.bytes > budget.maxBytes) {
+      scanLimited = true;
+      input.destroy();
+    }
+  });
+  try {
+    const lines = createInterface({ input, crlfDelay: Infinity });
+    for await (const line of lines) {
+      if (scanLimited) break;
+      if (!line) continue;
+      const parsed = JSON.parse(line);
+      if (!headerFound) {
+        if (parsed?.type !== "session" || parsed.id !== expectedSessionId) {
+          input.destroy();
+          return { status: "invalid" };
+        }
+        headerFound = true;
+      } else if (typeof parsed?.id === "string" && typeof parsed?.timestamp === "string") {
+        budget.entries += 1;
+        if (budget.entries > budget.maxEntries) {
+          scanLimited = true;
+          input.destroy();
+          break;
+        }
+        if (!expectedEntryIds.has(parsed.id)) continue;
+        if (entries.has(parsed.id)) {
+          input.destroy();
+          return { status: "invalid" };
+        }
+        entries.set(parsed.id, parsed.timestamp);
+      }
+    }
+  } catch {
+    input.destroy();
+    return { status: scanLimited ? "limit" : "invalid" };
+  }
+  if (scanLimited) return { status: "limit" };
+  return headerFound ? { status: "ok", entries } : { status: "invalid" };
+}
+
+async function loadReferencedSessions(sessionRoot, anchors, limits) {
+  const sessions = new Map();
+  const requested = new Map();
+  for (const anchor of anchors) {
+    if (!requested.has(anchor.sessionId)) requested.set(anchor.sessionId, new Set());
+    requested.get(anchor.sessionId).add(anchor.entryId);
+  }
+  if (requested.size === 0) return sessions;
+  if (await entryKind(sessionRoot) !== "directory") return sessions;
+  const candidates = new Map([...requested].map(([id]) => [id, []]));
+  try {
+    const directory = await opendir(sessionRoot);
+    for await (const entry of directory) {
+      if (!entry.name.endsWith(".jsonl")) continue;
+      for (const sessionId of requested.keys()) {
+        if (entry.name.endsWith(`_${sessionId}.jsonl`)) {
+          candidates.get(sessionId).push(join(sessionRoot, entry.name));
+        }
+      }
+    }
+  } catch {
+    return sessions;
+  }
+  const budget = { bytes: 0, entries: 0, maxBytes: limits.maxBytes, maxEntries: limits.maxEntries };
+  for (const [sessionId, paths] of candidates) {
+    let invalid = false;
+    for (const path of paths.sort(compareText)) {
+      const stat = await lstat(path).catch(() => null);
+      if (!stat?.isFile() || stat.isSymbolicLink()) {
+        invalid = true;
+        continue;
+      }
+      const result = await readSessionEntries(path, sessionId, requested.get(sessionId), budget);
+      if (result.status === "ok") {
+        sessions.set(sessionId, result);
+        break;
+      }
+      if (result.status === "limit") {
+        sessions.set(sessionId, result);
+        break;
+      }
+      invalid = true;
+    }
+    if (!sessions.has(sessionId) && invalid) sessions.set(sessionId, { status: "invalid" });
+    if (budget.bytes > budget.maxBytes || budget.entries > budget.maxEntries) break;
+  }
+  if (budget.bytes > budget.maxBytes || budget.entries > budget.maxEntries) {
+    for (const sessionId of requested.keys()) {
+      if (!sessions.has(sessionId)) sessions.set(sessionId, { status: "limit" });
+    }
+  }
+  return sessions;
+}
+
 function hasRawCore(raw) {
   return extractBlocks(bodyFromRaw(raw)).some((block) => block.core);
 }
@@ -193,21 +376,31 @@ function issue(code, relativePath, affectsCore) {
 async function inspectMemoryVault({
   root,
   forbiddenRoots = [],
+  sessionRoot,
+  validateSources = false,
   maxIssues = MAX_ISSUES,
   maxScannedNotes = MAX_SCANNED_NOTES,
   maxScannedBytes = MAX_SCANNED_BYTES,
+  maxScannedSessionBytes = MAX_SCANNED_SESSION_BYTES,
+  maxScannedSessionEntries = MAX_SCANNED_SESSION_ENTRIES,
 } = {}) {
   if (
     typeof root !== "string" ||
     root.trim() === "" ||
     !Array.isArray(forbiddenRoots) ||
     forbiddenRoots.some((path) => typeof path !== "string" || path.trim() === "") ||
+    typeof validateSources !== "boolean" ||
+    (validateSources && (typeof sessionRoot !== "string" || sessionRoot.trim() === "")) ||
     !Number.isInteger(maxIssues) ||
     maxIssues < 1 ||
     !Number.isInteger(maxScannedNotes) ||
     maxScannedNotes < 1 ||
     !Number.isInteger(maxScannedBytes) ||
-    maxScannedBytes < 1
+    maxScannedBytes < 1 ||
+    !Number.isInteger(maxScannedSessionBytes) ||
+    maxScannedSessionBytes < 1 ||
+    !Number.isInteger(maxScannedSessionEntries) ||
+    maxScannedSessionEntries < 1
   ) {
     throw new MemoryError("INVALID_INPUT", "Memory inspection is invalid");
   }
@@ -264,6 +457,7 @@ async function inspectMemoryVault({
     else candidateIds.add(candidate.id);
   }
   const notes = [];
+  const sourceAnchors = [];
   let scannedBytes = 0;
   for (const candidate of candidates) {
     let stat;
@@ -297,8 +491,36 @@ async function inspectMemoryVault({
     try {
       const note = parseMarkdownMemoryNote(raw, { id: candidate.id, type: candidate.type });
       notes.push({ ...candidate, note, blocks: extractBlocks(note.body) });
+      if (validateSources) {
+        const sources = parseSourceFootnotes(note.body);
+        for (const code of sources.codes) errors.push(issue(code, candidate.relativePath, false));
+        for (const anchor of sources.anchors) sourceAnchors.push({ ...anchor, relativePath: candidate.relativePath });
+      }
     } catch (error) {
       errors.push(issue(error instanceof MemoryError ? error.code : "IO_ERROR", candidate.relativePath, hasRawCore(raw)));
+    }
+  }
+
+  if (validateSources) {
+    const sessions = await loadReferencedSessions(
+      resolve(sessionRoot),
+      sourceAnchors,
+      { maxBytes: maxScannedSessionBytes, maxEntries: maxScannedSessionEntries },
+    );
+    for (const anchor of sourceAnchors) {
+      const session = sessions.get(anchor.sessionId);
+      if (!session) {
+        errors.push(issue("SOURCE_SESSION_NOT_FOUND", anchor.relativePath, false));
+      } else if (session.status === "limit") {
+        scanLimited = true;
+        errors.push(issue("SOURCE_SESSION_SCAN_LIMIT_EXCEEDED", anchor.relativePath, false));
+      } else if (session.status === "invalid") {
+        errors.push(issue("SOURCE_SESSION_INVALID", anchor.relativePath, false));
+      } else if (!session.entries.has(anchor.entryId)) {
+        errors.push(issue("SOURCE_ENTRY_NOT_FOUND", anchor.relativePath, false));
+      } else if (session.entries.get(anchor.entryId) !== anchor.timestamp) {
+        errors.push(issue("SOURCE_TIMESTAMP_MISMATCH", anchor.relativePath, false));
+      }
     }
   }
 
@@ -308,7 +530,9 @@ async function inspectMemoryVault({
   }
   for (const id of duplicateIds) {
     const duplicateNotes = notes.filter((entry) => entry.note.id === id);
-    const affectsCore = duplicateNotes.some((entry) => entry.blocks.some((block) => block.core));
+    const affectsCore = duplicateNotes.some(
+      (entry) => entry.note.status === "active" && entry.blocks.some((block) => block.core),
+    );
     const duplicateCandidates = candidates.filter((entry) => entry.id === id);
     for (const entry of duplicateCandidates.slice(1)) errors.push(issue("DUPLICATE_ID", entry.relativePath, affectsCore));
   }
@@ -322,9 +546,9 @@ async function inspectMemoryVault({
         if (!MEMORY_ID_PATTERN.test(link.target)) code = "INVALID_LINK";
         else if (duplicateIds.has(link.target)) code = "DUPLICATE_ID";
         else if (!byId.has(link.target)) code = "BROKEN_LINK";
-        if (code) errors.push(issue(code, entry.relativePath, block.core));
+        if (code) errors.push(issue(code, entry.relativePath, block.core && entry.note.status === "active"));
       }
-      if (!block.core) continue;
+      if (!block.core || entry.note.status !== "active") continue;
       const text = renderInline(block.tokens, titles);
       if (!text) {
         errors.push(issue("EMPTY_CORE_BLOCK", entry.relativePath, true));
@@ -388,12 +612,16 @@ async function inspectMemoryVault({
 }
 
 export async function lintMemoryVault(options) {
-  const inspected = await inspectMemoryVault(options);
+  const inspected = await inspectMemoryVault({
+    ...options,
+    sessionRoot: options?.sessionRoot ?? resolveBridgeSessionDirectory(),
+    validateSources: true,
+  });
   return inspected.report;
 }
 
 export async function compileCoreMemory(options) {
-  const { report, text } = await inspectMemoryVault(options);
+  const { report, text } = await inspectMemoryVault({ ...options, validateSources: false });
   if (!report.core.valid) throw new MemoryError("CORE_INVALID", "Core memory is invalid");
   return {
     text,
