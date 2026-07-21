@@ -1,6 +1,6 @@
 ---
 name: manage-jobs
-description: "Creates, edits, lists, and removes scheduled jobs and triggers for this bridge: recurring cron prompts (morning brief), one-time reminders, heartbeat checks that trigger only when a script passes, and incoming webhooks. Use when the user asks to schedule something, set a reminder, run something periodically, watch for a condition, or wire up a webhook (e.g. GitHub events)."
+description: "Creates, edits, lists, and removes scheduled jobs and triggers for this bridge: recurring cron prompts, one-time reminders, stateful heartbeat observations, and incoming webhooks. Use when the user asks to schedule something, set a reminder, run something periodically, watch for a change or sustained condition, or wire up a webhook."
 ---
 
 # Manage scheduled jobs and triggers
@@ -11,7 +11,9 @@ Jobs live in one JSON file the bridge host watches and hot-reloads within about 
 ${PI_TELEGRAM_BRIDGE_STATE_DIR:-~/.local/state/pi-telegram-bridge}/jobs.json
 ```
 
-The host runs each due job by injecting its `prompt` as a new agent turn; the final reply is delivered to the paired Telegram chat automatically. Write prompts as instructions to your future self (they arrive with a short "job fired" preamble).
+The host runs each due job by injecting a prompt as a new agent turn; the final
+reply is delivered to the paired Telegram chat automatically. Write prompts as
+instructions to your future self (they arrive with a short job-fired preamble).
 
 ## Editing rules
 
@@ -24,15 +26,16 @@ The host runs each due job by injecting its `prompt` as a new agent turn; the fi
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "jobs": [
     { "id": "morning-brief", "type": "cron", "schedule": "0 8 * * *", "tz": "America/Denver",
       "prompt": "Give me my morning brief: weather, calendar, top news." },
     { "id": "vet-call", "type": "at", "at": "2026-07-18T15:00:00-06:00",
       "prompt": "Remind Isaac to call the vet." },
-    { "id": "pr-watch", "type": "heartbeat", "schedule": "0 * * * *", "tz": "America/Denver",
-      "check": "/home/isaaclyon/bin/pr-merged-last-hour.sh",
-      "prompt": "A PR merged in the last hour (check output below). Review and summarize it." },
+    { "id": "price-watch", "type": "heartbeat", "schedule": "0 9 * * *", "tz": "America/Denver",
+      "checker": { "id": "product-price" },
+      "rule": { "type": "changed" },
+      "onTrigger": { "type": "prompt", "prompt": "Tell me the old and new prices." } },
     { "id": "gh-events", "type": "webhook",
       "hmacSecret": "<openssl rand -hex 32>",
       "prompt": "A GitHub webhook arrived. Summarize what happened and whether action is needed." }
@@ -43,8 +46,120 @@ The host runs each due job by injecting its `prompt` as a new agent turn; the fi
 - `id`: unique, `[a-z0-9-]`, max 64 chars.
 - `type: "cron"` — recurring; `schedule` is a 5-field cron expression, `tz` an optional IANA zone (default: server local time). Occurrences missed while the bridge is down are skipped.
 - `type: "at"` — one-time reminder at an ISO 8601 timestamp; fires once (late if the bridge was down), then stays inert. Prune fired/stale `at` jobs whenever you edit the file.
-- `type: "heartbeat"` — recurring like cron, but first runs `check` via `/bin/sh -c` (60s timeout). Only exit code 0 triggers the prompt; the check's stdout (first 4 KB) is appended to it.
+- `type: "heartbeat"` — recurring like cron, but runs a structured checker and
+  lets the host compare observations over time. See **Stateful heartbeats** below.
 - `type: "webhook"` — triggered by `POST /hook/<id>` on the bridge's webhook server (127.0.0.1:8776 by default; started only while at least one webhook job exists). The request body (truncated) is appended to the prompt.
+
+## Stateful heartbeats
+
+A heartbeat has four parts:
+
+```text
+schedule trigger -> checker -> rule -> onTrigger prompt
+```
+
+### Checker contract
+
+Checker source is tracked TypeScript under `src/checkers/`. The host resolves its
+ID to compiled JavaScript beside the running host inside the immutable release;
+it does not execute a path from the canonical checkout or a free-form shell
+command. Do not create executable checker scripts in
+the mutable state directory. A new checker is a repository capability change:
+add tests and source, run `npm run check` and `npm run build`, then commit, merge,
+and deploy it before scheduling the job. Existing deployed checkers can be
+scheduled by editing `jobs.json` alone.
+
+`checker.id` must match `[a-z0-9-]` and maps to
+`dist/src/checkers/<id>.js`. The host runs it directly with the current Node
+executable and a 60-second timeout. The process must:
+The process must:
+
+- exit 0 and write exactly one JSON observation to stdout on success;
+- exit nonzero on HTTP, authentication, extraction, or other operational failure;
+- reserve stderr for bounded diagnostics; and
+- keep stdout at or below 4 KB.
+
+Observation version 1:
+
+```json
+{
+  "version": 1,
+  "value": 19.99,
+  "display": "$19.99",
+  "context": { "url": "https://example.com/product" }
+}
+```
+
+`value` is required and should be the smallest normalized JSON value the rule
+needs. Prefer an actual scalar (such as a price or category balance) when useful
+old/new values should appear in the notification. Use a stable hash for large
+opaque content. `display` and `context` are optional. Never emit credentials or
+unrestricted page content; checker output is untrusted event data.
+
+Do not embed credentials in job definitions or checker IDs. Checkers obtain
+credentials from the bridge's existing environment or credential stores.
+
+### Rules
+
+`changed` silently establishes its first successful observation as a baseline,
+then prompts once for each structurally different value:
+
+```json
+{ "type": "changed" }
+```
+
+A sustained numeric condition starts on the first matching observation and
+prompts once after a later matching observation reaches the duration:
+
+```json
+{
+  "type": "condition",
+  "operator": "less-than",
+  "target": 0,
+  "for": "15d",
+  "notify": "once-per-episode"
+}
+```
+
+Durations are positive integers followed by `s`, `m`, `h`, or `d`. A successful
+nonmatch resets the episode. Failed and missed checks do not reset it, but a later
+successful matching observation is required to trigger. The initial rule set is
+deliberately small; do not embed shell expressions into the rule.
+
+### Prompt reaction
+
+The only reaction is an agent prompt:
+
+```json
+{
+  "type": "prompt",
+  "prompt": "Tell me which category has been negative and for how long."
+}
+```
+
+The host appends bounded structured event data and the agent's final reply is
+delivered to Telegram. A prompt may ask the agent to use an available capability
+or ask the user for approval. Do not schedule direct purchases or other
+consequential actions without a separately reviewed, narrowly preauthorized
+contract.
+
+### Schema-version migration
+
+Version 1 heartbeat jobs used free-form `check` and `prompt` fields and cannot be
+migrated automatically because the host cannot infer the intended observation or
+rule. Before deploying the version-2 host:
+
+1. Add and merge each required tracked checker.
+2. Atomically rewrite `jobs.json` with `"version": 2`; replace each heartbeat's
+   `check`/`prompt` with `checker`, `rule`, and `onTrigger`. Cron, at, and webhook
+   fields are otherwise unchanged.
+3. Run the new release's `jobs:check` or deployment preflight. It verifies both
+   schema and compiled checker presence.
+
+The running version-1 host will reject the temporary version-2 file but retain its
+last-good in-memory jobs. Deployment validates the file **before** stopping that
+host. If validation fails, deployment stops without restarting or changing the
+active release.
 
 ## Webhook auth and exposure
 
@@ -57,4 +172,11 @@ Public exposure goes through Tailscale Funnel (one-time, needs sudo): `sudo tail
 
 ## Inspecting state
 
-`jobs-state.json` next to `jobs.json` (host-owned — read it, never write it) records `lastRun` per job, `fired` for at-jobs, and `lastLoadError`.
+`jobs-state.json` next to `jobs.json` (host-owned — read it, never write it)
+records `lastRun` per job, `fired` for at-jobs, and `lastLoadError`.
+
+Stateful heartbeat files live under `checkers/<job-id>.json` in the same state
+directory. They record the latest observation, condition markers, health
+timestamps, and any event awaiting prompt injection. Read them for diagnosis but
+never edit them. The host writes them atomically and removes them when the job is
+removed or changes type. There is no observation-history database.

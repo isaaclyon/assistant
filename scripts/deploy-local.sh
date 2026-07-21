@@ -98,6 +98,7 @@ command -v node >/dev/null 2>&1 || {
   echo "Node.js is not available on the deployment runner." >&2
   exit 1
 }
+NODE_BINARY="$(command -v node)"
 node -e 'if (Number(process.versions.node.split(".")[0]) !== 24) process.exit(1)' || {
   echo "Node.js 24 is required to match CI; found $(node --version)." >&2
   exit 1
@@ -143,6 +144,12 @@ if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
   echo "Canonical checkout has tracked edits; refusing to discard live agent work." >&2
   exit 1
 fi
+
+echo "==> Validating scheduled jobs against the new release"
+systemd-run --user --wait --pipe --quiet --collect \
+  --property="EnvironmentFile=-$HOME/.config/pi-telegram-bridge/environment" \
+  --setenv="PI_TELEGRAM_BRIDGE_CWD=$DEPLOY_PATH" \
+  "$NODE_BINARY" "$RELEASE_PATH/dist/src/jobs-check.js"
 
 if [[ -f "$UNIT_PATH" ]]; then
   UNIT_BACKUP="$(mktemp)"

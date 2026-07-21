@@ -1,6 +1,7 @@
 ---
 status: accepted
 relates-to: ADR-0003, ADR-0009
+superseded-in-part-by: ADR-0019
 ---
 
 # Scheduled jobs and webhook triggers via host-injected prompts
