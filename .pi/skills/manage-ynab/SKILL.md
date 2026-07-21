@@ -52,6 +52,23 @@ ynab transactions list --budget <budget-id> --since <YYYY-MM-DD> --limit 100
 ynab transactions search --budget <budget-id> --payee-name <name> --since <YYYY-MM-DD>
 ```
 
+For transaction-review and categorization suggestions, prefer the bounded
+read-only helpers instead of repeatedly reshaping raw CLI output:
+
+```bash
+node .pi/skills/manage-ynab/scripts/list-ynab-categories.mjs
+node .pi/skills/manage-ynab/scripts/ynab-transaction-context.mjs <transaction-id>
+```
+
+Call `list-ynab-categories.mjs` once per review batch. It returns active
+categories with IDs and group names. Call `ynab-transaction-context.mjs` for
+each transaction; it returns current details, exact-payee category frequencies,
+and at most five recent exact-payee examples. Use that evidence to suggest a
+small number of categories, but do not update the transaction until the user
+clearly instructs you. When an ambiguous transaction is deferred, offer to add
+a concise actionable memo; do not create an interaction log or overwrite an
+existing memo without the user's instruction.
+
 For “how is my budget?” default to the current month and summarize: income/activity if available, total budgeted, total spent/activity, remaining/available, overspent categories, and notable low balances. Do not imply that available money is cash on hand; distinguish category availability from account balances.
 
 ## Explicit transaction requests
