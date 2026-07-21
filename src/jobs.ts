@@ -74,8 +74,21 @@ export function parseJobsFile(raw: string): JobDefinition[] {
     throw new Error(`jobs.json is not valid JSON: ${message}`);
   }
   if (!isRecord(parsed)) throw new Error("jobs.json must be a JSON object");
-  if (parsed.version !== 2) throw new Error('jobs.json must declare "version": 2');
+  if (parsed.version !== 1 && parsed.version !== 2) {
+    throw new Error('jobs.json must declare "version": 2');
+  }
   if (!Array.isArray(parsed.jobs)) throw new Error('jobs.json must have a "jobs" array');
+  if (parsed.version === 1) {
+    const legacyHeartbeats = parsed.jobs.flatMap((entry: unknown, index: number) => {
+      if (!isRecord(entry) || entry.type !== "heartbeat") return [];
+      return [typeof entry.id === "string" && ID_PATTERN.test(entry.id) ? entry.id : `jobs[${index}]`];
+    });
+    if (legacyHeartbeats.length > 0) {
+      throw new Error(
+        `Legacy heartbeat jobs ${legacyHeartbeats.join(", ")} must be migrated to checker/rule/onTrigger before deployment`,
+      );
+    }
+  }
 
   const errors: string[] = [];
   const jobs: JobDefinition[] = [];

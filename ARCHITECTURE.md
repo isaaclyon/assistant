@@ -82,6 +82,12 @@ hooks, signing, and unbounded execution. It never pushes; see
 
 Pushes to `main` run checks on a GitHub-hosted runner. After they pass, the `assistant-production` self-hosted runner builds an immutable release for the exact merged SHA, updates the canonical agent checkout, removes untracked and ignored project settings plus all repo-local extension/skill locations (`.pi` and `.agents`), points systemd at the release, and requires both the application-ready signal and a stable PID. Activation failure restores the previous unit. See ADR-0005.
 
+Before activating a release with jobs schema version 2, deployment validates the
+external jobs file and referenced compiled checkers from the immutable release.
+The host has bounded read-only compatibility for version-1 cron, at, and webhook
+jobs; it never rewrites them. Legacy shell-command heartbeats require manual
+conversion and block deployment.
+
 ## Shutdown
 
 The host disposes `AgentSessionRuntime`, which emits `session_shutdown` before invalidating the session. This lets pi-telegram stop long polling and timers cleanly.
