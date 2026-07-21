@@ -15,6 +15,37 @@ The host runs each due job by injecting a prompt as a new agent turn; the final
 reply is delivered to the paired Telegram chat automatically. Write prompts as
 instructions to your future self (they arrive with a short job-fired preamble).
 
+## Listing jobs and status
+
+When the user asks what jobs, schedules, reminders, heartbeats, or triggers are
+set up, answer by inspecting the state directly; do not require a dedicated CLI
+command from the user.
+
+1. Read `jobs.json` for the configured jobs. If it does not exist, report that
+   no jobs are configured.
+2. Read `jobs-state.json` when present and report `lastLoadError` prominently;
+   it means the host rejected the latest file and may still be running the
+   previously loaded configuration. Use `lastRun[job-id]` for each job's last
+   scheduler run and `fired[job-id]` to distinguish fired one-time jobs.
+3. For every configured heartbeat, read `checkers/<job-id>.json` when present.
+   Summarize its latest observation/display, last attempt, last successful
+   observation, current health, and rule state. Treat the latest attempt as
+   failed only when `lastFailureAt` is newer than
+   `lastSuccessfulObservationAt`. For condition rules, a non-null
+   `conditionSince` means an episode is active; `notifiedAt` indicates whether
+   that episode has already notified. A non-null `pendingEvent` is awaiting
+   prompt injection. No state file normally means the heartbeat has not yet
+   established a baseline.
+4. Present a concise, human-readable list grouped by type. Include each job's
+   ID, schedule in plain language (with timezone), purpose, last run, and useful
+   status. For webhooks, identify the endpoint path but never print
+   `hmacSecret`, bearer secrets, or other credentials. Mention inactive fired
+   or stale `at` jobs rather than presenting them as upcoming.
+
+Use exact timestamps when they matter, translated to the job's timezone when
+practical. Distinguish configuration from observed runtime state and say when a
+state file is missing or malformed rather than guessing.
+
 ## Editing rules
 
 1. Read the current file first (it may not exist yet; start from the template below).
