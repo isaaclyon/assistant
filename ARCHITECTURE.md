@@ -22,8 +22,18 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 | Telegram token/pairing/offset | `~/.pi/agent/telegram.json` | pi-telegram |
 | Telegram polling ownership | `~/.pi/agent/locks.json` | pi-telegram |
 | Bridge environment overrides | `~/.config/pi-telegram-bridge/environment` | User/systemd |
+| Scheduled job definitions | `<stateDir>/jobs.json` | Agent/user |
+| Scheduled job run state | `<stateDir>/jobs-state.json` | Host |
+| Heartbeat observations | `<stateDir>/checkers/*.json` | Host |
 | Personal memory vault | `~/.local/share/pi-telegram-bridge/memory` (override: `PI_TELEGRAM_MEMORY_DIR`) | `personal-memory` skill CLI |
 | Process logs | user journal | systemd |
+
+Stateful heartbeat jobs separate their cron trigger, tracked TypeScript checker,
+host-evaluated rule, and agent-prompt reaction. Checkers emit bounded structured
+observations and never own mutable state. The host resolves checker IDs inside its
+immutable release and executes them directly with Node, while atomically retaining
+only the latest observation and temporal markers. See
+[ADR-0019](docs/adr/0019-stateful-heartbeat-observations.md).
 
 The personal memory vault is user-owned plain Markdown outside the checkout and
 releases, so it survives deployment cleanup and can be opened directly in

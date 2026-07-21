@@ -1,10 +1,16 @@
 import { Cron } from "croner";
-import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { type FSWatcher, watch } from "node:fs";
 import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
+import {
+  createHeartbeatRunner,
+  parseHeartbeatFields,
+  runCompiledHeartbeatChecker,
+  type StatefulHeartbeatDefinition,
+} from "./heartbeat.js";
 import { type WebhookServer, startWebhookServer } from "./webhook.js";
 
 export interface JobsLogger {
@@ -13,30 +19,29 @@ export interface JobsLogger {
   error(message: string): void;
 }
 
-interface JobBase {
+interface PromptJobBase {
   id: string;
   prompt: string;
 }
 
-export interface CronJob extends JobBase {
+export interface CronJob extends PromptJobBase {
   type: "cron";
   schedule: string;
   tz?: string;
 }
 
-export interface AtJob extends JobBase {
+export interface AtJob extends PromptJobBase {
   type: "at";
   at: string;
 }
 
-export interface HeartbeatJob extends JobBase {
+export interface HeartbeatJob extends StatefulHeartbeatDefinition {
   type: "heartbeat";
   schedule: string;
   tz?: string;
-  check: string;
 }
 
-export interface WebhookJob extends JobBase {
+export interface WebhookJob extends PromptJobBase {
   type: "webhook";
   hmacSecret?: string;
 }
@@ -51,7 +56,6 @@ interface JobsState {
 
 const ID_PATTERN = /^[a-z0-9-]{1,64}$/;
 const MAX_PROMPT_BYTES = 8 * 1024;
-const MAX_CHECK_OUTPUT_BYTES = 4 * 1024;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -70,7 +74,7 @@ export function parseJobsFile(raw: string): JobDefinition[] {
     throw new Error(`jobs.json is not valid JSON: ${message}`);
   }
   if (!isRecord(parsed)) throw new Error("jobs.json must be a JSON object");
-  if (parsed.version !== 1) throw new Error('jobs.json must declare "version": 1');
+  if (parsed.version !== 2) throw new Error('jobs.json must declare "version": 2');
   if (!Array.isArray(parsed.jobs)) throw new Error('jobs.json must have a "jobs" array');
 
   const errors: string[] = [];
@@ -92,15 +96,18 @@ export function parseJobsFile(raw: string): JobDefinition[] {
       return;
     }
     seenIds.add(id);
-    const prompt = entry.prompt;
-    if (
-      typeof prompt !== "string" ||
-      prompt.trim().length === 0 ||
-      Buffer.byteLength(prompt, "utf8") > MAX_PROMPT_BYTES
-    ) {
-      errors.push(`${label} (${id}): "prompt" must be a non-empty string of at most 8 KB`);
-      return;
-    }
+    const requirePrompt = (): string | undefined => {
+      const prompt = entry.prompt;
+      if (
+        typeof prompt !== "string" ||
+        prompt.trim().length === 0 ||
+        Buffer.byteLength(prompt, "utf8") > MAX_PROMPT_BYTES
+      ) {
+        errors.push(`${label} (${id}): "prompt" must be a non-empty string of at most 8 KB`);
+        return undefined;
+      }
+      return prompt;
+    };
 
     const requireSchedule = (): string | undefined => {
       const schedule = entry.schedule;
@@ -126,7 +133,8 @@ export function parseJobsFile(raw: string): JobDefinition[] {
     switch (entry.type) {
       case "cron": {
         const schedule = requireSchedule();
-        if (schedule === undefined) return;
+        const prompt = requirePrompt();
+        if (schedule === undefined || prompt === undefined) return;
         jobs.push({
           id,
           type: "cron",
@@ -137,33 +145,31 @@ export function parseJobsFile(raw: string): JobDefinition[] {
         return;
       }
       case "at": {
+        const prompt = requirePrompt();
         const at = entry.at;
         if (typeof at !== "string" || !Number.isFinite(Date.parse(at))) {
           errors.push(`${label} (${id}): "at" must be a parseable timestamp (ISO 8601)`);
           return;
         }
+        if (prompt === undefined) return;
         jobs.push({ id, type: "at", at, prompt });
         return;
       }
       case "heartbeat": {
         const schedule = requireSchedule();
-        if (schedule === undefined) return;
-        const check = entry.check;
-        if (typeof check !== "string" || check.trim().length === 0) {
-          errors.push(`${label} (${id}): "check" must be a non-empty shell command`);
-          return;
-        }
+        const fields = parseHeartbeatFields(entry, `${label} (${id})`, errors);
+        if (schedule === undefined || fields === undefined) return;
         jobs.push({
           id,
           type: "heartbeat",
           schedule,
-          check,
-          prompt,
+          ...fields,
           ...(entry.tz === undefined ? {} : { tz: entry.tz as string }),
         });
         return;
       }
       case "webhook": {
+        const prompt = requirePrompt();
         const hmacSecret = entry.hmacSecret;
         if (
           hmacSecret !== undefined &&
@@ -172,6 +178,7 @@ export function parseJobsFile(raw: string): JobDefinition[] {
           errors.push(`${label} (${id}): "hmacSecret" must be a non-empty string`);
           return;
         }
+        if (prompt === undefined) return;
         jobs.push({
           id,
           type: "webhook",
@@ -236,7 +243,8 @@ async function ensureWebhookSecret(path: string): Promise<string> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
-  const secret = (await readFile(path, "utf8")).trim();
+  const rawSecret = await readFile(path, "utf8");
+  const secret = rawSecret.trim();
   if (secret.length === 0) throw new Error(`Webhook secret file is empty: ${path}`);
   return secret;
 }
@@ -244,19 +252,6 @@ async function ensureWebhookSecret(path: string): Promise<string> {
 export interface CheckResult {
   ok: boolean;
   stdout: string;
-}
-
-function runShellCheck(command: string, timeoutMs: number): Promise<CheckResult> {
-  return new Promise((resolve) => {
-    execFile(
-      "/bin/sh",
-      ["-c", command],
-      { timeout: timeoutMs, maxBuffer: 1024 * 1024 },
-      (error, stdout) => {
-        resolve({ ok: !error, stdout: stdout ?? "" });
-      },
-    );
-  });
 }
 
 export interface JobSchedulerOptions {
@@ -268,7 +263,7 @@ export interface JobSchedulerOptions {
   nowMs?: () => number;
   tickIntervalMs?: number;
   checkTimeoutMs?: number;
-  runCheck?: (command: string, timeoutMs: number) => Promise<CheckResult>;
+  runCheck?: (checkerId: string, timeoutMs: number) => Promise<CheckResult>;
 }
 
 export interface JobScheduler {
@@ -288,7 +283,7 @@ export async function startJobScheduler({
   nowMs = Date.now,
   tickIntervalMs = 30_000,
   checkTimeoutMs = 60_000,
-  runCheck = runShellCheck,
+  runCheck = runCompiledHeartbeatChecker,
 }: JobSchedulerOptions): Promise<JobScheduler> {
   const jobsPath = join(stateDir, "jobs.json");
   const statePath = join(stateDir, "jobs-state.json");
@@ -299,6 +294,14 @@ export async function startJobScheduler({
   let state = await loadState(statePath);
   let webhookServer: WebhookServer | undefined;
   let stopped = false;
+  const heartbeatRunner = createHeartbeatRunner({
+    stateDir,
+    runCheck,
+    inject,
+    logger,
+    nowMs,
+    checkTimeoutMs,
+  });
 
   const persistState = async (): Promise<void> => {
     try {
@@ -378,6 +381,9 @@ export async function startJobScheduler({
       lastLoadError: null,
     };
     await persistState();
+    await heartbeatRunner.prune(
+      new Set(jobs.flatMap((job) => (job.type === "heartbeat" ? [job.id] : []))),
+    );
     const now = nowMs();
     nextRuns.clear();
     for (const job of jobs) {
@@ -387,29 +393,49 @@ export async function startJobScheduler({
     logger.info(`Loaded ${jobs.length} job(s) from ${jobsPath}.`);
   };
 
-  // Serialize reloads: fs.watch and the tick's mtime check can race, and two
-  // concurrent reloads could both try to start the webhook server.
-  let reloadChain: Promise<void> = Promise.resolve();
-  const reload = (): Promise<void> => {
-    const next = reloadChain.then(doReload, doReload);
-    reloadChain = next;
+  // Reloads and ticks share mutable job/state snapshots and must never overlap.
+  let operationChain: Promise<void> = Promise.resolve();
+  const enqueue = (operation: () => Promise<void>): Promise<void> => {
+    const next = operationChain.then(operation, operation);
+    operationChain = next.catch(() => {});
     return next;
   };
+  const reload = (): Promise<void> => {
+    if (stopped) return Promise.resolve();
+    return enqueue(async () => {
+      if (!stopped) await doReload();
+    });
+  };
 
-  const fireScheduled = async (job: CronJob | HeartbeatJob | AtJob): Promise<boolean> => {
+  const heartbeatIsCurrent = async (job: HeartbeatJob): Promise<boolean> => {
+    if (stopped) return false;
+    let raw: string;
+    try {
+      raw = await readFile(jobsPath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error(`Heartbeat '${job.id}' could not verify jobs.json: ${message}`);
+      }
+      return false;
+    }
+    let currentJobs: JobDefinition[];
+    try {
+      currentJobs = parseJobsFile(raw);
+    } catch {
+      // Invalid edits retain the last-good loaded jobs until corrected.
+      return true;
+    }
+    const current = currentJobs.find((entry) => entry.id === job.id);
+    return current?.type === "heartbeat" && isDeepStrictEqual(current, job);
+  };
+
+  const fireScheduled = async (job: CronJob | AtJob): Promise<boolean> => {
     let prompt: string;
     if (job.type === "at") {
       prompt = `One-time reminder '${job.id}' fired (scheduled for ${job.at}).\n\n${job.prompt}`;
-    } else if (job.type === "cron") {
-      prompt = `Scheduled job '${job.id}' fired (schedule: ${job.schedule}${job.tz ? ` ${job.tz}` : ""}).\n\n${job.prompt}`;
     } else {
-      const result = await runCheck(job.check, checkTimeoutMs);
-      if (!result.ok) {
-        logger.info(`Heartbeat '${job.id}' check did not pass; skipping trigger.`);
-        return true;
-      }
-      const stdout = result.stdout.slice(0, MAX_CHECK_OUTPUT_BYTES);
-      prompt = `Heartbeat job '${job.id}' check passed.\n\n${job.prompt}\n\nCheck output:\n${stdout}`;
+      prompt = `Scheduled job '${job.id}' fired (schedule: ${job.schedule}${job.tz ? ` ${job.tz}` : ""}).\n\n${job.prompt}`;
     }
     try {
       await inject(prompt);
@@ -421,37 +447,48 @@ export async function startJobScheduler({
     }
   };
 
-  let ticking = false;
-  const tick = async (): Promise<void> => {
-    if (stopped || ticking) return;
-    ticking = true;
-    try {
-      // ponytail: mtime poll backs up fs.watch; both funnel into reload().
-      const mtimeMs = (await stat(jobsPath).catch(() => undefined))?.mtimeMs;
-      if (mtimeMs !== lastMtimeMs) await reload();
-      for (const job of jobs) {
-        if (stopped) return;
-        const now = nowMs();
-        if (job.type === "at") {
-          if (state.fired[job.id] !== undefined || now < Date.parse(job.at)) continue;
-          if (await fireScheduled(job)) {
-            state.fired[job.id] = now;
-            state.lastRun[job.id] = now;
-            await persistState();
-          }
-          continue;
+  const doTick = async (): Promise<void> => {
+    if (stopped) return;
+    // ponytail: mtime poll backs up fs.watch; both funnel into reload().
+    const mtimeMs = (await stat(jobsPath).catch(() => undefined))?.mtimeMs;
+    if (mtimeMs !== lastMtimeMs) await doReload();
+    for (const job of jobs) {
+      if (stopped) return;
+      const now = nowMs();
+      if (job.type === "at") {
+        if (state.fired[job.id] !== undefined || now < Date.parse(job.at)) continue;
+        if (await fireScheduled(job)) {
+          state.fired[job.id] = now;
+          state.lastRun[job.id] = now;
+          await persistState();
         }
-        if (job.type === "webhook") continue;
-        const dueMs = nextRuns.get(job.id);
-        if (dueMs === undefined || now < dueMs) continue;
-        computeNextRun(job, now);
-        await fireScheduled(job);
-        state.lastRun[job.id] = now;
-        await persistState();
+        continue;
       }
-    } finally {
-      ticking = false;
+      if (job.type === "webhook") continue;
+      const dueMs = nextRuns.get(job.id);
+      if (dueMs === undefined || now < dueMs) continue;
+      computeNextRun(job, now);
+      if (job.type === "heartbeat") {
+        await heartbeatRunner.run(job, () => heartbeatIsCurrent(job));
+      } else {
+        await fireScheduled(job);
+      }
+      state.lastRun[job.id] = now;
+      await persistState();
     }
+  };
+
+  let tickPending = false;
+  const tick = (): Promise<void> => {
+    if (stopped || tickPending) return Promise.resolve();
+    tickPending = true;
+    return enqueue(async () => {
+      try {
+        await doTick();
+      } finally {
+        tickPending = false;
+      }
+    });
   };
 
   await reload();
