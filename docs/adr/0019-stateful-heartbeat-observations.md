@@ -47,10 +47,12 @@ Model a heartbeat as `trigger -> checker -> rule -> onTrigger`.
 - Checker command or rule changes reset that job's baseline through a configuration
   fingerprint. Removing or changing the type of a job prunes its checker state.
 - `jobs.json` advances to schema version 2. Heartbeats use `checker`, `rule`, and
-  `onTrigger`; version-1 heartbeat compatibility is not retained. Deployment runs
-  the new release's validator before stopping the old service, so an unmigrated
-  file or missing compiled checker blocks activation rather than silently
-  starting without jobs.
+  `onTrigger`; version-1 heartbeat compatibility is not retained. The host has
+  bounded read-only compatibility for version-1 cron, at, and webhook jobs so a
+  release can be activated without mutating external state. Deployment runs the
+  new release's validator before stopping the old service. A legacy heartbeat or
+  missing compiled checker blocks activation rather than silently starting
+  without jobs.
 
 ## Considered options
 
@@ -72,6 +74,6 @@ Model a heartbeat as `trigger -> checker -> rule -> onTrigger`.
 - Prompt injection is at-least-once if the process crashes after injection but
   before clearing the pending event. ADR-0010's non-durable final Telegram send
   limitation remains unchanged.
-- Existing external `jobs.json` files must be migrated to version 2 before a
-  deployment using this decision. The old host retains its last-good version-1
-  jobs while the new version-2 file awaits deployment.
+- Existing external version-1 files without heartbeats continue to run unchanged
+  and should become version 2 on their next normal edit. Legacy heartbeats require
+  an explicit checker/rule rewrite before deployment.

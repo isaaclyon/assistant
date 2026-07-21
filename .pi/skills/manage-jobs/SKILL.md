@@ -145,9 +145,13 @@ contract.
 
 ### Schema-version migration
 
-Version 1 heartbeat jobs used free-form `check` and `prompt` fields and cannot be
+The version-2 host can read an existing version-1 file containing only cron, at,
+and webhook jobs without rewriting it. Convert the file to version 2 on its next
+normal atomic edit; those job fields are unchanged.
+
+Version-1 heartbeat jobs used free-form `check` and `prompt` fields and cannot be
 migrated automatically because the host cannot infer the intended observation or
-rule. Before deploying the version-2 host:
+rule. Before deploying one of those jobs:
 
 1. Add and merge each required tracked checker.
 2. Atomically rewrite `jobs.json` with `"version": 2`; replace each heartbeat's
@@ -156,10 +160,9 @@ rule. Before deploying the version-2 host:
 3. Run the new release's `jobs:check` or deployment preflight. It verifies both
    schema and compiled checker presence.
 
-The running version-1 host will reject the temporary version-2 file but retain its
-last-good in-memory jobs. Deployment validates the file **before** stopping that
-host. If validation fails, deployment stops without restarting or changing the
-active release.
+Deployment validates with the new release **before** stopping the old host. A
+legacy heartbeat or validation failure stops deployment without rewriting
+`jobs.json`, restarting the service, or changing the active release.
 
 ## Webhook auth and exposure
 

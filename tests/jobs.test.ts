@@ -58,8 +58,41 @@ describe("parseJobsFile", () => {
 
   it("rejects invalid JSON, versions, and shapes", () => {
     expect(() => parseJobsFile("{nope")).toThrow(/not valid JSON/);
-    expect(() => parseJobsFile('{"version":1,"jobs":[]}')).toThrow(/"version": 2/);
+    expect(() => parseJobsFile('{"version":3,"jobs":[]}')).toThrow(/"version": 2/);
     expect(() => parseJobsFile('{"version":2}')).toThrow(/"jobs" array/);
+  });
+
+  it("reads version-1 jobs that do not use legacy heartbeat shell commands", () => {
+    const jobs = parseJobsFile(
+      JSON.stringify({
+        version: 1,
+        jobs: [
+          { id: "brief", type: "cron", schedule: "0 8 * * *", prompt: "p" },
+          { id: "once", type: "at", at: "2026-07-18T15:00:00Z", prompt: "p" },
+          { id: "hook", type: "webhook", prompt: "p" },
+        ],
+      }),
+    );
+    expect(jobs.map((job) => job.type)).toEqual(["cron", "at", "webhook"]);
+  });
+
+  it("rejects version-1 heartbeat jobs with an actionable migration error", () => {
+    expect(() =>
+      parseJobsFile(
+        JSON.stringify({
+          version: 1,
+          jobs: [
+            {
+              id: "legacy-watch",
+              type: "heartbeat",
+              schedule: "0 * * * *",
+              check: "legacy.sh",
+              prompt: "p",
+            },
+          ],
+        }),
+      ),
+    ).toThrow(/legacy heartbeat jobs.*legacy-watch.*must be migrated/i);
   });
 
   it("collects per-job validation errors", () => {
