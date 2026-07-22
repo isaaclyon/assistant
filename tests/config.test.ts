@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -7,10 +7,15 @@ import {
   hasConfiguredTelegramToken,
   ensureCodexConfig,
   isProcessAlive,
+  loadBridgeInstanceConfig,
+  loadBridgeRuntimeConfig,
   readDefaultTelegramLock,
+  readTelegramLock,
   resolveBridgeConfig,
+  resolveBridgeInstanceConfig,
   shouldRecoverTelegramOwnership,
 } from "../src/config.js";
+import { parseBridgeInstanceManifest } from "../src/instances.js";
 
 describe("resolveBridgeConfig", () => {
   it("uses a dedicated state directory and the home directory as the agent cwd", () => {
@@ -64,6 +69,137 @@ describe("resolveBridgeConfig", () => {
     expect(() =>
       resolveBridgeConfig({ PI_TELEGRAM_BRIDGE_WEBHOOK_PORT: "not-a-port" }, "/home/tester"),
     ).toThrow(/port number/);
+  });
+});
+
+describe("resolveBridgeInstanceConfig", () => {
+  it("selects one stable instance and derives its resource, workspace, and private state boundaries", () => {
+    const manifest = parseBridgeInstanceManifest(
+      JSON.stringify({
+        version: 1,
+        instances: [
+          {
+            id: "isaac",
+            displayName: "Isaac Bot",
+            principal: "isaac",
+            telegramProfile: "isaac",
+            telegramSurface: { type: "private" },
+            workspaceCwd: "/worktrees/isaac",
+            capabilityProfile: "personal-isaac",
+            credentialScope: "isaac-personal",
+            memoryView: "owner-and-household",
+            jobsRole: "coordinator",
+          },
+        ],
+      }),
+    );
+
+    const config = resolveBridgeInstanceConfig(
+      manifest,
+      "isaac",
+      {
+        PI_TELEGRAM_BRIDGE_STATE_ROOT: "/state",
+        PI_TELEGRAM_BRIDGE_CONFIG_ROOT: "/private-config",
+        PI_CODING_AGENT_DIR: "/agent",
+      },
+      "/home/tester",
+      "/opt/assistant/releases/abc123",
+    );
+
+    expect(config).toMatchObject({
+      instanceId: "isaac",
+      displayName: "Isaac Bot",
+      principal: "isaac",
+      telegramProfile: "isaac",
+      telegramSurface: { type: "private" },
+      resourceRoot: "/opt/assistant/releases/abc123",
+      workspaceCwd: "/worktrees/isaac",
+      capabilityProfile: "personal-isaac",
+      credentialScope: "isaac-personal",
+      memoryView: "owner-and-household",
+      jobsRole: "coordinator",
+      agentDir: "/agent",
+      stateDir: "/state/instances/isaac",
+      sessionDir: "/state/instances/isaac/sessions",
+      inboxPath: "/state/instances/isaac/inbox.db",
+      codexConfigPath: "/state/instances/isaac/pi-codex-conversion.json",
+      restartMarkerPath: "/state/instances/isaac/restart-pending.json",
+      runtimeMetadataPath: "/state/instances/isaac/runtime.json",
+      checkerStateDir: "/state/instances/isaac/checkers",
+      environmentFilePath: "/private-config/instances/isaac.env",
+    });
+  });
+
+  it("loads the private production manifest and selects the service instance ID", async () => {
+    const configRoot = await mkdtemp(join(tmpdir(), "bridge-instance-config-"));
+    const manifestPath = join(configRoot, "instances.json");
+    await mkdir(join(configRoot, "instances"), { recursive: true });
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        version: 1,
+        instances: [
+          {
+            id: "emma",
+            displayName: "Emma Bot",
+            principal: "emma",
+            telegramProfile: "emma",
+            telegramSurface: { type: "private" },
+            workspaceCwd: "/worktrees/emma",
+            capabilityProfile: "personal-emma",
+            credentialScope: "emma-personal",
+            memoryView: "owner-and-household",
+            jobsRole: "target-only",
+          },
+        ],
+      }),
+      { mode: 0o600 },
+    );
+    await writeFile(
+      join(configRoot, "instances", "emma.env"),
+      "PI_TELEGRAM_CREDENTIAL_SCOPE=emma-personal\n",
+      { mode: 0o600 },
+    );
+
+    await expect(
+      loadBridgeInstanceConfig(
+        {
+          PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST: manifestPath,
+          PI_TELEGRAM_BRIDGE_INSTANCE_ID: "emma",
+          PI_TELEGRAM_BRIDGE_STATE_ROOT: "/state",
+          PI_TELEGRAM_BRIDGE_CONFIG_ROOT: configRoot,
+        },
+        "/home/tester",
+        "/opt/assistant/releases/abc123",
+      ),
+    ).resolves.toMatchObject({
+      instanceId: "emma",
+      principal: "emma",
+      workspaceCwd: "/worktrees/emma",
+      stateDir: "/state/instances/emma",
+      environmentFilePath: join(configRoot, "instances", "emma.env"),
+    });
+  });
+
+  it("keeps the current singleton paths only when no instance migration is configured", async () => {
+    await expect(
+      loadBridgeRuntimeConfig(
+        {
+          PI_TELEGRAM_BRIDGE_CWD: "/srv/current-assistant",
+          PI_TELEGRAM_BRIDGE_STATE_DIR: "/state/current-assistant",
+        },
+        "/home/tester",
+        "/opt/assistant/releases/abc123",
+      ),
+    ).resolves.toEqual({
+      agentDir: "/home/tester/.pi/agent",
+      codexConfigPath: "/state/current-assistant/pi-codex-conversion.json",
+      cwd: "/srv/current-assistant",
+      sessionDir: "/state/current-assistant/sessions",
+      stateDir: "/state/current-assistant",
+      webhookHost: "127.0.0.1",
+      webhookPort: 8776,
+    });
   });
 });
 
@@ -126,6 +262,27 @@ describe("Telegram ownership lock", () => {
       pid: 123,
       heartbeatMs: 456,
     });
+  });
+
+  it("reads only the selected named-profile ownership lock", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bridge-profile-locks-"));
+    const path = join(dir, "locks.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        "@llblab/pi-telegram": { pid: 100 },
+        "@llblab/pi-telegram:isaac": { pid: 101, heartbeatMs: 500 },
+        "@llblab/pi-telegram:emma": { pid: 102 },
+      }),
+    );
+
+    await expect(readTelegramLock(path, "isaac")).resolves.toEqual({
+      pid: 101,
+      heartbeatMs: 500,
+    });
+    await expect(readTelegramLock(path, "emma")).resolves.toEqual({ pid: 102 });
+    await expect(readTelegramLock(path, "missing")).resolves.toBeUndefined();
+    await expect(readTelegramLock(path, "default")).resolves.toEqual({ pid: 100 });
   });
 
   it("rejects invalid process identifiers in ownership locks", async () => {
@@ -196,6 +353,27 @@ describe("hasConfiguredTelegramToken", () => {
     await writeFile(path, JSON.stringify({ botToken: "secret" }), { mode: 0o600 });
 
     await expect(hasConfiguredTelegramToken(path)).resolves.toBe(true);
+  });
+
+  it("recognizes only the selected named Telegram profile", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bridge-profile-config-"));
+    const path = join(dir, "telegram.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        botToken: "default-secret",
+        profiles: {
+          isaac: { botToken: "isaac-secret" },
+          blank: { botToken: "   " },
+        },
+      }),
+      { mode: 0o600 },
+    );
+
+    await expect(hasConfiguredTelegramToken(path, "isaac")).resolves.toBe(true);
+    await expect(hasConfiguredTelegramToken(path, "missing")).resolves.toBe(false);
+    await expect(hasConfiguredTelegramToken(path, "blank")).resolves.toBe(false);
+    await expect(hasConfiguredTelegramToken(path, "default")).resolves.toBe(true);
   });
 
   it("returns false for missing, malformed, or blank configuration", async () => {

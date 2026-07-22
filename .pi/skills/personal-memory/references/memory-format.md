@@ -24,6 +24,8 @@ schema: 1
 id: "2f5f167d-7a18-4457-8de7-f2f801f1e934"
 type: "preference"
 status: "active"
+scope: "personal"
+owner: "isaac"
 title: "Coffee preference"
 tags: ["coffee", "food"]
 created: "2026-07-19T03:30:00.000Z"
@@ -32,10 +34,29 @@ updated: "2026-07-19T03:30:00.000Z"
 Prefers light-roast coffee.
 ```
 
-`schema`, `id`, `type`, `title`, `tags`, `created`, and `updated` are required.
+`schema`, `id`, `type`, `scope`, `title`, `tags`, `created`, and `updated` are required.
 `status` is `active`, `superseded`, or `archived`. New notes include it and
 default to `active`; existing schema-1 notes without it are treated as active
 and gain the field on their next CLI mutation.
+`scope` is `personal` or `household`. Personal notes require an `owner`
+(`isaac` or `emma`); household notes omit `owner`. The bridge supplies a trusted
+principal and memory view to every CLI invocation: personal views expose only
+that owner's personal notes plus household notes, household views expose only
+household notes, and `none` exposes no memory. New notes default to the narrowest
+scope allowed by the view. User input cannot select an owner. Promoting a note
+to household is an ordinary revision-checked update; the owner field is removed
+atomically. Legacy schema-1 notes without scope are conservatively interpreted
+as Isaac-personal and gain explicit fields on their next mutation; they are
+never inferred to be household data. The legacy spelling `shared` is rejected
+rather than guessed.
+
+`lint` reports `LEGACY_SCOPE_UNMATERIALIZED` for those notes only in Isaac's
+effective view. This is the bounded migration preview (inspection is capped at
+1,000 notes and 16 MiB). For each finding, `read` the stable ID to obtain its
+current revision, confirm the intended disclosure, then use a revision-checked
+`update` with `patch.scope`. `personal` materializes Isaac ownership;
+`household` deliberately broadens visibility. Process one note at a time so a
+concurrent Obsidian edit fails with `REVISION_CONFLICT`.
 Frontmatter may use any valid YAML representation, including block sequences
 written by Obsidian. Unknown properties and comments retain their meaning on
 CLI updates, though frontmatter formatting may be normalized. Invalid or
@@ -160,14 +181,14 @@ be inspected. Forgetting does not remove prior content from Git history.
 ## Requests
 
 ```json
-// add — status defaults to active; data: note metadata (no body)
-{"type":"preference","status":"active","title":"Coffee preference","tags":["coffee"],"body":"Prefers light-roast coffee."}
+// add — status defaults to active; scope defaults from trusted runtime view; data: note metadata (no body)
+{"type":"preference","status":"active","scope":"personal","title":"Coffee preference","tags":["coffee"],"body":"Prefers light-roast coffee."}
 
 // read — data: metadata plus body
 {"id":"2f5f167d-7a18-4457-8de7-f2f801f1e934"}
 
-// update — patch keys: status, title, tags, body; data: updated note with body
-{"id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","ifRevision":"sha256:…","patch":{"status":"superseded"}}
+// update — patch keys: status, scope, title, tags, body; data: updated note with body
+{"id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","ifRevision":"sha256:…","patch":{"scope":"household"}}
 
 // delete — confirmId must equal id; data: {"id":…,"deleted":true}
 {"id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","ifRevision":"sha256:…","confirmId":"2f5f167d-7a18-4457-8de7-f2f801f1e934"}
@@ -197,4 +218,5 @@ results capped at 50 (default 10), snippets at 240 characters. Warnings are
 sanitized `{code, relativePath}` pairs; note contents never appear in errors.
 Search, list, and happenings default to `statuses:["active"]`; pass explicit
 statuses to inspect superseded or archived notes. Direct reads by ID work for
-all statuses.
+all statuses only when the trusted memory view permits that note's scope and
+owner.

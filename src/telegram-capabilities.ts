@@ -65,15 +65,94 @@ export interface TelegramHostNewSessionResult {
 
 export type TelegramHostNewSession = () => Promise<TelegramHostNewSessionResult>;
 
+export interface TelegramHostHouseholdGroup {
+  kind: "household-group";
+  chatId: number;
+  actors: readonly [
+    { userId: number; label: "Isaac" },
+    { userId: number; label: "Emma" },
+  ];
+}
+
+interface HostRegistry extends Record<string, unknown> {
+  version: 1;
+  provider?: TelegramHostNewSession;
+  token?: object;
+  householdGroup?: TelegramHostHouseholdGroup;
+  householdToken?: object;
+}
+
+const HOST_REGISTRY_KEY = Symbol.for("pi-telegram.host-capability-registry");
+
+function isHostRegistry(value: unknown): value is HostRegistry {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  const provider = candidate.provider;
+  const token = candidate.token;
+  const householdGroup = candidate.householdGroup;
+  const householdToken = candidate.householdToken;
+  return (
+    candidate.version === 1 &&
+    (provider === undefined || typeof provider === "function") &&
+    (token === undefined || (typeof token === "object" && token !== null)) &&
+    (provider === undefined) === (token === undefined) &&
+    (householdGroup === undefined ||
+      (typeof householdGroup === "object" && householdGroup !== null)) &&
+    (householdToken === undefined ||
+      (typeof householdToken === "object" && householdToken !== null)) &&
+    (householdGroup === undefined) === (householdToken === undefined)
+  );
+}
+
+function bindHostCapability(
+  field: "provider" | "householdGroup",
+  tokenField: "token" | "householdToken",
+  value: TelegramHostNewSession | TelegramHostHouseholdGroup,
+  registeredError: string,
+): () => void {
+  const store = globalThis as Record<PropertyKey, unknown>;
+  const existing = store[HOST_REGISTRY_KEY];
+  let registry: HostRegistry;
+  if (existing === undefined) {
+    registry = { version: 1 };
+    store[HOST_REGISTRY_KEY] = registry;
+  } else if (isHostRegistry(existing)) {
+    registry = existing;
+  } else {
+    throw new Error(
+      "Telegram host capability registry is occupied by an incompatible value.",
+    );
+  }
+  if (registry[field]) throw new Error(registeredError);
+  const token = {};
+  (registry as Record<string, unknown>)[field] = value;
+  (registry as Record<string, unknown>)[tokenField] = token;
+  return () => {
+    if (registry[tokenField] !== token) return;
+    delete registry[field];
+    delete registry[tokenField];
+  };
+}
+
 export function bindTelegramHostNewSession(
   provider: TelegramHostNewSession,
 ): () => void {
-  return bindRegistry(
-    Symbol.for("pi-telegram.host-capability-registry"),
+  return bindHostCapability(
     "provider",
+    "token",
     provider,
-    "Telegram host capability registry is occupied by an incompatible value.",
     "Telegram host newSession capability is already registered",
+  );
+}
+
+export function bindTelegramHostHouseholdGroup(
+  policy: TelegramHostHouseholdGroup,
+): () => void {
+  return bindHostCapability(
+    "householdGroup",
+    "householdToken",
+    policy,
+    "Telegram host household group capability is already registered",
   );
 }
 

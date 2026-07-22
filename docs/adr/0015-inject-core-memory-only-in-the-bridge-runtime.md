@@ -18,7 +18,8 @@ memory stale after an edit.
 
 The host binds a token-guarded process-local runtime marker for its lifetime. A
 repo-local `before_agent_start` extension checks that marker, compiles the vault
-through ADR-0014's existing renderer, and appends the exact projection to the
+through ADR-0014's existing renderer using the host-bound instance principal
+and memory view, and appends the exact projection to the
 chained system prompt on every agent start. With no marker or no selected core,
 the extension is a no-op.
 
@@ -40,6 +41,8 @@ turn without core memory; the compiler never returns a partial projection.
 ## Consequences
 
 - Ordinary Pi sessions can load the extension but do not receive core memory.
+- Isaac, Emma, and Shared Bot receive independently filtered core projections;
+  Builder's `none` view compiles an empty projection.
 - Each agent start pays one bounded vault scan of at most 1,000 notes and 16 MiB.
 - Invalid core cannot block unrelated assistant work, but it is absent until the
   vault is repaired; the process log records the extension failure.

@@ -4,9 +4,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
-  resolveBridgeSessionDirectory,
+  resolveBridgeSessionDirectories,
   resolveMemoryDirectory,
   resolveMemoryGitAutocommit,
+  resolveMemoryView,
 } from "./config.mjs";
 import { commitMemoryMutation, prepareMemoryGitAutocommit } from "./git.mjs";
 import { compileCoreMemory, lintMemoryVault } from "./inspect.mjs";
@@ -95,11 +96,12 @@ export async function runMemoryCli({
 
   try {
     const root = resolveMemoryDirectory(env);
+    const view = resolveMemoryView(env);
     const forbiddenRoots = [cwd, PROJECT_ROOT];
     // Constructing the store enforces lexical vault confinement; search
     // bypasses the store's per-operation root checks, so verify the real
     // (symlink-resolved) root explicitly before scanning.
-    const store = createMarkdownMemoryStore({ root, forbiddenRoots });
+    const store = createMarkdownMemoryStore({ root, forbiddenRoots, ...view });
     let gitRoot;
     if (MUTATING_COMMANDS.has(command) && resolveMemoryGitAutocommit(env)) {
       if (!(await store.verifyRoot())) {
@@ -113,11 +115,16 @@ export async function runMemoryCli({
     let data;
     if (command === "lint" || command === "core") {
       if (Object.keys(request).length > 0) throw new MemoryError("INVALID_INPUT", "Request must be empty");
-      const options = { root, forbiddenRoots, sessionRoot: resolveBridgeSessionDirectory(env) };
+      const options = {
+        root,
+        forbiddenRoots,
+        sessionRoots: resolveBridgeSessionDirectories(env),
+        ...view,
+      };
       data = command === "lint" ? await lintMemoryVault(options) : await compileCoreMemory(options);
     } else if (command === "search" || command === "happenings") {
       await store.verifyRoot();
-      const backend = createMarkdownMemorySearchBackend({ root });
+      const backend = createMarkdownMemorySearchBackend({ root, ...view });
       data = await backend[command](request);
     } else if (command === "list") {
       data = { memories: await store.list(request) };

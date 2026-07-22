@@ -10,4 +10,7 @@ export function compileCoreMemory(options: {
   root: string;
   forbiddenRoots?: string[];
   sessionRoot?: string;
+  sessionRoots?: string[];
+  principal?: "isaac" | "emma" | "household" | "engineering";
+  memoryView?: "owner-and-household" | "household" | "none";
 }): Promise<CompiledCoreMemory>;

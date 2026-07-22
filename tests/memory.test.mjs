@@ -68,7 +68,7 @@ describe("Markdown personal memory store", () => {
     });
     expect(added.revision).toMatch(/^sha256:[0-9a-f]{64}$/);
     await expect(readFile(join(root, added.relativePath), "utf8")).resolves.toBe(
-      `---\nschema: 1\nid: "11111111-1111-4111-8111-111111111111"\ntype: "preference"\nstatus: "active"\ntitle: "Coffee preference"\ntags: ["coffee","food"]\ncreated: "2026-07-19T03:30:00.000Z"\nupdated: "2026-07-19T03:30:00.000Z"\n---\nPrefers light-roast coffee.\n`,
+      `---\nschema: 2\nid: "11111111-1111-4111-8111-111111111111"\ntype: "preference"\nstatus: "active"\nscope: "personal"\nowner: "isaac"\ntitle: "Coffee preference"\ntags: ["coffee","food"]\ncreated: "2026-07-19T03:30:00.000Z"\nupdated: "2026-07-19T03:30:00.000Z"\n---\nPrefers light-roast coffee.\n`,
     );
     await expect(store.read({ id: added.id })).resolves.toMatchObject({
       ...added,
@@ -255,11 +255,17 @@ describe("Markdown personal memory store", () => {
     const added = await store.add({ type: "reference", title: "Example reference", body: "Body" });
     const path = join(root, added.relativePath);
     const raw = await readFile(path, "utf8");
-    await writeFile(path, raw.replace("schema: 1\n", ""));
+    await writeFile(path, raw.replace("schema: 2\n", ""));
     await expectMemoryError(store.read({ id: added.id }), "MALFORMED_NOTE");
 
     await writeFile(path, raw.replace("title:", "title: \"duplicate\"\ntitle:"));
 
+    await expectMemoryError(store.read({ id: added.id }), "MALFORMED_NOTE");
+
+    await writeFile(path, raw.replace('owner: "isaac"\n', ""));
+    await expectMemoryError(store.read({ id: added.id }), "MALFORMED_NOTE");
+
+    await writeFile(path, raw.replace('scope: "personal"', 'scope: "household"'));
     await expectMemoryError(store.read({ id: added.id }), "MALFORMED_NOTE");
 
     await mkdir(join(root, "people"), { recursive: true, mode: 0o700 });

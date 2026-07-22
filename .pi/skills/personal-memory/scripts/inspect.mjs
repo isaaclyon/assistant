@@ -13,7 +13,9 @@ import {
   MAX_MEMORY_NOTE_BYTES,
   MemoryError,
   createMarkdownMemoryStore,
+  memoryViewAllows,
   parseMarkdownMemoryNote,
+  validateMemoryView,
 } from "./store.mjs";
 
 const CORE_MEMORY_BUDGET = 4_000;
@@ -311,7 +313,7 @@ async function readSessionEntries(path, expectedSessionId, expectedEntryIds, bud
   return headerFound ? { status: "ok", entries } : { status: "invalid" };
 }
 
-async function loadReferencedSessions(sessionRoot, anchors, limits) {
+async function loadReferencedSessions(sessionRoots, anchors, limits) {
   const sessions = new Map();
   const requested = new Map();
   for (const anchor of anchors) {
@@ -319,20 +321,22 @@ async function loadReferencedSessions(sessionRoot, anchors, limits) {
     requested.get(anchor.sessionId).add(anchor.entryId);
   }
   if (requested.size === 0) return sessions;
-  if (await entryKind(sessionRoot) !== "directory") return sessions;
   const candidates = new Map([...requested].map(([id]) => [id, []]));
-  try {
-    const directory = await opendir(sessionRoot);
-    for await (const entry of directory) {
-      if (!entry.name.endsWith(".jsonl")) continue;
-      for (const sessionId of requested.keys()) {
-        if (entry.name.endsWith(`_${sessionId}.jsonl`)) {
-          candidates.get(sessionId).push(join(sessionRoot, entry.name));
+  for (const sessionRoot of sessionRoots) {
+    if (await entryKind(sessionRoot) !== "directory") continue;
+    try {
+      const directory = await opendir(sessionRoot);
+      for await (const entry of directory) {
+        if (!entry.name.endsWith(".jsonl")) continue;
+        for (const sessionId of requested.keys()) {
+          if (entry.name.endsWith(`_${sessionId}.jsonl`)) {
+            candidates.get(sessionId).push(join(sessionRoot, entry.name));
+          }
         }
       }
+    } catch {
+      continue;
     }
-  } catch {
-    return sessions;
   }
   const budget = { bytes: 0, entries: 0, maxBytes: limits.maxBytes, maxEntries: limits.maxEntries };
   for (const [sessionId, paths] of candidates) {
@@ -376,7 +380,10 @@ function issue(code, relativePath, affectsCore) {
 async function inspectMemoryVault({
   root,
   forbiddenRoots = [],
+  principal = "isaac",
+  memoryView = "owner-and-household",
   sessionRoot,
+  sessionRoots,
   validateSources = false,
   maxIssues = MAX_ISSUES,
   maxScannedNotes = MAX_SCANNED_NOTES,
@@ -384,13 +391,19 @@ async function inspectMemoryVault({
   maxScannedSessionBytes = MAX_SCANNED_SESSION_BYTES,
   maxScannedSessionEntries = MAX_SCANNED_SESSION_ENTRIES,
 } = {}) {
+  const effectiveSessionRoots = sessionRoots ?? (sessionRoot === undefined ? [] : [sessionRoot]);
   if (
     typeof root !== "string" ||
     root.trim() === "" ||
     !Array.isArray(forbiddenRoots) ||
     forbiddenRoots.some((path) => typeof path !== "string" || path.trim() === "") ||
     typeof validateSources !== "boolean" ||
-    (validateSources && (typeof sessionRoot !== "string" || sessionRoot.trim() === "")) ||
+    (validateSources &&
+      (!Array.isArray(effectiveSessionRoots) ||
+        effectiveSessionRoots.length === 0 ||
+        effectiveSessionRoots.some(
+          (path) => typeof path !== "string" || path.trim() === "",
+        ))) ||
     !Number.isInteger(maxIssues) ||
     maxIssues < 1 ||
     !Number.isInteger(maxScannedNotes) ||
@@ -405,9 +418,11 @@ async function inspectMemoryVault({
     throw new MemoryError("INVALID_INPUT", "Memory inspection is invalid");
   }
   const vault = resolve(root);
+  const view = validateMemoryView(principal, memoryView);
   await createMarkdownMemoryStore({
     root: vault,
     forbiddenRoots: [PROJECT_ROOT, ...forbiddenRoots],
+    ...view,
   }).verifyRoot();
   const errors = [];
   const warnings = [];
@@ -490,6 +505,12 @@ async function inspectMemoryVault({
     }
     try {
       const note = parseMarkdownMemoryNote(raw, { id: candidate.id, type: candidate.type });
+      if (!memoryViewAllows(note, view)) continue;
+      if (note.schema === 1) {
+        warnings.push(
+          issue("LEGACY_SCOPE_UNMATERIALIZED", candidate.relativePath, false),
+        );
+      }
       notes.push({ ...candidate, note, blocks: extractBlocks(note.body) });
       if (validateSources) {
         const sources = parseSourceFootnotes(note.body);
@@ -503,7 +524,7 @@ async function inspectMemoryVault({
 
   if (validateSources) {
     const sessions = await loadReferencedSessions(
-      resolve(sessionRoot),
+      effectiveSessionRoots.map((path) => resolve(path)),
       sourceAnchors,
       { maxBytes: maxScannedSessionBytes, maxEntries: maxScannedSessionEntries },
     );
@@ -614,7 +635,11 @@ async function inspectMemoryVault({
 export async function lintMemoryVault(options) {
   const inspected = await inspectMemoryVault({
     ...options,
-    sessionRoot: options?.sessionRoot ?? resolveBridgeSessionDirectory(),
+    sessionRoots:
+      options?.sessionRoots ??
+      (options?.sessionRoot === undefined
+        ? [resolveBridgeSessionDirectory()]
+        : [options.sessionRoot]),
     validateSources: true,
   });
   return inspected.report;

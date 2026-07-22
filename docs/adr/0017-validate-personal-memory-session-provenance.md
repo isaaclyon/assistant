@@ -23,9 +23,11 @@ session provenance. Their definitions use one exact, inspectable form:
 ```
 
 The timestamp is canonical ISO-8601 UTC and must exactly match the referenced
-entry. Vault lint resolves the bridge session directory from
-`PI_TELEGRAM_BRIDGE_STATE_DIR` (defaulting to the bridge's normal state
-directory), then verifies the session header, entry ID, and timestamp. Missing,
+entry. In fleet mode the host supplies the bounded list of configured
+per-instance session roots through `PI_TELEGRAM_BRIDGE_SESSION_ROOTS`; the
+compatibility singleton falls back to `PI_TELEGRAM_BRIDGE_STATE_DIR`. Vault
+lint verifies the session header, entry ID, and timestamp only for notes visible
+to the effective memory view. Missing,
 malformed, or stale anchors produce sanitized note-path findings. Ordinary
 footnotes are outside this contract.
 
@@ -56,3 +58,5 @@ footnote or the append-only Pi session JSONL.
   memory.
 - This validation does not index or search session text; those remain separate
   future retrieval capabilities.
+- Resolving multiple instance roots does not widen memory visibility and lint
+  findings never include session message content.

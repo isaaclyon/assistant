@@ -1,18 +1,18 @@
 # Pi Telegram Bridge Host
 
-A small, systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](https://github.com/isaaclyon/pi-telegram/commit/a575e08b252bfd6e98be6d64e35c232bf3d1fa8b). It keeps one persistent Pi session available through a private Telegram bot and adds a narrow host-backed Telegram `/new` lifecycle bridge.
+A systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](https://github.com/isaaclyon/pi-telegram/commit/053113f9e2ee9ba4374f121471f2896b95f9c764). It supports a compatibility singleton or a manifest-defined household fleet whose bots share one immutable capability release while keeping conversations, workspaces, credentials, and memory views distinct.
 
 ## Runtime shape
 
 ```text
-systemd user service
-  └── this Node.js host
-        └── Pi AgentSessionRuntime (persistent session)
-              ├── @llblab/pi-telegram (Telegram transport and UI)
+one systemd user service per instance
+  └── this Node.js host (shared exact release, selected instance)
+        └── Pi AgentSessionRuntime (instance-persistent session)
+              ├── @llblab/pi-telegram (private or household-group surface)
               └── @howaboua/pi-codex-conversion (Codex tools/prompt adapter)
 ```
 
-The Pi runtime uses this repository as its working directory by default, while its tools remain free to work elsewhere on the server when requested. The host disables hierarchical AGENTS discovery and loads only `.pi/telegram/AGENTS.md` for the Telegram runtime; the root `AGENTS.md` remains developer guidance. Conversation sessions are isolated under `~/.local/state/pi-telegram-bridge/sessions`.
+The compatibility runtime uses this repository as its working directory. Fleet instances use separate mutable workspaces, but all extension, skill, and instruction code is selected from the shared immutable release through `.pi/capabilities.json`. The host disables hierarchical discovery; the root `AGENTS.md` remains developer guidance. Fleet conversations and inboxes live under `~/.local/state/pi-telegram-bridge/instances/<id>`.
 
 ## Initial setup
 
@@ -61,6 +61,13 @@ systemctl --user stop pi-telegram-bridge.service
 journalctl --user -u pi-telegram-bridge.service -f
 ```
 
+For a configured fleet, use `pi-telegram-bridge-<id>.service` or the glob
+`pi-telegram-bridge-*.service`. The complete production setup, credential
+namespaces, migration procedure, rollback behavior, and smoke matrix are in
+[docs/household-fleet.md](docs/household-fleet.md). Production identity values
+belong in a mode-`0600` external manifest; start from the tracked
+[example](docs/examples/instances.example.json).
+
 The Telegram `/restart` command gracefully restarts the bridge and sends a confirmation after the service is back online. The service automatically restarts after failures. Pi conversation history, Telegram configuration, pairing, and Telegram update offsets persist across restarts. The extension reclaims its stale same-working-directory ownership lock when the host returns. Telegram `/new` starts a fresh session in the same thread only when Pi and the Telegram queue are idle; otherwise it reports why replacement is unsafe.
 
 ## Deploying updates
@@ -92,6 +99,11 @@ Optional environment variables:
 | --- | --- | --- |
 | `PI_TELEGRAM_BRIDGE_CWD` | process working directory (this repo under systemd) | Pi home base and context root |
 | `PI_TELEGRAM_BRIDGE_STATE_DIR` | `~/.local/state/pi-telegram-bridge` | Dedicated session state |
+| `PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST` | unset | Enables fleet mode using a private manifest |
+| `PI_TELEGRAM_BRIDGE_INSTANCE_ID` | unset | Stable instance selected by a fleet unit |
+| `PI_TELEGRAM_BRIDGE_RESOURCE_ROOT` | release directory | Shared immutable capability/code root |
+| `PI_TELEGRAM_BRIDGE_STATE_ROOT` | `~/.local/state/pi-telegram-bridge` | Parent for per-instance state |
+| `PI_TELEGRAM_BRIDGE_CONFIG_ROOT` | `~/.config/pi-telegram-bridge` | Private manifest and credential environment root |
 | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi credentials, settings, and Telegram config |
 | `PI_TELEGRAM_CODEX_CONFIG` | `<stateDir>/pi-codex-conversion.json` | Telegram-only Codex conversion settings |
 | `PI_BIN` | `pi` | Pi executable used only by `telegram:setup` |
@@ -123,7 +135,10 @@ created mode 0700 and notes mode 0600. Open the directory directly in Obsidian
 to browse or edit notes — human titles are in frontmatter, filenames are
 UUIDs. Managed notes require `schema: 1` and accept normal YAML frontmatter;
 CLI updates preserve its meaning and comments but may normalize formatting.
-Lifecycle status is `active`, `superseded`, or `archived`; normal queries and
+Each note is `personal` (owned by Isaac or Emma) or `household`. Personal bots
+see only their own personal notes plus household notes; Shared Bot sees only
+household notes; Builder sees none. Promotion to household is explicit and
+revision-checked. Lifecycle status is `active`, `superseded`, or `archived`; normal queries and
 core memory use active notes unless inactive statuses are explicitly requested.
 Legacy notes without status remain active and gain the field on their next CLI
 mutation.
@@ -177,7 +192,7 @@ Boundaries to know:
 
 ## Security and durability boundary
 
-The bot controls a Pi process with the current user's filesystem and command permissions. Keep the bot token private and pair only the intended Telegram account.
+Each bot controls a Pi process with the current user's filesystem and command permissions. The fleet's memory, credential, conversation, and capability boundaries are semantic controls under one Unix identity, not hostile-user OS isolation. Keep tokens private and configure only the intended Telegram actors and exact household group.
 
 This host provides process restart and persistent Pi sessions. Accepted inbound turns are also made crash-durable by a SQLite inbox at `<stateDir>/inbox.db` (`src/inbox.ts`): a turn is persisted the instant it is accepted, removed once Pi owns it, and replayed on startup, giving at-least-once execution across a host crash. Idempotency is keyed on a stable per-turn identity (chat plus source message id). The host and the pinned fork rendezvous on a shared process-global registry (`src/telegram-capabilities.ts`) — the same pattern as the session-replacement capability — so the compiled host never imports the source-only fork; binding is inert against a fork build that does not read it. Durable *outbound* delivery remains out of scope for ordinary assistant replies, but `/restart` has a small durable startup acknowledgment so operators can tell whether the process returned successfully. See [ADR-0003](docs/adr/0003-durable-inbound-inbox.md) and [ADR-0008](docs/adr/0008-restart-completion-notification.md).
 

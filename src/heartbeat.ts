@@ -467,7 +467,10 @@ export function createHeartbeatRunner({
 }: {
   stateDir: string;
   runCheck: (checkerId: string, timeoutMs: number) => Promise<HeartbeatCheckResult>;
-  inject: (prompt: string) => Promise<void>;
+  inject: (
+    prompt: string,
+    job: StatefulHeartbeatDefinition,
+  ) => Promise<void>;
   logger: HeartbeatLogger;
   nowMs: () => number;
   checkTimeoutMs: number;
@@ -505,7 +508,7 @@ export function createHeartbeatRunner({
       return false;
     }
     try {
-      await inject(eventPrompt(job, event));
+      await inject(eventPrompt(job, event), job);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error(`Heartbeat '${job.id}' prompt injection failed: ${message}`);

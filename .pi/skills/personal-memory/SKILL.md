@@ -54,6 +54,11 @@ changed.
   `purchase`, `reference`. A wishlist is a `list`. Type is immutable; to
   reclassify, add the corrected note and, after confirmation, forget the old
   one.
+- Every note has a privacy scope. Personal bots default new notes to
+  `scope: personal` and bind `owner` to their trusted runtime principal. The
+  shared household bot defaults new notes to `scope: household` and cannot
+  create or read personal notes. Never accept an `owner` supplied in a chat
+  request; identity comes from the host-bound runtime context.
 
 ## Recall
 
@@ -71,8 +76,11 @@ changed.
 
 - Search and `read` the note to obtain its current `revision`, then `update`
   with `ifRevision` and a patch containing only the requested changes
-  (`title`, `tags`, and/or `body`). Unrelated content and unknown frontmatter
+  (`title`, `tags`, `body`, `status`, and/or `scope`). Unrelated content and unknown frontmatter
   are preserved automatically.
+- Treat promotion from `personal` to `household` as an explicit disclosure:
+  name the note and ask for confirmation before sending the revision-checked
+  update. A household bot cannot demote or claim ownership of a personal note.
 - On `REVISION_CONFLICT`, the note changed since it was read (for example a
   manual Obsidian edit). Re-read and report the conflict rather than
   overwriting.
@@ -176,6 +184,10 @@ Telegram agent start; ordinary local Pi sessions do not receive it.
 ## Hard rules
 
 - Never place personal facts in tracked repository files or instructions.
+- Never quote, summarize, count, or reveal the existence of another
+  principal's personal notes. Household context contains only household-scoped
+  notes; personal context contains the current principal's personal notes plus
+  household notes.
 - Never interpolate user text into shell commands; requests go through stdin.
 - Never claim persistence without an observed successful CLI response.
 - Never claim a local Git commit unless `git.committed` is `true`; the CLI never

@@ -2,12 +2,53 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
+import {
+  type BridgeInstanceManifest,
+  type BridgeJobsRole,
+  type BridgeMemoryView,
+  type BridgePrincipal,
+  type BridgeTelegramSurface,
+  loadBridgeInstanceManifest,
+  resolveBridgeInstancePaths,
+  selectBridgeInstance,
+} from "./instances.js";
+import { validateCredentialEnvironmentFile } from "./credential-environment.js";
+
 export interface BridgeConfig {
   agentDir: string;
   codexConfigPath: string;
   cwd: string;
   sessionDir: string;
   stateDir: string;
+  webhookHost: string;
+  webhookPort: number;
+}
+
+export interface BridgeInstanceConfig {
+  instanceId: string;
+  displayName: string;
+  principal: BridgePrincipal;
+  telegramProfile: string;
+  telegramSurface: BridgeTelegramSurface;
+  resourceRoot: string;
+  workspaceCwd: string;
+  capabilityProfile: string;
+  credentialScope: string;
+  memoryView: BridgeMemoryView;
+  jobsRole: BridgeJobsRole;
+  configuredInstanceIds: string[];
+  jobsCoordinatorId?: string;
+  agentDir: string;
+  stateRoot: string;
+  configRoot: string;
+  stateDir: string;
+  sessionDir: string;
+  inboxPath: string;
+  codexConfigPath: string;
+  restartMarkerPath: string;
+  runtimeMetadataPath: string;
+  checkerStateDir: string;
+  environmentFilePath: string;
   webhookHost: string;
   webhookPort: number;
 }
@@ -58,6 +99,121 @@ export function resolveBridgeConfig(
     webhookHost: env.PI_TELEGRAM_BRIDGE_WEBHOOK_HOST?.trim() || "127.0.0.1",
     webhookPort,
   };
+}
+
+export function resolveBridgeInstanceConfig(
+  manifest: BridgeInstanceManifest,
+  instanceId: string,
+  env: BridgeEnvironment = process.env,
+  home = homedir(),
+  defaultResourceRoot = process.cwd(),
+): BridgeInstanceConfig {
+  const instance = selectBridgeInstance(manifest, instanceId);
+  const resourceRoot = resolveFromHome(
+    env.PI_TELEGRAM_BRIDGE_RESOURCE_ROOT,
+    defaultResourceRoot,
+    home,
+  );
+  const stateRoot = resolveFromHome(
+      env.PI_TELEGRAM_BRIDGE_STATE_ROOT,
+      join(home, ".local", "state", "pi-telegram-bridge"),
+      home,
+    );
+  const configRoot = resolveFromHome(
+      env.PI_TELEGRAM_BRIDGE_CONFIG_ROOT,
+      join(home, ".config", "pi-telegram-bridge"),
+      home,
+    );
+  const paths = resolveBridgeInstancePaths(instance, { stateRoot, configRoot });
+  const webhookPortRaw = env.PI_TELEGRAM_BRIDGE_WEBHOOK_PORT?.trim();
+  const webhookPort = webhookPortRaw ? Number.parseInt(webhookPortRaw, 10) : 8776;
+  if (!Number.isInteger(webhookPort) || webhookPort < 0 || webhookPort > 65_535) {
+    throw new Error(
+      `PI_TELEGRAM_BRIDGE_WEBHOOK_PORT must be a port number: ${webhookPortRaw}`,
+    );
+  }
+
+  return {
+    instanceId: instance.id,
+    displayName: instance.displayName,
+    principal: instance.principal,
+    telegramProfile: instance.telegramProfile,
+    telegramSurface: instance.telegramSurface,
+    resourceRoot,
+    workspaceCwd: instance.workspaceCwd,
+    capabilityProfile: instance.capabilityProfile,
+    credentialScope: instance.credentialScope,
+    memoryView: instance.memoryView,
+    jobsRole: instance.jobsRole,
+    configuredInstanceIds: manifest.instances.map((candidate) => candidate.id),
+    ...(manifest.instances.find((candidate) => candidate.jobsRole === "coordinator")
+      ?.id === undefined
+      ? {}
+      : {
+          jobsCoordinatorId: manifest.instances.find(
+            (candidate) => candidate.jobsRole === "coordinator",
+          )!.id,
+        }),
+    agentDir: resolveFromHome(
+      env.PI_CODING_AGENT_DIR,
+      join(home, ".pi", "agent"),
+      home,
+    ),
+    stateRoot,
+    configRoot,
+    ...paths,
+    webhookHost: env.PI_TELEGRAM_BRIDGE_WEBHOOK_HOST?.trim() || "127.0.0.1",
+    webhookPort,
+  };
+}
+
+export async function loadBridgeInstanceConfig(
+  env: BridgeEnvironment = process.env,
+  home = homedir(),
+  defaultResourceRoot = process.cwd(),
+): Promise<BridgeInstanceConfig> {
+  const configRoot = resolveFromHome(
+    env.PI_TELEGRAM_BRIDGE_CONFIG_ROOT,
+    join(home, ".config", "pi-telegram-bridge"),
+    home,
+  );
+  const manifestPath = resolveFromHome(
+    env.PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST,
+    join(configRoot, "instances.json"),
+    home,
+  );
+  const instanceId = env.PI_TELEGRAM_BRIDGE_INSTANCE_ID?.trim();
+  if (!instanceId) {
+    throw new Error("PI_TELEGRAM_BRIDGE_INSTANCE_ID must select one bridge instance");
+  }
+  const manifest = await loadBridgeInstanceManifest(manifestPath);
+  const config = resolveBridgeInstanceConfig(
+    manifest,
+    instanceId,
+    env,
+    home,
+    defaultResourceRoot,
+  );
+  await validateCredentialEnvironmentFile(
+    config.environmentFilePath,
+    config.credentialScope,
+  );
+  return config;
+}
+
+export async function loadBridgeRuntimeConfig(
+  env: BridgeEnvironment = process.env,
+  home = homedir(),
+  defaultRuntimeRoot = process.cwd(),
+): Promise<BridgeConfig | BridgeInstanceConfig> {
+  const instanceMigrationConfigured = Boolean(
+    env.PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST?.trim() ||
+      env.PI_TELEGRAM_BRIDGE_INSTANCE_ID?.trim(),
+  );
+  if (instanceMigrationConfigured) {
+    return loadBridgeInstanceConfig(env, home, defaultRuntimeRoot);
+  }
+  return resolveBridgeConfig(env, home, defaultRuntimeRoot);
 }
 
 export async function ensureCodexConfig(path: string): Promise<void> {
@@ -148,9 +304,26 @@ async function readJsonObject(path: string): Promise<Record<string, unknown> | u
   }
 }
 
-export async function hasConfiguredTelegramToken(path: string): Promise<boolean> {
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export async function hasConfiguredTelegramToken(
+  path: string,
+  profileName = "default",
+): Promise<boolean> {
   const config = await readJsonObject(path);
-  return typeof config?.botToken === "string" && config.botToken.trim().length > 0;
+  const profile =
+    profileName === "default"
+      ? config
+      : isJsonObject(config?.profiles)
+        ? config.profiles[profileName]
+        : undefined;
+  return (
+    isJsonObject(profile) &&
+    typeof profile.botToken === "string" &&
+    profile.botToken.trim().length > 0
+  );
 }
 
 export interface TelegramLockView {
@@ -162,8 +335,19 @@ export interface TelegramLockView {
 export async function readDefaultTelegramLock(
   path: string,
 ): Promise<TelegramLockView | undefined> {
+  return readTelegramLock(path, "default");
+}
+
+export async function readTelegramLock(
+  path: string,
+  profileName: string,
+): Promise<TelegramLockView | undefined> {
   const locks = await readJsonObject(path);
-  const value = locks?.["@llblab/pi-telegram"];
+  const key =
+    profileName === "default"
+      ? "@llblab/pi-telegram"
+      : `@llblab/pi-telegram:${profileName}`;
+  const value = locks?.[key];
   if (typeof value !== "object" || value === null) return undefined;
   const lock = value as Record<string, unknown>;
   if (

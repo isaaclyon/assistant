@@ -7,8 +7,10 @@ import {
   MEMORY_TYPE_FOLDERS,
   MAX_MEMORY_NOTE_BYTES,
   MemoryError,
+  memoryViewAllows,
   parseMarkdownMemoryNote,
   parseHappenings,
+  validateMemoryView,
   validateHappeningDate,
 } from "./store.mjs";
 
@@ -169,6 +171,10 @@ export function createMarkdownMemorySearchBackend(options) {
     invalid("Memory directory is required");
   }
   const root = resolve(options.root);
+  const view = validateMemoryView(
+    options.principal ?? "isaac",
+    options.memoryView ?? "owner-and-household",
+  );
   const maxScannedNotes = options.maxScannedNotes ?? DEFAULT_MAX_SCANNED_NOTES;
   const maxWarnings = options.maxWarnings ?? DEFAULT_MAX_WARNINGS;
   if (!Number.isInteger(maxScannedNotes) || maxScannedNotes < 1) invalid("Memory scan limit is invalid");
@@ -223,6 +229,7 @@ export function createMarkdownMemorySearchBackend(options) {
           if (seen.has(note.id)) continue;
           seen.add(note.id);
           if (!statuses.includes(note.status)) continue;
+          if (!memoryViewAllows(note, view)) continue;
           const score = scoreNote(note, query, queryTokens);
           if (score === null) continue;
           results.push({
@@ -231,6 +238,8 @@ export function createMarkdownMemorySearchBackend(options) {
             relativePath: candidate.relativePath,
             type: note.type,
             status: note.status,
+            scope: note.scope,
+            ...(note.scope === "personal" ? { owner: note.owner } : {}),
             title: note.title,
             tags: note.tags,
             created: note.created,
@@ -302,6 +311,7 @@ export function createMarkdownMemorySearchBackend(options) {
           if (seen.has(note.id)) continue;
           seen.add(note.id);
           if (!statuses.includes(note.status)) continue;
+          if (!memoryViewAllows(note, view)) continue;
           const happenings = parseHappenings(note.body).entries;
           happenings.forEach((happening, index) => {
             if (from && happening.date < from) return;
@@ -313,6 +323,8 @@ export function createMarkdownMemorySearchBackend(options) {
               relativePath: candidate.relativePath,
               type: note.type,
               status: note.status,
+              scope: note.scope,
+              ...(note.scope === "personal" ? { owner: note.owner } : {}),
               title: note.title,
               date: happening.date,
               text: happening.text,

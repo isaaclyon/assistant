@@ -14,17 +14,20 @@ import { readFileSync, realpathSync } from "node:fs";
 import { mkdir, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
 
+import { loadCapabilityProfile } from "./capabilities.js";
 import {
   type BridgeConfig,
+  type BridgeInstanceConfig,
   type TelegramLockView,
   ensureCodexConfig,
   hasConfiguredTelegramToken,
   isProcessAlive as isProcessAliveByPid,
-  readDefaultTelegramLock,
+  readTelegramLock as readConfiguredTelegramLock,
   shouldRecoverTelegramOwnership,
 } from "./config.js";
 import { type InboundInbox, openInbox } from "./inbox.js";
 import { type JobScheduler, startJobScheduler } from "./jobs.js";
+import { drainJobHandoffs, enqueueJobHandoff } from "./job-handoff.js";
 import {
   resolveCodexExtensionPath,
   resolveRetryExtensionPath,
@@ -32,8 +35,10 @@ import {
 } from "./package-paths.js";
 import {
   type InboundInboxCapability,
+  type TelegramHostHouseholdGroup,
   bindBridgeRestart,
   bindBridgeRuntimeMarker,
+  bindTelegramHostHouseholdGroup,
   bindTelegramHostNewSession,
   bindTelegramInboundInbox,
 } from "./telegram-capabilities.js";
@@ -43,6 +48,9 @@ import {
  * returns an unbind callback. Injectable so tests can substitute a fake binding.
  */
 export type BindInbox = (inbox: InboundInboxCapability) => () => void;
+export type BindHouseholdGroup = (
+  policy: TelegramHostHouseholdGroup,
+) => () => void;
 
 export interface BridgeLogger {
   info(message: string): void;
@@ -51,7 +59,7 @@ export interface BridgeLogger {
 }
 
 export interface BridgeHostOptions {
-  config: BridgeConfig;
+  config: BridgeConfig | BridgeInstanceConfig;
   logger?: BridgeLogger;
   onShutdownRequest?: () => void;
   onRestartRequest?: () => void;
@@ -59,14 +67,42 @@ export interface BridgeHostOptions {
   isProcessAlive?: (pid: number) => boolean;
   nowMs?: () => number;
   ownershipMonitorIntervalMs?: number;
-  readTelegramLock?: (path: string) => Promise<TelegramLockView | undefined>;
+  jobHandoffIntervalMs?: number;
+  readTelegramLock?: (
+    path: string,
+    profileName: string,
+  ) => Promise<TelegramLockView | undefined>;
   openInbox?: (dbPath: string) => InboundInbox;
   bindInbox?: BindInbox;
+  bindHouseholdGroup?: BindHouseholdGroup;
 }
 
 export interface BridgeHost {
   runtime: AgentSessionRuntime;
   dispose(): Promise<void>;
+}
+
+export function shouldStartJobScheduler(
+  config: BridgeConfig | BridgeInstanceConfig | { jobsRole?: BridgeInstanceConfig["jobsRole"] },
+): boolean {
+  return !("jobsRole" in config) || config.jobsRole === "coordinator";
+}
+
+export function resolveTelegramHostHouseholdGroup(
+  config: unknown,
+): TelegramHostHouseholdGroup | undefined {
+  if (!config || typeof config !== "object") return undefined;
+  const surface = (config as { telegramSurface?: BridgeInstanceConfig["telegramSurface"] })
+    .telegramSurface;
+  if (!surface || surface.type !== "household-group") return undefined;
+  return {
+    kind: "household-group",
+    chatId: surface.chatId,
+    actors: [
+      { userId: surface.actors.isaac, label: "Isaac" },
+      { userId: surface.actors.emma, label: "Emma" },
+    ],
+  };
 }
 
 const consoleLogger: BridgeLogger = {
@@ -84,21 +120,50 @@ export async function startBridgeHost({
   isProcessAlive = isProcessAliveByPid,
   nowMs = Date.now,
   ownershipMonitorIntervalMs = 5_000,
-  readTelegramLock = readDefaultTelegramLock,
+  jobHandoffIntervalMs = 5_000,
+  readTelegramLock = readConfiguredTelegramLock,
   openInbox: openInboxStore = openInbox,
   bindInbox = bindTelegramInboundInbox,
+  bindHouseholdGroup = bindTelegramHostHouseholdGroup,
 }: BridgeHostOptions): Promise<BridgeHost> {
+  const resourceRoot =
+    "resourceRoot" in config ? config.resourceRoot : config.cwd;
+  const workspaceCwd =
+    "workspaceCwd" in config ? config.workspaceCwd : config.cwd;
+  const inboxPath =
+    "inboxPath" in config ? config.inboxPath : join(config.stateDir, "inbox.db");
+  const telegramProfile =
+    "telegramProfile" in config ? config.telegramProfile : "default";
   const codexExtensionPath = resolveCodexExtensionPath();
   const retryExtensionPath = resolveRetryExtensionPath();
   process.env.PI_CODING_AGENT_DIR = config.agentDir;
   process.env.PI_CODEX_CONVERSION_CONFIG_PATH = config.codexConfigPath;
+  process.env.PI_TELEGRAM_BRIDGE_STATE_DIR = config.stateDir;
+  process.env.PI_TELEGRAM_BRIDGE_SESSION_DIR = config.sessionDir;
+  if ("instanceId" in config) {
+    process.env.PI_TELEGRAM_PRINCIPAL = config.principal;
+    process.env.PI_TELEGRAM_MEMORY_VIEW = config.memoryView;
+    process.env.PI_TELEGRAM_BRIDGE_SESSION_ROOTS = JSON.stringify(
+      config.configuredInstanceIds.map((instanceId) =>
+        join(config.stateRoot, "instances", instanceId, "sessions"),
+      ),
+    );
+  } else {
+    process.env.PI_TELEGRAM_PRINCIPAL = "isaac";
+    process.env.PI_TELEGRAM_MEMORY_VIEW = "owner-and-household";
+    process.env.PI_TELEGRAM_BRIDGE_SESSION_ROOTS = JSON.stringify([
+      config.sessionDir,
+    ]);
+  }
   initTheme();
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   await mkdir(config.sessionDir, { recursive: true, mode: 0o700 });
   await ensureCodexConfig(config.codexConfigPath);
 
-  const telegramAgentsPath = join(config.cwd, ".pi", "telegram", "AGENTS.md");
-  const bridgeRealPath = await realpath(config.cwd);
+  const capabilityProfile =
+    "capabilityProfile" in config ? config.capabilityProfile : undefined;
+  let telegramAgentsPath = join(resourceRoot, ".pi", "telegram", "AGENTS.md");
+  const bridgeRealPath = await realpath(resourceRoot);
   const bridgeRealPrefix = bridgeRealPath + sep;
   const isInsideBridge = (target: string): boolean =>
     target === bridgeRealPath || target.startsWith(bridgeRealPrefix);
@@ -124,16 +189,16 @@ export async function startBridgeHost({
   };
 
   const resourceManager = new DefaultPackageManager({
-    cwd: config.cwd,
+    cwd: resourceRoot,
     agentDir: config.agentDir,
-    settingsManager: SettingsManager.create(config.cwd, config.agentDir),
+    settingsManager: SettingsManager.create(workspaceCwd, config.agentDir),
   });
   const discoverRepoResources = async (): Promise<{
     extensions: string[];
     skills: string[];
   }> => {
     const resolved = await resourceManager.resolveExtensionSources(
-      [join(config.cwd, ".pi")],
+      [join(resourceRoot, ".pi")],
       { temporary: true },
     );
     const keepInsideBridge = async (
@@ -170,11 +235,22 @@ export async function startBridgeHost({
   // Open and register the durable inbox before the runtime starts its session:
   // the fork replays pending turns on session start, so the capability must be
   // live first. A registration failure must still release the database handle.
-  const inbox = openInboxStore(join(config.stateDir, "inbox.db"));
+  const inbox = openInboxStore(inboxPath);
   let unregisterInbox: () => void;
   try {
     unregisterInbox = bindInbox(inbox);
   } catch (error) {
+    inbox.close();
+    throw error;
+  }
+  const householdGroup = resolveTelegramHostHouseholdGroup(config);
+  let unbindHouseholdGroup: () => void = () => {};
+  try {
+    if (householdGroup) {
+      unbindHouseholdGroup = bindHouseholdGroup(householdGroup);
+    }
+  } catch (error) {
+    unregisterInbox();
     inbox.close();
     throw error;
   }
@@ -197,7 +273,17 @@ export async function startBridgeHost({
     ];
     const additionalSkillPaths: string[] = [];
     const refreshRepoResources = async (): Promise<void> => {
-      const discovered = await discoverRepoResources();
+      const discovered = capabilityProfile
+        ? await loadCapabilityProfile(resourceRoot, capabilityProfile).then(
+            (selection) => {
+              telegramAgentsPath = selection.instructionsPath;
+              return {
+                extensions: selection.extensionPaths,
+                skills: selection.skillPaths,
+              };
+            },
+          )
+        : await discoverRepoResources();
       additionalExtensionPaths.splice(
         3,
         additionalExtensionPaths.length - 3,
@@ -274,11 +360,12 @@ export async function startBridgeHost({
   let runtime: AgentSessionRuntime;
   try {
     runtime = await createAgentSessionRuntime(createRuntime, {
-      cwd: config.cwd,
+      cwd: workspaceCwd,
       agentDir: config.agentDir,
-      sessionManager: SessionManager.continueRecent(config.cwd, config.sessionDir),
+      sessionManager: SessionManager.continueRecent(workspaceCwd, config.sessionDir),
     });
   } catch (error) {
+    unbindHouseholdGroup();
     unregisterInbox();
     inbox.close();
     throw error;
@@ -289,6 +376,7 @@ export async function startBridgeHost({
     unbindRuntimeMarker = bindBridgeRuntimeMarker();
   } catch (error) {
     await runtime.dispose();
+    unbindHouseholdGroup();
     unregisterInbox();
     inbox.close();
     throw error;
@@ -305,6 +393,7 @@ export async function startBridgeHost({
   } catch (error) {
     await runtime.dispose();
     unbindRuntimeMarker();
+    unbindHouseholdGroup();
     unregisterInbox();
     inbox.close();
     throw error;
@@ -331,6 +420,7 @@ export async function startBridgeHost({
     await runtime.dispose();
     unbindRestart();
     unbindRuntimeMarker();
+    unbindHouseholdGroup();
     unregisterInbox();
     inbox.close();
     throw error;
@@ -339,12 +429,15 @@ export async function startBridgeHost({
   let ownershipMonitor: ReturnType<typeof setInterval> | undefined;
   let ownershipRecoveryPromise: Promise<void> | undefined;
   let jobScheduler: JobScheduler | undefined;
+  let jobHandoffMonitor: ReturnType<typeof setInterval> | undefined;
+  let jobHandoffDrainPromise: Promise<void> | undefined;
   let stopping = false;
   let disposePromise: Promise<void> | undefined;
   const dispose = (): Promise<void> => {
     disposePromise ??= (async () => {
       stopping = true;
       if (ownershipMonitor) clearInterval(ownershipMonitor);
+      if (jobHandoffMonitor) clearInterval(jobHandoffMonitor);
       try {
         await jobScheduler?.stop();
       } catch (error) {
@@ -358,11 +451,18 @@ export async function startBridgeHost({
         // must still release Pi and the process-local host capability.
       }
       try {
+        await jobHandoffDrainPromise;
+      } catch {
+        // A handoff failure is logged by its caller. Disposal still owns all
+        // remaining runtime and inbox cleanup.
+      }
+      try {
         await runtime.dispose();
       } finally {
         unregisterTelegramHost();
         unbindRestart();
         unbindRuntimeMarker();
+        unbindHouseholdGroup();
         unregisterInbox();
         inbox.close();
       }
@@ -428,12 +528,15 @@ export async function startBridgeHost({
 
     const telegramConfigPath = join(config.agentDir, "telegram.json");
     const locksPath = join(config.agentDir, "locks.json");
-    const telegramConfigured = await hasConfiguredTelegramToken(telegramConfigPath);
+    const telegramConfigured = await hasConfiguredTelegramToken(
+      telegramConfigPath,
+      telegramProfile,
+    );
     const recoverOwnership = (): Promise<void> => {
       if (stopping) return Promise.resolve();
       if (ownershipRecoveryPromise) return ownershipRecoveryPromise;
       const recovery = (async () => {
-        const lock = await readTelegramLock(locksPath);
+        const lock = await readTelegramLock(locksPath, telegramProfile);
         if (stopping) return;
         if (
           !shouldRecoverTelegramOwnership(
@@ -445,9 +548,18 @@ export async function startBridgeHost({
         ) {
           return;
         }
-        logger.info("Telegram has no live polling owner; connecting the default profile.");
+        logger.info(
+          telegramProfile === "default"
+            ? "Telegram has no live polling owner; connecting the default profile."
+            : `Telegram has no live polling owner; connecting profile ${telegramProfile}.`,
+        );
         try {
-          await runtime.session.prompt("/telegram-connect", { source: "rpc" });
+          await runtime.session.prompt(
+            telegramProfile === "default"
+              ? "/telegram-connect"
+              : `/telegram-connect ${telegramProfile}`,
+            { source: "rpc" },
+          );
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           logger.error(`Telegram connect command failed: ${message}`);
@@ -467,7 +579,7 @@ export async function startBridgeHost({
         "Telegram is not configured. Run `npm run telegram:setup`, then restart this service.",
       );
     } else {
-      const lock = await readTelegramLock(locksPath);
+      const lock = await readTelegramLock(locksPath, telegramProfile);
       const shouldRecover = shouldRecoverTelegramOwnership(
         lock,
         process.pid,
@@ -514,13 +626,78 @@ export async function startBridgeHost({
         }
       }
     };
-    jobScheduler = await startJobScheduler({
-      stateDir: config.stateDir,
-      webhookHost: config.webhookHost,
-      webhookPort: config.webhookPort,
-      inject: injectJobPrompt,
-      logger,
-    });
+    const drainInstanceJobHandoffs = (): Promise<void> => {
+      if (!("instanceId" in config) || stopping) return Promise.resolve();
+      if (jobHandoffDrainPromise) return jobHandoffDrainPromise;
+      const drain = drainJobHandoffs({
+        stateDir: config.stateDir,
+        instanceId: config.instanceId,
+        inject: injectJobPrompt,
+      }).then((result) => {
+        if (result.uncertain > 0) {
+          logger.warn(
+            `${result.uncertain} job handoff(s) remain in uncertain processing state for ${config.instanceId}.`,
+          );
+        }
+        if (result.failed > 0) {
+          logger.error(
+            `${result.failed} job handoff(s) failed or were quarantined for ${config.instanceId}.`,
+          );
+        }
+      });
+      const trackedDrain = drain.finally(() => {
+        if (jobHandoffDrainPromise === trackedDrain) {
+          jobHandoffDrainPromise = undefined;
+        }
+      });
+      jobHandoffDrainPromise = trackedDrain;
+      return trackedDrain;
+    };
+    if ("instanceId" in config) {
+      await drainInstanceJobHandoffs();
+      jobHandoffMonitor = setInterval(() => {
+        void drainInstanceJobHandoffs().catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          logger.error(`Job handoff drain failed: ${message}`);
+        });
+      }, jobHandoffIntervalMs);
+      jobHandoffMonitor.unref?.();
+    }
+    const dispatchJobPrompt = async (
+      prompt: string,
+      dispatch?: { jobId: string; target: string; eventId: string },
+    ): Promise<void> => {
+      if (!("instanceId" in config) || dispatch === undefined) {
+        await injectJobPrompt(prompt);
+        return;
+      }
+      await enqueueJobHandoff({
+        stateRoot: config.stateRoot,
+        coordinatorStateDir: config.stateDir,
+        eventId: dispatch.eventId,
+        jobId: dispatch.jobId,
+        target: dispatch.target,
+        prompt,
+      });
+      await drainInstanceJobHandoffs();
+    };
+    if (shouldStartJobScheduler(config)) {
+      jobScheduler = await startJobScheduler({
+        stateDir: config.stateDir,
+        webhookHost: config.webhookHost,
+        webhookPort: config.webhookPort,
+        inject: dispatchJobPrompt,
+        logger,
+        ...("instanceId" in config
+          ? {
+              validTargets: new Set(config.configuredInstanceIds),
+              requireTargets: true,
+            }
+          : {}),
+      });
+    } else {
+      logger.info("Scheduled-work evaluation is disabled in this instance process.");
+    }
 
     logger.info(`Pi Telegram bridge ready (session: ${runtime.session.sessionFile ?? "ephemeral"}).`);
 
