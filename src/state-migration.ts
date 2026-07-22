@@ -21,7 +21,10 @@ const LEGACY_STATE_ENTRIES = new Set([
   "pi-codex-conversion.json",
   "restart-pending.json",
   "sessions",
+  "webhook-secret",
 ]);
+
+const LEGACY_STATE_SHARED_ENTRIES = new Set(["deploy.lock"]);
 
 export interface LegacyStateMigrationOptions {
   stateRoot: string;
@@ -78,7 +81,10 @@ export async function migrateLegacyStateToInstance({
   }
   const source = resolve(stateRoot);
   const entries = (await readdir(source))
-    .filter((entry) => entry !== "instances")
+    .filter(
+      (entry) =>
+        entry !== "instances" && !LEGACY_STATE_SHARED_ENTRIES.has(entry),
+    )
     .sort();
   const unknownEntries = entries.filter((entry) => !LEGACY_STATE_ENTRIES.has(entry));
   if (unknownEntries.length > 0) {
