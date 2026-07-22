@@ -1,6 +1,6 @@
 # Pi Telegram Bridge Host
 
-A systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](https://github.com/isaaclyon/pi-telegram/commit/053113f9e2ee9ba4374f121471f2896b95f9c764). It supports a compatibility singleton or a manifest-defined household fleet whose bots share one immutable capability release while keeping conversations, workspaces, credentials, and memory views distinct.
+A systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](https://github.com/isaaclyon/pi-telegram/commit/d9877050370219d69b56bcc3a510d45905101c03). It supports a compatibility singleton or a manifest-defined household fleet whose bots share one immutable capability release while keeping conversations, workspaces, credentials, and memory views distinct.
 
 ## Runtime shape
 
