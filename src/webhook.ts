@@ -18,7 +18,7 @@ export interface WebhookServerOptions {
   port: number;
   secret: string;
   getJob(id: string): WebhookJob | undefined;
-  inject(prompt: string): Promise<void>;
+  inject(prompt: string, job: WebhookJob): Promise<void>;
   logger: JobsLogger;
 }
 
@@ -127,7 +127,7 @@ export async function startWebhookServer({
       `Request body (truncated to ${MAX_BODY_IN_PROMPT_BYTES / 1024} KB):\n${bodyText}`,
     ].join("\n\n");
     try {
-      await inject(prompt);
+      await inject(prompt, job);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error(`Webhook '${job.id}' prompt injection failed: ${message}`);

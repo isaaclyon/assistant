@@ -191,10 +191,12 @@ describe("personal memory CLI", () => {
     const updatedResult = await run("update", {
       id: added.id,
       ifRevision: added.revision,
-      patch: { body: "Prefers synthetic coffee." },
+      patch: { body: "Prefers synthetic coffee.", scope: "household" },
     }, { gitAutocommit: true });
     const updated = parseLine(updatedResult.stdout).data;
     expect(updated.git).toEqual({ committed: true });
+    expect(updated).toMatchObject({ scope: "household" });
+    expect(updated).not.toHaveProperty("owner");
 
     const happeningResult = await run("happening-add", {
       id: added.id,

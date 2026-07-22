@@ -33,6 +33,14 @@ truth. Forgetting a memory hard-deletes the confirmed canonical note; it does
 not claim to erase Pi or Telegram conversation history, filesystem snapshots,
 or third-party backups.
 
+Each managed note declares either `scope: personal` with a trusted `owner`, or
+`scope: household` with no owner. The host binds principal and memory view from
+the validated instance identity; chat input cannot choose an owner. Isaac and
+Emma personal views include their own personal notes plus household notes, the
+household view includes only household notes, and engineering has no memory
+view. Promotion to household is explicit and revision-checked. Legacy notes
+without scope fail safely to Isaac-personal rather than becoming shared.
+
 ## Considered Options
 
 - **One aggregate Markdown file per domain:** rejected because small corrections
@@ -53,6 +61,8 @@ or third-party backups.
 - Users can inspect and edit ordinary Markdown with Obsidian, while the skill
   and scripts enforce the memory consent, privacy, bounded-output, and safe
   mutation contract.
+- Memory isolation is semantic enforcement under the shared service account;
+  it does not claim hostile-user filesystem isolation.
 - V1 search is a bounded Markdown scan; future indexes must be rebuildable from
   the vault and disposable without changing the canonical CRUD contract.
 - Hard deletion has a deliberately limited scope, and users remain responsible

@@ -1,11 +1,25 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
-import { TELEGRAM_LOCK_STALE_HEARTBEAT_MS } from "../src/config.js";
+import {
+  TELEGRAM_LOCK_STALE_HEARTBEAT_MS,
+  resolveBridgeInstanceConfig,
+} from "../src/config.js";
 import { startBridgeHost } from "../src/host.js";
+import { parseBridgeInstanceManifest } from "../src/instances.js";
+import { enqueueJobHandoff } from "../src/job-handoff.js";
+import { bindTelegramHostHouseholdGroup } from "../src/telegram-capabilities.js";
 import {
   resolveRetryExtensionPath,
   resolveTelegramExtensionPath,
@@ -18,8 +32,12 @@ const BRIDGE_RUNTIME_REGISTRY = Symbol.for(
 async function startTestBridgeHost(
   options: Parameters<typeof startBridgeHost>[0],
 ): ReturnType<typeof startBridgeHost> {
+  const resourceRoot =
+    "resourceRoot" in options.config
+      ? options.config.resourceRoot
+      : options.config.cwd;
   const agentsPath = join(
-    options.config.cwd,
+    resourceRoot,
     ".pi",
     "telegram",
     "AGENTS.md",
@@ -47,6 +65,20 @@ async function loadPinnedTelegramHostApi(): Promise<{
   return (await import(specifier)) as {
     registerTelegramHostNewSession: RegisterTelegramHostNewSession;
   };
+}
+
+async function loadPinnedTelegramHostHouseholdInternals(): Promise<{
+  getTelegramHostHouseholdGroup(): {
+    kind: "household-group";
+    chatId: number;
+    actors: readonly { userId: number; label: string }[];
+  } | undefined;
+  isTelegramHostPrivateChatThreadedModeAllowed(): boolean;
+}> {
+  const path = join(dirname(resolveTelegramExtensionPath()), "lib", "host.ts");
+  return (await import(pathToFileURL(path).href)) as Awaited<
+    ReturnType<typeof loadPinnedTelegramHostHouseholdInternals>
+  >;
 }
 
 interface PinnedSessionReplacementRuntime {
@@ -100,6 +132,30 @@ async function loadPinnedLockApi(): Promise<{
 }
 
 describe("startBridgeHost", () => {
+  it("shares the exact household authorization policy with the pinned fork", async () => {
+    const pinnedHost = await loadPinnedTelegramHostHouseholdInternals();
+    const policy = {
+      kind: "household-group" as const,
+      chatId: -100123,
+      actors: [
+        { userId: 101, label: "Isaac" as const },
+        { userId: 202, label: "Emma" as const },
+      ],
+    } as const;
+
+    const unbind = bindTelegramHostHouseholdGroup(policy);
+    try {
+      expect(pinnedHost.getTelegramHostHouseholdGroup()).toEqual(policy);
+      expect(pinnedHost.isTelegramHostPrivateChatThreadedModeAllowed()).toBe(
+        false,
+      );
+    } finally {
+      unbind();
+    }
+    expect(pinnedHost.getTelegramHostHouseholdGroup()).toBeUndefined();
+    expect(pinnedHost.isTelegramHostPrivateChatThreadedModeAllowed()).toBe(true);
+  });
+
   it("lets the Telegram host capability replace and rebind the persistent session", async () => {
     const { registerTelegramHostNewSession } = await loadPinnedTelegramHostApi();
     const { createTelegramSessionReplacementRuntime } =
@@ -855,6 +911,223 @@ describe("startBridgeHost", () => {
           .getSkills()
           .skills.map((skill) => skill.name),
       ).toEqual(["local-skill"]);
+    } finally {
+      await host.dispose();
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
+  }, 20_000);
+
+  it("loads resources only from the immutable release while executing in the instance workspace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-telegram-host-root-split-"));
+    const resourceRoot = join(root, "release");
+    const workspaceCwd = join(root, "workspace");
+    const agentDir = join(root, "agent");
+    const telegramExtensionPath = join(resourceRoot, "telegram-extension.mjs");
+    const connectedProfilePath = join(root, "connected-profile.txt");
+    const handoffMarkerPath = join(root, "handoff-executed.txt");
+    await mkdir(join(resourceRoot, ".pi", "extensions"), { recursive: true });
+    await mkdir(join(resourceRoot, ".pi", "skills", "release-skill"), {
+      recursive: true,
+    });
+    await mkdir(join(resourceRoot, ".pi", "skills", "unselected-skill"), {
+      recursive: true,
+    });
+    await mkdir(join(resourceRoot, ".pi", "telegram"), { recursive: true });
+    await mkdir(join(workspaceCwd, ".pi", "extensions"), { recursive: true });
+    await mkdir(join(workspaceCwd, ".pi", "skills", "workspace-skill"), {
+      recursive: true,
+    });
+    await mkdir(join(workspaceCwd, ".pi", "telegram"), { recursive: true });
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(
+      join(agentDir, "telegram.json"),
+      JSON.stringify({ profiles: { isaac: { botToken: "test-token" } } }),
+      { mode: 0o600 },
+    );
+    await writeFile(
+      telegramExtensionPath,
+      `import { writeFileSync } from "node:fs";
+export default function(pi) {
+  pi.registerCommand("telegram-connect", {
+    description: "test named profile activation",
+    handler: async (args) => writeFileSync(${JSON.stringify(connectedProfilePath)}, args),
+  });
+  pi.registerCommand("handoff-test", {
+    description: "test durable target handoff",
+    handler: async (args) => writeFileSync(${JSON.stringify(handoffMarkerPath)}, args),
+  });
+}
+`,
+    );
+    await writeFile(
+      join(resourceRoot, ".pi", "extensions", "release-extension.js"),
+      "export default function() {}\n",
+    );
+    await writeFile(
+      join(resourceRoot, ".pi", "extensions", "unselected-extension.js"),
+      "export default function() {}\n",
+    );
+    await writeFile(
+      join(resourceRoot, ".pi", "skills", "release-skill", "SKILL.md"),
+      "---\nname: release-skill\ndescription: release only\n---\nbody\n",
+    );
+    await writeFile(
+      join(resourceRoot, ".pi", "skills", "unselected-skill", "SKILL.md"),
+      "---\nname: unselected-skill\ndescription: must stay hidden\n---\nbody\n",
+    );
+    await writeFile(
+      join(resourceRoot, ".pi", "telegram", "AGENTS.md"),
+      "release guidance\n",
+    );
+    await writeFile(
+      join(resourceRoot, ".pi", "capabilities.json"),
+      JSON.stringify({
+        version: 1,
+        resources: {
+          extensions: [
+            {
+              id: "release-extension",
+              path: ".pi/extensions/release-extension.js",
+              enabled: true,
+            },
+            {
+              id: "unselected-extension",
+              path: ".pi/extensions/unselected-extension.js",
+              enabled: true,
+            },
+          ],
+          skills: [
+            {
+              id: "release-skill",
+              path: ".pi/skills/release-skill/SKILL.md",
+              enabled: true,
+            },
+            {
+              id: "unselected-skill",
+              path: ".pi/skills/unselected-skill/SKILL.md",
+              enabled: true,
+            },
+          ],
+          instructions: [
+            {
+              id: "telegram-default",
+              path: ".pi/telegram/AGENTS.md",
+              enabled: true,
+            },
+          ],
+        },
+        profiles: [
+          {
+            id: "personal-isaac",
+            extensions: ["release-extension"],
+            skills: ["release-skill"],
+            instructions: "telegram-default",
+          },
+        ],
+      }),
+    );
+    await writeFile(
+      join(workspaceCwd, ".pi", "extensions", "workspace-extension.js"),
+      "export default function() {}\n",
+    );
+    await writeFile(
+      join(workspaceCwd, ".pi", "skills", "workspace-skill", "SKILL.md"),
+      "---\nname: workspace-skill\ndescription: must stay hidden\n---\nbody\n",
+    );
+    await writeFile(
+      join(workspaceCwd, ".pi", "telegram", "AGENTS.md"),
+      "workspace guidance must stay hidden\n",
+    );
+
+    const manifest = parseBridgeInstanceManifest(
+      JSON.stringify({
+        version: 1,
+        instances: [
+          {
+            id: "isaac",
+            displayName: "Isaac Bot",
+            principal: "isaac",
+            telegramProfile: "isaac",
+            telegramSurface: { type: "private" },
+            workspaceCwd,
+            capabilityProfile: "personal-isaac",
+            credentialScope: "isaac-personal",
+            memoryView: "owner-and-household",
+            jobsRole: "coordinator",
+          },
+        ],
+      }),
+    );
+    const config = resolveBridgeInstanceConfig(
+      manifest,
+      "isaac",
+      {
+        PI_CODING_AGENT_DIR: agentDir,
+        PI_TELEGRAM_BRIDGE_STATE_ROOT: join(root, "state"),
+        PI_TELEGRAM_BRIDGE_CONFIG_ROOT: join(root, "config"),
+      },
+      root,
+      resourceRoot,
+    );
+    const canonicalResourceRoot = await realpath(resourceRoot);
+    await enqueueJobHandoff({
+      stateRoot: config.stateRoot,
+      coordinatorStateDir: config.stateDir,
+      eventId: "test:host-startup-handoff",
+      jobId: "host-startup",
+      target: "isaac",
+      prompt: "/handoff-test routed",
+    });
+
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const host = await startBridgeHost({
+      config,
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      telegramExtensionPath,
+    });
+    try {
+      await expect(readFile(connectedProfilePath, "utf8")).resolves.toBe("isaac");
+      await vi.waitFor(async () => {
+        await expect(readFile(handoffMarkerPath, "utf8")).resolves.toBe("routed");
+      });
+      expect(host.runtime.session.sessionManager.getCwd()).toBe(workspaceCwd);
+      expect(host.runtime.services.resourceLoader.getAgentsFiles()).toEqual({
+        agentsFiles: [
+          {
+            path: join(canonicalResourceRoot, ".pi", "telegram", "AGENTS.md"),
+            content: "release guidance\n",
+          },
+        ],
+      });
+      expect(
+        host.runtime.services.resourceLoader
+          .getExtensions()
+          .extensions.map((extension) => extension.resolvedPath),
+      ).toContain(
+        join(canonicalResourceRoot, ".pi", "extensions", "release-extension.js"),
+      );
+      expect(
+        host.runtime.services.resourceLoader
+          .getExtensions()
+          .extensions.map((extension) => extension.resolvedPath),
+      ).not.toContain(join(workspaceCwd, ".pi", "extensions", "workspace-extension.js"));
+      expect(
+        host.runtime.services.resourceLoader
+          .getExtensions()
+          .extensions.map((extension) => extension.resolvedPath),
+      ).not.toContain(
+        join(
+          canonicalResourceRoot,
+          ".pi",
+          "extensions",
+          "unselected-extension.js",
+        ),
+      );
+      expect(
+        host.runtime.services.resourceLoader.getSkills().skills.map((skill) => skill.name),
+      ).toEqual(["release-skill"]);
+      expect(host.runtime.session.sessionFile).toContain(config.sessionDir);
     } finally {
       await host.dispose();
       if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;

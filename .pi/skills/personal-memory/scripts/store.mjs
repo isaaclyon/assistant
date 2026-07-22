@@ -24,6 +24,8 @@ export const MEMORY_TYPES = Object.freeze([
   "reference",
 ]);
 export const MEMORY_STATUSES = Object.freeze(["active", "superseded", "archived"]);
+export const MEMORY_SCOPES = Object.freeze(["personal", "household"]);
+export const MEMORY_OWNERS = Object.freeze(["isaac", "emma"]);
 
 export const MEMORY_TYPE_FOLDERS = Object.freeze({
   person: "people",
@@ -34,9 +36,9 @@ export const MEMORY_TYPE_FOLDERS = Object.freeze({
   purchase: "purchases",
   reference: "references",
 });
-const NOTE_SCHEMA_VERSION = 1;
+const NOTE_SCHEMA_VERSION = 2;
 const REQUIRED_MANAGED_KEYS = new Set(["schema", "id", "type", "title", "tags", "created", "updated"]);
-const MANAGED_KEYS = new Set([...REQUIRED_MANAGED_KEYS, "status"]);
+const MANAGED_KEYS = new Set([...REQUIRED_MANAGED_KEYS, "status", "scope", "owner"]);
 export const MEMORY_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const MAX_MEMORY_NOTE_BYTES = 256 * 1024;
 const MAX_TITLE_LENGTH = 200;
@@ -128,6 +130,35 @@ function validateType(type) {
 function validateStatus(status) {
   if (!MEMORY_STATUSES.includes(status)) fail("INVALID_INPUT", "Memory status is invalid");
   return status;
+}
+
+function validateScope(scope) {
+  if (!MEMORY_SCOPES.includes(scope)) fail("INVALID_INPUT", "Memory scope is invalid");
+  return scope;
+}
+
+function validateOwner(owner) {
+  if (!MEMORY_OWNERS.includes(owner)) fail("INVALID_INPUT", "Memory owner is invalid");
+  return owner;
+}
+
+export function validateMemoryView(principal, memoryView) {
+  if (
+    !["isaac", "emma", "household", "engineering"].includes(principal) ||
+    !["owner-and-household", "household", "none"].includes(memoryView) ||
+    (memoryView === "owner-and-household" && !MEMORY_OWNERS.includes(principal)) ||
+    (memoryView === "household" && principal !== "household") ||
+    (memoryView === "none" && principal !== "engineering")
+  ) {
+    fail("INVALID_INPUT", "Memory view is invalid");
+  }
+  return { principal, memoryView };
+}
+
+export function memoryViewAllows(note, { principal, memoryView }) {
+  if (memoryView === "none") return false;
+  if (note.scope === "household") return true;
+  return memoryView === "owner-and-household" && note.owner === principal;
 }
 
 function validateStatuses(statuses = ["active"]) {
@@ -320,14 +351,27 @@ export function parseMarkdownMemoryNote(raw, expected = {}) {
     fail("MALFORMED_NOTE", "Memory note is malformed");
   }
   const hasStatus = Object.hasOwn(values, "status");
+  const hasScope = Object.hasOwn(values, "scope");
+  const hasOwner = Object.hasOwn(values, "owner");
   for (const key of REQUIRED_MANAGED_KEYS) {
     if (!Object.hasOwn(values, key)) fail("MALFORMED_NOTE", "Memory note is malformed");
   }
   try {
-    if (values.schema !== NOTE_SCHEMA_VERSION) fail("MALFORMED_NOTE", "Memory note is malformed");
+    if (values.schema !== 1 && values.schema !== NOTE_SCHEMA_VERSION) {
+      fail("MALFORMED_NOTE", "Memory note is malformed");
+    }
     values.id = validateId(values.id);
     values.type = validateType(values.type);
     values.status = validateStatus(Object.hasOwn(values, "status") ? values.status : "active");
+    if (values.schema === 1) {
+      values.scope = "personal";
+      values.owner = "isaac";
+    } else {
+      values.scope = validateScope(values.scope);
+      if (values.scope === "personal") values.owner = validateOwner(values.owner);
+      else if (Object.hasOwn(values, "owner")) fail("MALFORMED_NOTE", "Memory note is malformed");
+      else values.owner = undefined;
+    }
     values.title = validateTitle(values.title);
     values.tags = validateTags(values.tags);
     values.created = validateTimestamp(values.created);
@@ -345,7 +389,14 @@ export function parseMarkdownMemoryNote(raw, expected = {}) {
     body,
     frontmatterDocument: document,
     frontmatterValues: Object.fromEntries(
-      [...MANAGED_KEYS].map((key) => [key, key === "status" && !hasStatus ? undefined : values[key]]),
+      [...MANAGED_KEYS].map((key) => [
+        key,
+        (key === "status" && !hasStatus) ||
+        (key === "scope" && !hasScope) ||
+        (key === "owner" && !hasOwner)
+          ? undefined
+          : values[key],
+      ]),
     ),
     revision: digest(raw),
   };
@@ -358,6 +409,8 @@ function renderNote(note) {
     id: note.id,
     type: note.type,
     status: note.status,
+    scope: note.scope,
+    ...(note.scope === "personal" ? { owner: note.owner } : {}),
     title: note.title,
     tags: note.tags,
     created: note.created,
@@ -366,6 +419,7 @@ function renderNote(note) {
   let header;
   if (note.frontmatterDocument) {
     const document = note.frontmatterDocument.clone();
+    if (note.scope === "household") document.delete("owner");
     for (const [key, value] of Object.entries(managed)) {
       if (JSON.stringify(note.frontmatterValues?.[key]) === JSON.stringify(value)) continue;
       const sourceNode = document.get(key, true);
@@ -404,6 +458,8 @@ function renderNote(note) {
       `id: ${JSON.stringify(note.id)}`,
       `type: ${JSON.stringify(note.type)}`,
       `status: ${JSON.stringify(note.status)}`,
+      `scope: ${JSON.stringify(note.scope)}`,
+      ...(note.scope === "personal" ? [`owner: ${JSON.stringify(note.owner)}`] : []),
       `title: ${JSON.stringify(note.title)}`,
       `tags: ${JSON.stringify(note.tags)}`,
       `created: ${JSON.stringify(note.created)}`,
@@ -421,6 +477,8 @@ function publicMetadata(note, relativePath) {
     id: note.id,
     type: note.type,
     status: note.status,
+    scope: note.scope,
+    ...(note.scope === "personal" ? { owner: note.owner } : {}),
     title: note.title,
     tags: [...note.tags],
     created: note.created,
@@ -467,7 +525,33 @@ export function createMarkdownMemoryStore(options) {
   const forbiddenRoots = (options.forbiddenRoots ?? []).map((path) => resolve(path));
   const now = options.now ?? (() => new Date());
   const randomUUID = options.randomUUID ?? nodeRandomUUID;
+  const view = validateMemoryView(
+    options.principal ?? "isaac",
+    options.memoryView ?? "owner-and-household",
+  );
   assertOutsideForbidden(root, forbiddenRoots);
+
+  function assertVisible(note) {
+    if (!memoryViewAllows(note, view)) fail("NOT_FOUND", "Memory was not found");
+  }
+
+  function resolveNewScope(request) {
+    if (view.memoryView === "none") fail("INVALID_SCOPE", "Memory is unavailable in this instance");
+    const scope = validateScope(
+      Object.hasOwn(request ?? {}, "scope")
+        ? request.scope
+        : view.memoryView === "household"
+          ? "household"
+          : "personal",
+    );
+    if (scope === "personal" && view.memoryView !== "owner-and-household") {
+      fail("INVALID_SCOPE", "Personal memory is unavailable in this instance");
+    }
+    return {
+      scope,
+      ...(scope === "personal" ? { owner: view.principal } : {}),
+    };
+  }
 
   async function prepareRoot(create) {
     let exists = await assertDirectory(root, "UNSAFE_VAULT");
@@ -558,6 +642,7 @@ export function createMarkdownMemoryStore(options) {
     if (typeof ifRevision !== "string") fail("INVALID_INPUT", "Memory revision is required");
     const location = await locate(id);
     const { note } = await readLocated(location);
+    assertVisible(note);
     if (note.revision !== ifRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
     try {
       await unlink(location.path);
@@ -579,6 +664,7 @@ export function createMarkdownMemoryStore(options) {
       const title = validateTitle(request?.title);
       const tags = validateTags(request?.tags);
       const body = validateBody(request?.body ?? "");
+      const scope = resolveNewScope(request);
       const id = validateId(randomUUID());
       const timestamp = now().toISOString();
       await prepareRoot(true);
@@ -586,7 +672,7 @@ export function createMarkdownMemoryStore(options) {
       const relativePath = join(MEMORY_TYPE_FOLDERS[type], `${id}.md`);
       const destination = join(root, relativePath);
       if (await assertRegularFile(destination)) fail("DUPLICATE_ID", "Memory id is duplicated");
-      const raw = renderNote({ schema: NOTE_SCHEMA_VERSION, id, type, status, title, tags, created: timestamp, updated: timestamp, body });
+      const raw = renderNote({ schema: NOTE_SCHEMA_VERSION, id, type, status, ...scope, title, tags, created: timestamp, updated: timestamp, body });
       const tempPath = await writeTemp(directory, id, raw);
       try {
         await link(tempPath, destination);
@@ -602,6 +688,7 @@ export function createMarkdownMemoryStore(options) {
     async read({ id } = {}) {
       const location = await locate(id);
       const { note } = await readLocated(location);
+      assertVisible(note);
       return publicNote(note, location.relativePath);
     },
 
@@ -612,6 +699,7 @@ export function createMarkdownMemoryStore(options) {
       validateHappeningText(text);
       const location = await locate(id);
       const { note } = await readLocated(location);
+      assertVisible(note);
       if (note.revision !== ifRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
       const updated = {
         ...note,
@@ -640,13 +728,22 @@ export function createMarkdownMemoryStore(options) {
       if (typeof ifRevision !== "string" || !patch || typeof patch !== "object" || Array.isArray(patch)) {
         fail("INVALID_INPUT", "Memory update is invalid");
       }
-      const allowed = new Set(["status", "title", "tags", "body"]);
+      const allowed = new Set(["status", "scope", "title", "tags", "body"]);
       if (Object.keys(patch).some((key) => !allowed.has(key))) fail("INVALID_INPUT", "Memory update is invalid");
       const location = await locate(id);
       const { note } = await readLocated(location);
+      assertVisible(note);
       if (note.revision !== ifRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
+      const scope = Object.hasOwn(patch, "scope")
+        ? validateScope(patch.scope)
+        : note.scope;
+      if (scope === "personal" && view.memoryView !== "owner-and-household") {
+        fail("INVALID_SCOPE", "Personal memory is unavailable in this instance");
+      }
       const updated = {
         ...note,
+        scope,
+        ...(scope === "personal" ? { owner: view.principal } : { owner: undefined }),
         status: Object.hasOwn(patch, "status") ? validateStatus(patch.status) : note.status,
         title: Object.hasOwn(patch, "title") ? validateTitle(patch.title) : note.title,
         tags: Object.hasOwn(patch, "tags") ? validateTags(patch.tags) : note.tags,
@@ -702,6 +799,7 @@ export function createMarkdownMemoryStore(options) {
           const note = parseMarkdownMemoryNote(raw, { id, type });
           seen.add(id);
           if (!selectedStatuses.includes(note.status)) continue;
+          if (!memoryViewAllows(note, view)) continue;
           results.push(publicMetadata(note, join(MEMORY_TYPE_FOLDERS[type], name)));
         }
       }

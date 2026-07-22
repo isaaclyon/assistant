@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "instances": [
+    {
+      "id": "isaac",
+      "displayName": "Isaac Bot",
+      "principal": "isaac",
+      "telegramProfile": "isaac",
+      "telegramSurface": { "type": "private" },
+      "workspaceCwd": "/home/assistant/workspaces/isaac",
+      "capabilityProfile": "personal-isaac",
+      "credentialScope": "isaac-personal",
+      "memoryView": "owner-and-household",
+      "jobsRole": "coordinator"
+    },
+    {
+      "id": "emma",
+      "displayName": "Emma Bot",
+      "principal": "emma",
+      "telegramProfile": "emma",
+      "telegramSurface": { "type": "private" },
+      "workspaceCwd": "/home/assistant/workspaces/emma",
+      "capabilityProfile": "personal-emma",
+      "credentialScope": "emma-personal",
+      "memoryView": "owner-and-household",
+      "jobsRole": "target-only"
+    },
+    {
+      "id": "shared",
+      "displayName": "Shared Bot",
+      "principal": "household",
+      "telegramProfile": "shared",
+      "telegramSurface": {
+        "type": "household-group",
+        "chatId": -1001234567890,
+        "actors": { "isaac": 111111111, "emma": 222222222 }
+      },
+      "workspaceCwd": "/home/assistant/workspaces/shared",
+      "capabilityProfile": "household-shared",
+      "credentialScope": "household",
+      "memoryView": "household",
+      "jobsRole": "target-only"
+    },
+    {
+      "id": "builder",
+      "displayName": "Builder Bot",
+      "principal": "engineering",
+      "telegramProfile": "builder",
+      "telegramSurface": { "type": "private" },
+      "workspaceCwd": "/home/assistant/workspaces/builder",
+      "capabilityProfile": "builder",
+      "credentialScope": "engineering",
+      "memoryView": "none",
+      "jobsRole": "target-only"
+    }
+  ]
+}

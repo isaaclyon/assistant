@@ -22,7 +22,8 @@ read as active and gain the field on their next CLI mutation. Status is mutable
 with the existing revision-checked update operation and does not encode a
 structured supersession target; ordinary Markdown links retain that role.
 
-Normal list, lexical search, and happenings queries select only active notes.
+Scope/owner filtering happens before lifecycle filtering on every retrieval
+surface. Normal list, lexical search, and happenings queries select only active notes.
 Callers may explicitly request one or more statuses to inspect history. Direct
 reads by stable ID work for every status. Only active notes contribute `#core`
 blocks, while lint continues to report defects in inactive notes without those
@@ -30,7 +31,8 @@ blocks affecting core validity.
 
 ## Consequences
 
-- Inactive knowledge remains canonical and inspectable but cannot silently
+- Inactive knowledge remains canonical and inspectable only to an authorized
+  memory view, and cannot silently
   influence normal recall or the Telegram system prompt.
 - Historical lookup must request inactive statuses explicitly.
 - Lifecycle changes are reversible and distinct from confirmed hard deletion.

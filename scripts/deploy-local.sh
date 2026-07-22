@@ -145,6 +145,30 @@ if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
   exit 1
 fi
 
+FLEET_MANIFEST="${PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST:-$HOME/.config/pi-telegram-bridge/instances.json}"
+if [[ -f "$FLEET_MANIFEST" ]]; then
+  echo "==> Activating configured bridge fleet"
+  PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST="$FLEET_MANIFEST" \
+    bash "$RELEASE_PATH/scripts/activate-fleet.sh" \
+      "$EXPECTED_SHA" "$RELEASE_PATH" "$NODE_BINARY"
+
+  # The canonical checkout may be updated after fleet readiness because every
+  # service loads code/resources from the immutable release. Builder worktrees
+  # are separate paths and are never reset or cleaned here.
+  git reset --hard "$EXPECTED_SHA"
+  git clean -ffdx -- \
+    .pi/extensions \
+    .pi/skills \
+    .pi/settings.json \
+    .agents/skills
+  echo "==> Fleet deployment complete at $(git rev-parse --short HEAD)"
+  find "$RELEASE_ROOT" -mindepth 1 -maxdepth 1 -type d \
+    ! -name "$EXPECTED_SHA" -printf '%T@ %p\n' \
+    | sort -nr | tail -n +4 | cut -d' ' -f2- | xargs -r rm -rf
+  trap - ERR
+  exit 0
+fi
+
 echo "==> Validating scheduled jobs against the new release"
 systemd-run --user --wait --pipe --quiet --collect \
   --property="EnvironmentFile=-$HOME/.config/pi-telegram-bridge/environment" \

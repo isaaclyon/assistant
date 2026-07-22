@@ -2,13 +2,13 @@
 
 ## Boundaries
 
-- **Host:** owns process lifetime, Pi runtime creation, persistent session selection, signal handling, and service installation.
+- **Host:** owns instance selection, process lifetime, Pi runtime creation, persistent session selection, signal handling, and service installation.
 - **Pi:** owns agent execution, model/tool state, extension lifecycle, and conversation persistence.
 - **pi-telegram:** owns Telegram polling, pairing, routing, rendering, controls, and update-offset persistence.
-- **systemd:** owns boot activation, restart policy, and logs.
+- **systemd:** owns one unit per instance, boot activation, restart policy, and logs.
 - **GitHub Actions:** owns post-merge validation and serialized production deployment through the server's repository-scoped runner.
 
-The host loads a full-commit-pinned `isaaclyon/pi-telegram` fork through Pi's `DefaultResourceLoader` and binds extensions in RPC mode. A version- and source-checked postinstall patch replaces raw tool-call status labels with deterministic, privacy-safe activity descriptions; see [ADR-0007](docs/adr/0007-patch-telegram-tool-activity-labels.md). The RPC binding includes Pi's official command-context session actions (`waitForIdle`, `newSession`, `fork`, tree navigation, session switching, and reload). The fork's narrow process-local host capability delegates Telegram `/new` to `AgentSessionRuntime.newSession()` without exposing the runtime or retaining stale extension contexts. The bridge repo is the agent's home base, but the host disables hierarchical AGENTS discovery and supplies only `.pi/telegram/AGENTS.md` as runtime context; see [ADR-0009](docs/adr/0009-isolate-telegram-agent-instructions.md). Filesystem/tool access is not restricted to the cwd. The host also disables normal extension/skill discovery, canonicalizes repo resources before loading, rejects symlink escapes, and passes Pi only those resources plus the pinned dependencies. Global `~/.pi/agent`, `~/.agents`, and ancestor `.agents` capabilities therefore never execute in the bridge.
+The host loads a full-commit-pinned `isaaclyon/pi-telegram` fork through Pi's `DefaultResourceLoader` and binds extensions in RPC mode. A version- and source-checked postinstall patch replaces raw tool-call status labels with deterministic, privacy-safe activity descriptions; see [ADR-0007](docs/adr/0007-patch-telegram-tool-activity-labels.md). The RPC binding includes Pi's official command-context session actions (`waitForIdle`, `newSession`, `fork`, tree navigation, session switching, and reload). The fork's narrow process-local host capability delegates Telegram `/new` to `AgentSessionRuntime.newSession()` without exposing the runtime or retaining stale extension contexts. In fleet mode, the host separates mutable `workspaceCwd` from immutable `resourceRoot`, disables hierarchical discovery, and supplies only the selected profile from `.pi/capabilities.json`; see [ADR-0009](docs/adr/0009-isolate-telegram-agent-instructions.md) and [ADR-0020](docs/adr/0020-run-a-household-bot-fleet-from-one-release.md). Canonicalized resources must remain inside the release, and symlink escapes are rejected. Global Pi/Agents directories and workspace-local capabilities never execute in the bridge. Filesystem tool access itself is not restricted to the cwd.
 
 The host explicitly loads the pinned, repo-installed Codex conversion and retry dependencies; ordinary Pi sessions opened in this repo do not auto-discover them. The retry extension classifies transient Codex websocket/backend failures and stalled streams for Pi's built-in retry policy. A version-checked install patch makes `pi-telegram` finalize the active turn on Pi's `agent_settled` event so retries keep their Telegram destination. Another patch gives the Codex extension a bridge-only settings path while preserving the shared Pi agent directory required by credentials and Telegram ownership. See ADR-0002, ADR-0004, and ADR-0013.
 
@@ -28,6 +28,14 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 | Personal memory vault | `~/.local/share/pi-telegram-bridge/memory` (override: `PI_TELEGRAM_MEMORY_DIR`) | `personal-memory` skill CLI |
 | Process logs | user journal | systemd |
 
+Fleet mode replaces singleton state rows with per-instance paths under
+`<stateRoot>/instances/<id>` for sessions, SQLite inbox, Codex settings,
+restart marker, checkers, job handoffs, and `runtime.json`. Telegram bot tokens,
+pairing, offsets, and locks remain in named profiles in the private Pi agent
+directory. Per-instance mode-`0600` environment files live under
+`<configRoot>/instances/<id>.env`; the strict mode-`0600` instance manifest is
+`<configRoot>/instances.json` by default.
+
 Stateful heartbeat jobs separate their cron trigger, tracked TypeScript checker,
 host-evaluated rule, and agent-prompt reaction. Checkers emit bounded structured
 observations and never own mutable state. The host resolves checker IDs inside its
@@ -35,7 +43,18 @@ immutable release and executes them directly with Node, while atomically retaini
 only the latest observation and temporal markers. See
 [ADR-0019](docs/adr/0019-stateful-heartbeat-observations.md).
 
-The personal memory vault is user-owned plain Markdown outside the checkout and
+In fleet mode, exactly one `jobsRole: coordinator` process owns cron, at,
+heartbeat, and webhook trigger evaluation plus mutable run state. Version-3 jobs
+name a stable target instance or `both-personal`. Before execution, the
+coordinator writes an idempotent dispatch record and mode-`0600` handoff into
+each recipient's state tree. The target drains its own handoffs into its own Pi
+runtime, so capabilities, memory, credentials, and Telegram destination come
+from the recipient rather than the coordinator. Per-recipient `pending` and
+`enqueued` states prevent retrying completed fan-out recipients; a file left in
+`processing` is reported as uncertain for operator review. External Telegram
+send remains non-durable.
+
+The memory vault is user-owned plain Markdown outside the checkout and
 releases, so it survives deployment cleanup and can be opened directly in
 Obsidian. Only the tracked skill-local CLI
 (`.pi/skills/personal-memory/scripts/memory.mjs`) mutates it and exposes
@@ -46,7 +65,11 @@ host's token-guarded process-local runtime marker is bound; ordinary Pi sessions
 in this repository do not receive it. Compilation errors are logged by Pi and
 the turn continues without core memory. There is no generated file, memory
 daemon, database, or cache. Any future full-text index must be derived and
-disposable, rebuilt from the Markdown. Notes have active, superseded, or
+disposable, rebuilt from the Markdown. Every note has a `personal` scope with a
+trusted owner or a `household` scope without an owner. Host-bound principal/view
+values filter every read, search, list, core compilation, and mutation: Isaac
+and Emma each see their own plus household; the household sees only household;
+engineering sees none. Notes have active, superseded, or
 archived lifecycle status. Normal retrieval and core compilation select active
 notes; inactive notes remain available to
 explicitly filtered queries and stable-ID reads. See
@@ -68,19 +91,19 @@ hooks, signing, and unbounded execution. It never pushes; see
 
 ## Startup
 
-1. Resolve dedicated state and working-directory paths.
+1. Load the private instance manifest (or compatibility singleton), validate its invariants, and resolve separate release, workspace, config, and state paths.
 2. Continue the most recent session in the bridge-only session directory.
 3. Point Codex conversion at its bridge-only settings file.
-4. Build an `AgentSessionRuntime` with the upstream Telegram extension path and repo-local Codex extension.
+4. Resolve the instance's default-deny capability profile from the immutable release and build an `AgentSessionRuntime` with the pinned dependencies.
 5. Bind the process-local bridge runtime marker, then bind extensions in RPC mode, emitting `session_start`.
-6. Let pi-telegram resume an owned/stale lock, or invoke `/telegram-connect` when no owner exists.
+6. Bind exact Telegram surface/actor policy, then let pi-telegram resume the selected named profile lock or connect it when no owner exists.
 7. Compile and append core memory before each agent start.
 8. Monitor polling ownership every five seconds. A live external Pi owner is respected; when it exits, the host reconnects automatically.
 9. Wait for SIGINT, SIGTERM, or an extension shutdown request.
 
 ## Deployment
 
-Pushes to `main` run checks on a GitHub-hosted runner. After they pass, the `assistant-production` self-hosted runner builds an immutable release for the exact merged SHA, updates the canonical agent checkout, removes untracked and ignored project settings plus all repo-local extension/skill locations (`.pi` and `.agents`), points systemd at the release, and requires both the application-ready signal and a stable PID. Activation failure restores the previous unit. See ADR-0005.
+Pushes to `main` run checks on a GitHub-hosted runner. After they pass, the `assistant-production` self-hosted runner builds one immutable release for the exact merged SHA. If the external instance manifest exists, it preflights every instance and the job graph, installs all units, stops the compatibility singleton, and activates instances sequentially. Readiness requires exact instance ID, full release SHA, and stable systemd PID from private runtime metadata. Any failure restores every changed unit. Mutable state/workspaces and separate builder worktrees are preserved. Without a manifest, the compatibility singleton deployment remains available. See ADR-0005 and [the fleet runbook](docs/household-fleet.md).
 
 Before activating a release with jobs schema version 2, deployment validates the
 external jobs file and referenced compiled checkers from the immutable release.

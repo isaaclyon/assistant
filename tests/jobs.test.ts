@@ -56,9 +56,89 @@ describe("parseJobsFile", () => {
     expect(jobs.map((job) => job.type)).toEqual(["cron", "at", "heartbeat", "webhook"]);
   });
 
+  it("requires and validates explicit version-3 instance targets", () => {
+    const jobs = parseJobsFile(
+      JSON.stringify({
+        version: 3,
+        jobs: [
+          {
+            id: "isaac-brief",
+            type: "cron",
+            schedule: "0 8 * * *",
+            prompt: "p",
+            target: "isaac",
+          },
+          {
+            id: "shared-hook",
+            type: "webhook",
+            prompt: "p",
+            target: "shared",
+          },
+          {
+            id: "couple-reminder",
+            type: "at",
+            at: "2026-07-18T15:00:00Z",
+            prompt: "p",
+            target: "both-personal",
+          },
+        ],
+      }),
+      { validTargets: new Set(["isaac", "emma", "shared", "builder"]) },
+    );
+
+    expect(jobs.map((job) => job.target)).toEqual([
+      "isaac",
+      "shared",
+      "both-personal",
+    ]);
+  });
+
+  it("rejects missing, unknown, retired, or unavailable fan-out targets", () => {
+    const parse = (target?: string, validTargets = new Set(["isaac", "shared"])) =>
+      parseJobsFile(
+        JSON.stringify({
+          version: 3,
+          jobs: [
+            {
+              id: "brief",
+              type: "cron",
+              schedule: "0 8 * * *",
+              prompt: "p",
+              ...(target === undefined ? {} : { target }),
+            },
+          ],
+        }),
+        { validTargets },
+      );
+
+    expect(() => parse()).toThrow(/target.*required/i);
+    expect(() => parse("retired")).toThrow(/unknown target.*retired/i);
+    expect(() => parse("both-personal")).toThrow(/requires configured targets isaac and emma/i);
+  });
+
+  it("maps a legacy targetless file to Isaac only when compatibility is explicit", () => {
+    const raw = jobsFile([
+      { id: "brief", type: "cron", schedule: "0 8 * * *", prompt: "p" },
+    ]);
+
+    expect(() =>
+      parseJobsFile(raw, {
+        validTargets: new Set(["isaac", "emma"]),
+        requireTargets: true,
+      }),
+    ).toThrow(/migrate.*target.*isaac/i);
+    expect(
+      parseJobsFile(raw, {
+        validTargets: new Set(["isaac", "emma"]),
+        requireTargets: true,
+        compatibilityTarget: "isaac",
+      })[0]?.target,
+    ).toBe("isaac");
+  });
+
   it("rejects invalid JSON, versions, and shapes", () => {
     expect(() => parseJobsFile("{nope")).toThrow(/not valid JSON/);
-    expect(() => parseJobsFile('{"version":3,"jobs":[]}')).toThrow(/"version": 2/);
+    expect(() => parseJobsFile('{"version":4,"jobs":[]}')).toThrow(/"version": 2 or 3/);
     expect(() => parseJobsFile('{"version":2}')).toThrow(/"jobs" array/);
   });
 
@@ -150,6 +230,49 @@ describe("startJobScheduler", () => {
     });
     return { stateDir, inject, now };
   }
+
+  it("carries the validated target into scheduled prompt dispatch", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "jobs-target-dispatch-"));
+    const inject = vi.fn(async () => {});
+    const now = Date.parse("2026-07-18T16:00:00Z");
+    await writeFile(
+      join(stateDir, "jobs.json"),
+      JSON.stringify({
+        version: 3,
+        jobs: [
+          {
+            id: "emma-reminder",
+            type: "at",
+            at: "2026-07-18T15:00:00Z",
+            prompt: "Call the dentist",
+            target: "emma",
+          },
+        ],
+      }),
+    );
+    scheduler = await startJobScheduler({
+      stateDir,
+      webhookHost: "127.0.0.1",
+      webhookPort: 0,
+      inject,
+      logger: silentLogger,
+      nowMs: () => now,
+      tickIntervalMs: 60_000,
+      validTargets: new Set(["isaac", "emma", "shared"]),
+      requireTargets: true,
+    });
+
+    await scheduler.tick();
+
+    expect(inject).toHaveBeenCalledWith(
+      expect.stringContaining("Call the dentist"),
+      {
+        jobId: "emma-reminder",
+        target: "emma",
+        eventId: `at:emma-reminder:${Date.parse("2026-07-18T15:00:00Z")}`,
+      },
+    );
+  });
 
   async function writeJobs(stateDir: string, jobs: unknown[]): Promise<void> {
     const temporary = join(stateDir, "jobs.json.tmp");

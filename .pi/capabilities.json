@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "resources": {
+    "extensions": [
+      {
+        "id": "core-memory",
+        "path": ".pi/extensions/core-memory.ts",
+        "enabled": true
+      },
+      {
+        "id": "reload",
+        "path": ".pi/extensions/reload.ts",
+        "enabled": true
+      },
+      {
+        "id": "restart",
+        "path": ".pi/extensions/restart.ts",
+        "enabled": true
+      },
+      {
+        "id": "skills",
+        "path": ".pi/extensions/skills.ts",
+        "enabled": true
+      }
+    ],
+    "skills": [
+      {
+        "id": "agent-browser",
+        "path": ".pi/skills/agent-browser/SKILL.md",
+        "enabled": true
+      },
+      {
+        "id": "check-weather",
+        "path": ".pi/skills/check-weather/SKILL.md",
+        "enabled": true
+      },
+      {
+        "id": "extend-this-agent",
+        "path": ".pi/skills/extend-this-agent/SKILL.md",
+        "enabled": true
+      },
+      {
+        "id": "manage-jobs",
+        "path": ".pi/skills/manage-jobs/SKILL.md",
+        "enabled": true
+      },
+      {
+        "id": "manage-ynab",
+        "path": ".pi/skills/manage-ynab/SKILL.md",
+        "enabled": true
+      },
+      {
+        "id": "personal-memory",
+        "path": ".pi/skills/personal-memory/SKILL.md",
+        "enabled": true
+      },
+      {
+        "id": "track-improvement-ideas",
+        "path": ".pi/skills/track-improvement-ideas/SKILL.md",
+        "enabled": true
+      }
+    ],
+    "instructions": [
+      {
+        "id": "telegram-default",
+        "path": ".pi/telegram/AGENTS.md",
+        "enabled": true
+      }
+    ]
+  },
+  "profiles": [
+    {
+      "id": "personal-isaac",
+      "extensions": ["core-memory", "reload", "restart", "skills"],
+      "skills": [
+        "agent-browser",
+        "check-weather",
+        "manage-jobs",
+        "manage-ynab",
+        "personal-memory"
+      ],
+      "instructions": "telegram-default"
+    },
+    {
+      "id": "personal-emma",
+      "extensions": ["core-memory", "reload", "restart", "skills"],
+      "skills": [
+        "agent-browser",
+        "check-weather",
+        "manage-jobs",
+        "manage-ynab",
+        "personal-memory"
+      ],
+      "instructions": "telegram-default"
+    },
+    {
+      "id": "household-shared",
+      "extensions": ["core-memory", "reload", "restart", "skills"],
+      "skills": [
+        "agent-browser",
+        "check-weather",
+        "manage-jobs",
+        "manage-ynab",
+        "personal-memory"
+      ],
+      "instructions": "telegram-default"
+    },
+    {
+      "id": "builder",
+      "extensions": ["reload", "restart", "skills"],
+      "skills": [
+        "agent-browser",
+        "check-weather",
+        "extend-this-agent",
+        "manage-jobs",
+        "track-improvement-ideas"
+      ],
+      "instructions": "telegram-default"
+    }
+  ]
+}

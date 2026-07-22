@@ -1,5 +1,5 @@
 import { Cron } from "croner";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { type FSWatcher, watch } from "node:fs";
 import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -22,6 +22,7 @@ export interface JobsLogger {
 interface PromptJobBase {
   id: string;
   prompt: string;
+  target?: string;
 }
 
 export interface CronJob extends PromptJobBase {
@@ -39,6 +40,7 @@ export interface HeartbeatJob extends StatefulHeartbeatDefinition {
   type: "heartbeat";
   schedule: string;
   tz?: string;
+  target?: string;
 }
 
 export interface WebhookJob extends PromptJobBase {
@@ -65,7 +67,16 @@ function makeCron(schedule: string, tz: string | undefined): Cron {
   return new Cron(schedule, tz === undefined ? {} : { timezone: tz });
 }
 
-export function parseJobsFile(raw: string): JobDefinition[] {
+export interface ParseJobsFileOptions {
+  validTargets?: ReadonlySet<string>;
+  requireTargets?: boolean;
+  compatibilityTarget?: string;
+}
+
+export function parseJobsFile(
+  raw: string,
+  options: ParseJobsFileOptions = {},
+): JobDefinition[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -74,8 +85,8 @@ export function parseJobsFile(raw: string): JobDefinition[] {
     throw new Error(`jobs.json is not valid JSON: ${message}`);
   }
   if (!isRecord(parsed)) throw new Error("jobs.json must be a JSON object");
-  if (parsed.version !== 1 && parsed.version !== 2) {
-    throw new Error('jobs.json must declare "version": 2');
+  if (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3) {
+    throw new Error('jobs.json must declare "version": 2 or 3');
   }
   if (!Array.isArray(parsed.jobs)) throw new Error('jobs.json must have a "jobs" array');
   if (parsed.version === 1) {
@@ -109,6 +120,41 @@ export function parseJobsFile(raw: string): JobDefinition[] {
       return;
     }
     seenIds.add(id);
+    const targetRequired = parsed.version === 3 || options.requireTargets === true;
+    let target = entry.target;
+    if (target === undefined && targetRequired) {
+      target = options.compatibilityTarget;
+      if (target === undefined) {
+        errors.push(
+          `${label} (${id}): "target" is required; migrate this job with target "isaac" or another configured instance`,
+        );
+        return;
+      }
+    }
+    if (target !== undefined) {
+      if (typeof target !== "string" || !ID_PATTERN.test(target)) {
+        errors.push(`${label} (${id}): "target" must be a stable instance ID`);
+        return;
+      }
+      if (target === "both-personal") {
+        if (
+          options.validTargets !== undefined &&
+          (!options.validTargets.has("isaac") || !options.validTargets.has("emma"))
+        ) {
+          errors.push(
+            `${label} (${id}): target "both-personal" requires configured targets isaac and emma`,
+          );
+          return;
+        }
+      } else if (
+        options.validTargets !== undefined &&
+        !options.validTargets.has(target)
+      ) {
+        errors.push(`${label} (${id}): unknown target "${target}"`);
+        return;
+      }
+    }
+    const targetField = target === undefined ? {} : { target };
     const requirePrompt = (): string | undefined => {
       const prompt = entry.prompt;
       if (
@@ -153,6 +199,7 @@ export function parseJobsFile(raw: string): JobDefinition[] {
           type: "cron",
           schedule,
           prompt,
+          ...targetField,
           ...(entry.tz === undefined ? {} : { tz: entry.tz as string }),
         });
         return;
@@ -165,7 +212,7 @@ export function parseJobsFile(raw: string): JobDefinition[] {
           return;
         }
         if (prompt === undefined) return;
-        jobs.push({ id, type: "at", at, prompt });
+        jobs.push({ id, type: "at", at, prompt, ...targetField });
         return;
       }
       case "heartbeat": {
@@ -177,6 +224,7 @@ export function parseJobsFile(raw: string): JobDefinition[] {
           type: "heartbeat",
           schedule,
           ...fields,
+          ...targetField,
           ...(entry.tz === undefined ? {} : { tz: entry.tz as string }),
         });
         return;
@@ -196,6 +244,7 @@ export function parseJobsFile(raw: string): JobDefinition[] {
           id,
           type: "webhook",
           prompt,
+          ...targetField,
           ...(hmacSecret === undefined ? {} : { hmacSecret }),
         });
         return;
@@ -271,12 +320,21 @@ export interface JobSchedulerOptions {
   stateDir: string;
   webhookHost: string;
   webhookPort: number;
-  inject: (prompt: string) => Promise<void>;
+  inject: (prompt: string, dispatch?: JobDispatch) => Promise<void>;
   logger: JobsLogger;
+  validTargets?: ReadonlySet<string>;
+  requireTargets?: boolean;
+  compatibilityTarget?: string;
   nowMs?: () => number;
   tickIntervalMs?: number;
   checkTimeoutMs?: number;
   runCheck?: (checkerId: string, timeoutMs: number) => Promise<CheckResult>;
+}
+
+export interface JobDispatch {
+  jobId: string;
+  target: string;
+  eventId: string;
 }
 
 export interface JobScheduler {
@@ -293,6 +351,9 @@ export async function startJobScheduler({
   webhookPort,
   inject,
   logger,
+  validTargets,
+  requireTargets,
+  compatibilityTarget,
   nowMs = Date.now,
   tickIntervalMs = 30_000,
   checkTimeoutMs = 60_000,
@@ -307,10 +368,29 @@ export async function startJobScheduler({
   let state = await loadState(statePath);
   let webhookServer: WebhookServer | undefined;
   let stopped = false;
+  const parseOptions: ParseJobsFileOptions = {
+    ...(validTargets === undefined ? {} : { validTargets }),
+    ...(requireTargets === undefined ? {} : { requireTargets }),
+    ...(compatibilityTarget === undefined ? {} : { compatibilityTarget }),
+  };
+  const dispatchFor = (
+    job: JobDefinition,
+    eventId: string,
+  ): JobDispatch | undefined =>
+    job.target === undefined
+      ? undefined
+      : { jobId: job.id, target: job.target, eventId };
   const heartbeatRunner = createHeartbeatRunner({
     stateDir,
     runCheck,
-    inject,
+    inject: (prompt, job) =>
+      inject(
+        prompt,
+        dispatchFor(
+          job as HeartbeatJob,
+          `heartbeat:${job.id}:${createHash("sha256").update(prompt).digest("hex")}`,
+        ),
+      ),
     logger,
     nowMs,
     checkTimeoutMs,
@@ -351,7 +431,8 @@ export async function startJobScheduler({
           const job = jobs.find((entry) => entry.id === id);
           return job?.type === "webhook" ? job : undefined;
         },
-        inject,
+        inject: (prompt, job) =>
+          inject(prompt, dispatchFor(job, `webhook:${job.id}:${randomUUID()}`)),
         logger,
       });
       logger.info(`Webhook trigger server listening on ${webhookHost}:${webhookServer.port}.`);
@@ -378,7 +459,7 @@ export async function startJobScheduler({
     let loaded: JobDefinition[] = [];
     if (raw !== undefined) {
       try {
-        loaded = parseJobsFile(raw);
+        loaded = parseJobsFile(raw, parseOptions);
       } catch (error) {
         await recordLoadError(error instanceof Error ? error.message : String(error));
         return;
@@ -434,7 +515,7 @@ export async function startJobScheduler({
     }
     let currentJobs: JobDefinition[];
     try {
-      currentJobs = parseJobsFile(raw);
+      currentJobs = parseJobsFile(raw, parseOptions);
     } catch {
       // Invalid edits retain the last-good loaded jobs until corrected.
       return true;
@@ -443,7 +524,10 @@ export async function startJobScheduler({
     return current?.type === "heartbeat" && isDeepStrictEqual(current, job);
   };
 
-  const fireScheduled = async (job: CronJob | AtJob): Promise<boolean> => {
+  const fireScheduled = async (
+    job: CronJob | AtJob,
+    eventId: string,
+  ): Promise<boolean> => {
     let prompt: string;
     if (job.type === "at") {
       prompt = `One-time reminder '${job.id}' fired (scheduled for ${job.at}).\n\n${job.prompt}`;
@@ -451,7 +535,7 @@ export async function startJobScheduler({
       prompt = `Scheduled job '${job.id}' fired (schedule: ${job.schedule}${job.tz ? ` ${job.tz}` : ""}).\n\n${job.prompt}`;
     }
     try {
-      await inject(prompt);
+      await inject(prompt, dispatchFor(job, eventId));
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -470,7 +554,7 @@ export async function startJobScheduler({
       const now = nowMs();
       if (job.type === "at") {
         if (state.fired[job.id] !== undefined || now < Date.parse(job.at)) continue;
-        if (await fireScheduled(job)) {
+        if (await fireScheduled(job, `at:${job.id}:${Date.parse(job.at)}`)) {
           state.fired[job.id] = now;
           state.lastRun[job.id] = now;
           await persistState();
@@ -484,7 +568,7 @@ export async function startJobScheduler({
       if (job.type === "heartbeat") {
         await heartbeatRunner.run(job, () => heartbeatIsCurrent(job));
       } else {
-        await fireScheduled(job);
+        await fireScheduled(job, `cron:${job.id}:${dueMs}`);
       }
       state.lastRun[job.id] = now;
       await persistState();

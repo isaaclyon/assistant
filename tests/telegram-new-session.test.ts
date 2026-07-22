@@ -62,4 +62,45 @@ describe("Telegram /new delivery", () => {
     expect(requests).toBe(1);
     expect(replies).toEqual(["🆕 Starting a new session in this thread."]);
   });
+
+  it("ignores a redelivered household confirmation message", async () => {
+    const commands = await import(
+      pathToFileURL(
+        join(dirname(resolveTelegramExtensionPath()), "lib", "commands.ts"),
+      ).href
+    );
+    const message = {
+      chat: { id: -1007 },
+      message_id: 930_002,
+      message_thread_id: 9,
+    };
+    const confirmations: Array<{ chatId: number; threadId?: number }> = [];
+    const deps = {
+      isIdle: () => true,
+      hasPendingMessages: () => false,
+      hasActiveTelegramTurn: () => false,
+      hasDispatchPending: () => false,
+      hasQueuedTelegramItems: () => false,
+      isCompactionInProgress: () => false,
+      hasPendingSessionReplacement: () => false,
+      requestNewSession: () => ({ accepted: true }),
+      getMessageTarget: (currentMessage: typeof message) => ({
+        chatId: currentMessage.chat.id,
+        threadId: currentMessage.message_thread_id,
+      }),
+      sendTextReply: async () => undefined,
+      requiresConfirmation: () => true,
+      sendConfirmation: async (target: {
+        chatId: number;
+        threadId?: number;
+      }) => {
+        confirmations.push(target);
+      },
+    };
+
+    await commands.handleTelegramNewSessionCommand(message, deps);
+    await commands.handleTelegramNewSessionCommand(message, deps);
+
+    expect(confirmations).toEqual([{ chatId: -1007, threadId: 9 }]);
+  });
 });

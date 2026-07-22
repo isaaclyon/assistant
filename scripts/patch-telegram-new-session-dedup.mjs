@@ -70,11 +70,18 @@ const replacement = `export async function handleTelegramNewSessionCommand<TMess
 ): Promise<void> {
   if (isDuplicateTelegramNewSessionMessage(message)) return;
   const blockingReason = getTelegramNewSessionBlockingReason({`;
-const notice = `  await deps.sendTextReply("🆕 Starting a new session in this thread.");
-}`;
-const noticeReplacement = `  rememberTelegramNewSessionMessage(message);
-  await deps.sendTextReply("🆕 Starting a new session in this thread.");
-}`;
+const confirmation = `    await deps.sendConfirmation(deps.getMessageTarget(message));
+    return;`;
+const confirmationReplacement = `    await deps.sendConfirmation(deps.getMessageTarget(message));
+    rememberTelegramNewSessionMessage(message);
+    return;`;
+const acceptedReply = `  await deps.sendTextReply(
+    deps.acceptedMessage ?? "🆕 Starting a new session in this thread.",
+  );`;
+const acceptedReplyReplacement = `  rememberTelegramNewSessionMessage(message);
+  await deps.sendTextReply(
+    deps.acceptedMessage ?? "🆕 Starting a new session in this thread.",
+  );`;
 
 const manifest = await readFile(join(packageRoot, "package.json"), "utf8");
 if (!/^\s*"version":\s*"0\.20\.6",?\s*$/m.test(manifest)) {
@@ -85,7 +92,11 @@ if (!/^\s*"version":\s*"0\.20\.6",?\s*$/m.test(manifest)) {
 
 let source = await readFile(commandsPath, "utf8");
 if (!source.includes(marker)) {
-  if (!source.includes(original) || !source.includes(notice)) {
+  if (
+    !source.includes(original) ||
+    !source.includes(confirmation) ||
+    !source.includes(acceptedReply)
+  ) {
     throw new Error(
       `Telegram /new dedup patch no longer applies cleanly to ${commandsPath}.`,
     );
@@ -96,6 +107,7 @@ if (!source.includes(marker)) {
       helpers + "const TELEGRAM_EXTENSION_COMMAND_REGISTRY_KEY =",
     )
     .replace(original, replacement)
-    .replace(notice, noticeReplacement);
+    .replace(confirmation, confirmationReplacement)
+    .replace(acceptedReply, acceptedReplyReplacement);
   await writeFile(commandsPath, source);
 }

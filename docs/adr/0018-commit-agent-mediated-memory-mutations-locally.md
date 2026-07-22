@@ -36,6 +36,11 @@ The generated systemd unit reads the optional, user-owned
 Store the vault path and opt-in there so regenerated units and deployments do
 not reset them. Disabled mode performs no Git discovery or command.
 
+Scope promotion uses the same preflight, revision check, single-path commit,
+and sanitized failure semantics as any other update. The commit message names
+only the note UUID and does not disclose the old/new scope, owner, title, or
+body.
+
 ## Considered Options
 
 - **Enable automatically for any containing repository:** rejected because a

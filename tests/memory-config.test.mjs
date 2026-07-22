@@ -5,8 +5,10 @@ import {
   DEFAULT_BRIDGE_STATE_RELATIVE_PATH,
   DEFAULT_MEMORY_RELATIVE_PATH,
   resolveBridgeSessionDirectory,
+  resolveBridgeSessionDirectories,
   resolveMemoryDirectory,
   resolveMemoryGitAutocommit,
+  resolveMemoryView,
 } from "../.pi/skills/personal-memory/scripts/config.mjs";
 import {
   errorEnvelope,
@@ -48,6 +50,34 @@ describe("personal memory script configuration", () => {
         "/home/tester",
       ),
     ).toBe("/home/tester/state/telegram/sessions");
+  });
+
+  it("resolves the explicit instance principal, memory view, and fleet session roots", () => {
+    expect(
+      resolveMemoryView({
+        PI_TELEGRAM_PRINCIPAL: "emma",
+        PI_TELEGRAM_MEMORY_VIEW: "owner-and-household",
+      }),
+    ).toEqual({ principal: "emma", memoryView: "owner-and-household" });
+    expect(
+      resolveBridgeSessionDirectories({
+        PI_TELEGRAM_BRIDGE_SESSION_ROOTS: JSON.stringify([
+          "/state/instances/isaac/sessions",
+          "/state/instances/emma/sessions",
+          "/state/instances/shared/sessions",
+        ]),
+      }),
+    ).toEqual([
+      "/state/instances/isaac/sessions",
+      "/state/instances/emma/sessions",
+      "/state/instances/shared/sessions",
+    ]);
+    expect(() =>
+      resolveMemoryView({
+        PI_TELEGRAM_PRINCIPAL: "household",
+        PI_TELEGRAM_MEMORY_VIEW: "owner-and-household",
+      }),
+    ).toThrow(/incompatible/i);
   });
 
   it("requires an explicit valid Git auto-commit opt-in", () => {

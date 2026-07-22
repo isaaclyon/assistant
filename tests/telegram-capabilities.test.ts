@@ -3,10 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import {
   bindBridgeRestart,
   bindBridgeRuntimeMarker,
+  bindTelegramHostHouseholdGroup,
+  bindTelegramHostNewSession,
 } from "../src/telegram-capabilities.js";
 
 const RESTART_REGISTRY = Symbol.for("pi-telegram-bridge.restart-registry");
 const RUNTIME_REGISTRY = Symbol.for("pi-telegram-bridge.runtime-registry");
+const HOST_REGISTRY = Symbol.for("pi-telegram.host-capability-registry");
 
 function readRegistry(): { request?: unknown } | undefined {
   const value = (globalThis as Record<PropertyKey, unknown>)[RESTART_REGISTRY];
@@ -45,6 +48,49 @@ describe("bindBridgeRuntimeMarker", () => {
 
     expect(registry).toMatchObject({ version: 1, runtime: {} });
     unbind();
+    expect(registry).toEqual({ version: 1 });
+  });
+});
+
+describe("Telegram host capability bindings", () => {
+  it("binds session replacement and household policy independently", () => {
+    const unbindSession = bindTelegramHostNewSession(async () => ({
+      cancelled: false,
+    }));
+    const unbindHousehold = bindTelegramHostHouseholdGroup({
+      kind: "household-group",
+      chatId: -100123,
+      actors: [
+        { userId: 101, label: "Isaac" },
+        { userId: 202, label: "Emma" },
+      ],
+    });
+    const registry = (globalThis as Record<PropertyKey, unknown>)[
+      HOST_REGISTRY
+    ];
+    expect(registry).toMatchObject({
+      version: 1,
+      provider: expect.any(Function),
+      token: expect.any(Object),
+      householdGroup: {
+        kind: "household-group",
+        chatId: -100123,
+        actors: [
+          { userId: 101, label: "Isaac" },
+          { userId: 202, label: "Emma" },
+        ],
+      },
+      householdToken: expect.any(Object),
+    });
+
+    unbindHousehold();
+    expect(registry).toMatchObject({
+      version: 1,
+      provider: expect.any(Function),
+      token: expect.any(Object),
+    });
+    expect(registry).not.toHaveProperty("householdGroup");
+    unbindSession();
     expect(registry).toEqual({ version: 1 });
   });
 });
