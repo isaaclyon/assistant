@@ -8,6 +8,11 @@
         "enabled": true
       },
       {
+        "id": "deploy",
+        "path": ".pi/extensions/deploy.ts",
+        "enabled": true
+      },
+      {
         "id": "reload",
         "path": ".pi/extensions/reload.ts",
         "enabled": true
@@ -107,7 +112,7 @@
     },
     {
       "id": "builder",
-      "extensions": ["reload", "restart", "skills"],
+      "extensions": ["deploy", "reload", "restart", "skills"],
       "skills": [
         "agent-browser",
         "check-weather",

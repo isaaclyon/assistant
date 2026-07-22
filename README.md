@@ -68,7 +68,7 @@ namespaces, migration procedure, rollback behavior, and smoke matrix are in
 belong in a mode-`0600` external manifest; start from the tracked
 [example](docs/examples/instances.example.json).
 
-The Telegram `/restart` command gracefully restarts the bridge and sends a confirmation after the service is back online. The service automatically restarts after failures. Pi conversation history, Telegram configuration, pairing, and Telegram update offsets persist across restarts. The extension reclaims its stale same-working-directory ownership lock when the host returns. Telegram `/new` starts a fresh session in the same thread only when Pi and the Telegram queue are idle; otherwise it reports why replacement is unsafe.
+The Telegram `/restart` command gracefully restarts the bridge and sends a confirmation after the service is back online. The service automatically restarts after failures. Pi conversation history, Telegram configuration, pairing, and Telegram update offsets persist across restarts. The extension reclaims its stale same-working-directory ownership lock when the host returns. Telegram `/new` starts a fresh session in the same thread only when Pi and the Telegram queue are idle; otherwise it reports why replacement is unsafe. The engineering-only Builder Bot also exposes `/deploy` in Telegram autocomplete; it injects the tracked GitHub finish-line prompt so publishing work is driven through review, CI, and merge.
 
 ## Deploying updates
 

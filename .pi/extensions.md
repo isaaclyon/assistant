@@ -11,5 +11,7 @@ are type-checked by `npm run check` via `tsconfig.extensions.json`.
 - `restart.ts`: the `/restart` command. Restarts the bridge process so it comes
   back on the deployed release (distinct from Pi's built-in `/reload`, which
   hot-reloads skills/extensions in-process). See `docs/adr/0006`.
+- `deploy.ts`: the builder-only `/deploy` command. Loads the tracked GitHub
+  finish-line prompt and exposes it in Telegram autocomplete.
 - `skills.ts`: the `/skills` command. Lists available skills with a short
   description of each; menu-visible in Telegram autocomplete.
