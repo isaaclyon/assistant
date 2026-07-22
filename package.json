@@ -27,7 +27,7 @@
     "@earendil-works/pi-coding-agent": "0.80.10",
     "@earendil-works/pi-tui": "0.80.10",
     "@howaboua/pi-codex-conversion": "2.2.13",
-    "@llblab/pi-telegram": "https://codeload.github.com/isaaclyon/pi-telegram/tar.gz/d9877050370219d69b56bcc3a510d45905101c03",
+    "@llblab/pi-telegram": "https://codeload.github.com/isaaclyon/pi-telegram/tar.gz/eb40bad13d448ac8530521b056f2ae0550a38781",
     "@narumitw/pi-retry": "0.22.0",
     "croner": "^10.0.1",
     "marked": "18.0.5",
