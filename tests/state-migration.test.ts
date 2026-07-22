@@ -26,6 +26,8 @@ describe("legacy instance-state migration", () => {
       ["restart-pending.json", ""],
       ["jobs.json", "{}\n"],
       ["jobs-state.json", "{}\n"],
+      ["webhook-secret", "secret\n"],
+      ["deploy.lock", ""],
     ] as const) {
       await writeFile(join(stateRoot, name), content);
     }
@@ -50,6 +52,7 @@ describe("legacy instance-state migration", () => {
         "pi-codex-conversion.json",
         "restart-pending.json",
         "sessions",
+        "webhook-secret",
       ],
     });
     await expect(
@@ -61,6 +64,15 @@ describe("legacy instance-state migration", () => {
     await expect(readFile(join(stateRoot, "inbox.db"), "utf8")).resolves.toBe(
       "sqlite",
     );
+    await expect(
+      readFile(join(destination, "webhook-secret"), "utf8"),
+    ).resolves.toBe("secret\n");
+    await expect(readFile(join(stateRoot, "deploy.lock"), "utf8")).resolves.toBe(
+      "",
+    );
+    await expect(
+      readFile(join(destination, "deploy.lock"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(join(destination, "migration.json"), "utf8")).resolves.toBe(
       `${JSON.stringify(
         {
