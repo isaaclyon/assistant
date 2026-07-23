@@ -19,6 +19,9 @@ Act like the user asked for the PR to get all the way to green, not merely to be
 - Require GitHub CLI `gh`. Check `gh --version`. If missing, ask the user to install `gh` and stop.
 - Require authenticated `gh` session. Run `gh auth status`. If not authenticated, ask the user to run `gh auth login` (and re-run `gh auth status`) before continuing.
 - Require a local git repository with an accessible GitHub remote.
+- Inspect `git worktree list --porcelain` before choosing or cleaning branches.
+  A default branch already checked out in another worktree cannot also be
+  checked out in the current worktree.
 
 ## Naming conventions
 
@@ -77,7 +80,34 @@ Act like the user asked for the PR to get all the way to green, not merely to be
 
 - Merge only when CI passes and no conflicts appear. Once true, you should merge.
 - Use the repository's normal merge style when obvious; otherwise prefer the least surprising GitHub default.
+- After merge, verify the PR's `mergedAt` and merge commit through `gh pr view`.
+  If a push-to-default-branch workflow performs deployment or other required
+  validation, find the run for that exact merge SHA and watch it to completion.
+  Treat a failed post-merge deployment as an active blocker and triage it using
+  the failed-CI workflow above.
+
+## Post-merge branch and worktree cleanup
+
+- Cleanup begins only after GitHub confirms the PR is merged. Never delete an
+  unmerged branch, remove a worktree, discard local changes, or clean a branch
+  whose scope is uncertain.
+- Check `gh repo view --json deleteBranchOnMerge`. When
+  `deleteBranchOnMerge` is enabled, GitHub owns future remote head-branch
+  deletion. Otherwise, delete only the just-merged remote head branch with
+  `git push origin --delete <branch>` after confirming the merge.
+- Run `git fetch --prune` so deleted remote branches disappear locally.
+- If the current clean worktree still has the merged feature branch checked
+  out, inspect `git worktree list --porcelain`:
+  - when the base branch is checked out elsewhere, run
+    `git switch --detach origin/<base>`, then `git branch -d <feature>`;
+  - otherwise switch to the base branch, fast-forward it, then delete the local
+    feature branch with `git branch -d <feature>`.
+- A cleanup failure does not undo a successful merge. Diagnose it, avoid
+  force-deleting work, and report any branch or worktree intentionally left in
+  place.
 
 ## Final report
 
-Report the branch, commit(s), PR URL, current mergeability, CI result, fixes pushed after opening the PR, and anything still blocked.
+Report the branch, commit(s), PR URL, merge commit, PR and post-merge CI/deploy
+results, cleanup performed, fixes pushed after opening the PR, and anything
+still blocked.

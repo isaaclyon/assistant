@@ -71,6 +71,9 @@ describe("/deploy extension", () => {
     const prompt = enqueuePrompt.mock.calls[0]?.[0];
     expect(prompt).toContain("# GitHub Finish-Line Publish");
     expect(prompt).toContain("Drive the PR to green");
+    expect(prompt).toContain("git worktree list --porcelain");
+    expect(prompt).toContain("deleteBranchOnMerge");
+    expect(prompt).toContain("detach");
     expect(prompt).not.toMatch(/^---/);
   });
 });
