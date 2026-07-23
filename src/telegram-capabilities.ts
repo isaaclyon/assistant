@@ -184,6 +184,17 @@ export function bindBridgeRuntimeMarker(): () => void {
   );
 }
 
+/** Host-owned durable background-subagent service exposed to its repo-local tool. */
+export function bindBridgeSubagents(service: object): () => void {
+  return bindRegistry(
+    Symbol.for("pi-telegram-bridge.subagent-registry"),
+    "service",
+    service,
+    "Bridge subagent registry is occupied by an incompatible value.",
+    "Bridge subagent service is already registered",
+  );
+}
+
 /**
  * The subset of the durable inbox handed across the ADR-0003 capability
  * boundary. The pinned pi-telegram fork records and reads turns but never owns
