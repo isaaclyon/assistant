@@ -28,13 +28,14 @@ unobserved running jobs interrupted and never reports them as completed.
 
 Children run the pinned Pi CLI with discovery, built-in tools, skills, and
 context files disabled. The only loaded child extension provides dedicated,
-bounded repository list/read/literal-search and public HTTP(S) search/retrieval
-tools. Repository paths are canonicalized beneath the selected workspace or
-immutable resource root; escaping symlinks, special files, oversized files,
-private/local network targets, credential-bearing URLs, unrestricted shell,
-Telegram, memory, scheduling, and nested delegation are absent. Child prompts
-receive only the task and optional explicit context. Child output and remote
-content are labeled untrusted and cannot authorize parent actions.
+bounded repository list/read/literal-search/image inspection, public HTTP(S)
+search/retrieval, and a small non-sensitive runtime snapshot. Repository paths
+are canonicalized beneath the selected workspace or immutable resource root;
+escaping symlinks, special files, oversized files, private/local network
+targets, credential-bearing URLs, unrestricted shell, Telegram, memory,
+scheduling, and nested delegation are absent. Child prompts receive only the
+task and optional explicit context. Child output and remote content are labeled
+untrusted and cannot authorize parent actions.
 
 The pinned Telegram dependency receives a version- and source-checked install
 patch exposing one bridge-only target scope. Launch captures the active target;
@@ -53,8 +54,14 @@ Telegram result over claiming an unobserved delivery.
   explicitly requested parallelism.
 - Read-only is enforced by the child tool surface, not by describing shell use
   as safe.
+- Filesystem containment assumes other processes under the same Unix identity
+  are trusted not to race path validation; this is process/tool isolation, not
+  a hostile-user OS sandbox.
 - Listings omit task text, explicit context, and output; inspection and collect
   return bounded details only when explicitly requested.
+- Terminal batches expire after seven days even when parent completion
+  injection failed; a summary that remains undeliverable for the full retention
+  window is discarded rather than retaining job state indefinitely.
 - A crash during the small completion-injection window may leave an uncertain,
   inspectable batch without an automatic summary, but cannot duplicate a
   completion turn on restart.

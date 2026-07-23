@@ -40,7 +40,7 @@ export default function childSubagentExtension(pi: ExtensionAPI): void {
     },
   });
   pi.registerTool({
-    name: "repo_list", label: "List repository directory", description: "List a directory within the configured repository root without following symlinks.",
+    name: "repo_list", label: "List repository directory", description: "List a directory within the configured repository roots without following symlinks.",
     parameters: Type.Object({ path: Type.Optional(Type.String()) }),
     async execute(_id, { path }) { return text((await inspector.list(path)).join("\n")); },
   });

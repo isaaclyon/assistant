@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -108,18 +108,19 @@ describe("background subagent service", () => {
   it("marks restart-interrupted jobs terminal and never retries an uncertain event", async () => {
     const stateDir = await tempState();
     const statePath = join(stateDir, "subagents", "state.json");
+    const createdAt = Date.now();
     await import("node:fs/promises").then(({ mkdir, writeFile }) =>
       mkdir(join(stateDir, "subagents"), { recursive: true }).then(() =>
         writeFile(statePath, JSON.stringify({
           version: 1,
           batches: [{
-            id: "batch-1", createdAt: 1, jobIds: ["job-1"],
+            id: "batch-1", createdAt, jobIds: ["job-1"],
             completionState: "injecting", origin: { chatId: 7 },
           }],
           jobs: [{
             id: "job-1", batchId: "batch-1", task: "x", status: "running",
             model: "openai-codex/gpt-5.6-luna", thinking: "high",
-            createdAt: 1, startedAt: 2,
+            createdAt, startedAt: createdAt + 1,
           }],
         })),
       ),
@@ -135,6 +136,38 @@ describe("background subagent service", () => {
     expect(injectCompletion).not.toHaveBeenCalled();
     expect(JSON.parse(await readFile(statePath, "utf8")).batches[0].completionState)
       .toBe("uncertain");
+    await service.stop();
+  });
+
+  it("expires old terminal batches even when completion injection remained pending", async () => {
+    const stateDir = await tempState();
+    const subagentDir = join(stateDir, "subagents");
+    const sessionDir = join(subagentDir, "sessions", "job-old");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(join(subagentDir, "state.json"), JSON.stringify({
+      version: 1,
+      batches: [{
+        id: "batch-old", createdAt: 1, jobIds: ["job-old"],
+        completionState: "pending", origin: { chatId: 7 },
+      }],
+      jobs: [{
+        id: "job-old", batchId: "batch-old", task: "x", status: "failed",
+        model: "openai-codex/gpt-5.6-luna", thinking: "high",
+        createdAt: 1, finishedAt: 2, failureReason: "completion failed", sessionDir,
+      }],
+    }));
+
+    const service = await startSubagentService({
+      stateDir,
+      retentionMs: 10,
+      now: () => 100,
+      runner: vi.fn(async () => ({ output: "should not run" })),
+      injectCompletion: vi.fn(async () => {}),
+    });
+
+    expect(service.list()).toEqual([]);
+    expect(() => service.collect({ batchId: "batch-old" })).toThrow(/unknown/i);
+    await expect(access(sessionDir)).rejects.toThrow();
     await service.stop();
   });
 });
