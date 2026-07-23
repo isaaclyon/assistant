@@ -65,6 +65,11 @@
         "enabled": true
       },
       {
+        "id": "plan-weekend",
+        "path": ".pi/skills/plan-weekend/SKILL.md",
+        "enabled": true
+      },
+      {
         "id": "track-improvement-ideas",
         "path": ".pi/skills/track-improvement-ideas/SKILL.md",
         "enabled": true
@@ -87,7 +92,8 @@
         "check-weather",
         "manage-jobs",
         "manage-ynab",
-        "personal-memory"
+        "personal-memory",
+        "plan-weekend"
       ],
       "instructions": "telegram-default"
     },
@@ -99,7 +105,8 @@
         "check-weather",
         "manage-jobs",
         "manage-ynab",
-        "personal-memory"
+        "personal-memory",
+        "plan-weekend"
       ],
       "instructions": "telegram-default"
     },
@@ -111,7 +118,8 @@
         "check-weather",
         "manage-jobs",
         "manage-ynab",
-        "personal-memory"
+        "personal-memory",
+        "plan-weekend"
       ],
       "instructions": "telegram-default"
     },
