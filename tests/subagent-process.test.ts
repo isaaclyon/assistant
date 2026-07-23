@@ -34,6 +34,20 @@ afterEach(async () => {
 });
 
 describe("createPiSubagentRunner", () => {
+  it("passes only the documented child tools to Pi", async () => {
+    const { root, cli } = await fakePi(`
+      const index = process.argv.indexOf("--tools");
+      process.stdout.write(JSON.stringify({
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: process.argv[index + 1] }], stopReason: "stop" }
+      }) + "\\n");
+    `);
+    const runner = createPiSubagentRunner({ cwd: root, resourceRoot: root, piCliPath: cli });
+
+    await expect(runner(job(join(root, "session")), new AbortController().signal, vi.fn()))
+      .resolves.toEqual({ output: "repo_read,repo_list,repo_search,repo_image,web_fetch,web_search,system_info" });
+  });
+
   it("allows verbose bounded intermediate events before a final report", async () => {
     const { root, cli } = await fakePi(`
       import { once } from "node:events";

@@ -106,15 +106,6 @@ export async function startSubagentService(options: StartSubagentServiceOptions)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
-  const cutoff = now() - retention;
-  const expiredJobs = state.jobs.filter((job) => {
-    const batch = state.batches.find((candidate) => candidate.id === job.batchId);
-    return batch !== undefined && batch.createdAt < cutoff && ["injected", "uncertain"].includes(batch.completionState) && terminal(job.status);
-  });
-  const retainedBatches = new Set(state.batches.filter((b) => b.createdAt >= cutoff || !["injected", "uncertain"].includes(b.completionState) || b.jobIds.some((id) => state.jobs.some((j) => j.id === id && !terminal(j.status)))).map((b) => b.id));
-  state.batches = state.batches.filter((b) => retainedBatches.has(b.id));
-  state.jobs = state.jobs.filter((j) => retainedBatches.has(j.batchId));
-  await Promise.all(expiredJobs.map((job) => job.sessionDir ? rm(job.sessionDir, { recursive: true, force: true }) : Promise.resolve()));
   for (const job of state.jobs) {
     if (!terminal(job.status)) {
       job.status = "interrupted";
@@ -126,6 +117,17 @@ export async function startSubagentService(options: StartSubagentServiceOptions)
   for (const batch of state.batches) {
     if (batch.completionState === "injecting") batch.completionState = "uncertain";
   }
+  const cutoff = now() - retention;
+  const expiredBatchIds = new Set(state.batches.filter((batch) =>
+    batch.createdAt < cutoff && batch.completionState !== "injecting" && batch.jobIds.every((id) => {
+      const job = state.jobs.find((candidate) => candidate.id === id);
+      return job === undefined || terminal(job.status);
+    }),
+  ).map((batch) => batch.id));
+  const expiredJobs = state.jobs.filter((job) => expiredBatchIds.has(job.batchId));
+  state.batches = state.batches.filter((batch) => !expiredBatchIds.has(batch.id));
+  state.jobs = state.jobs.filter((job) => !expiredBatchIds.has(job.batchId));
+  await Promise.all(expiredJobs.map((job) => job.sessionDir ? rm(job.sessionDir, { recursive: true, force: true }) : Promise.resolve()));
   let persistChain = Promise.resolve();
   const persist = (): Promise<void> => {
     persistChain = persistChain.then(async () => {
@@ -139,17 +141,17 @@ export async function startSubagentService(options: StartSubagentServiceOptions)
   const cleanupExpired = async (): Promise<void> => {
     const expiry = now() - retention;
     const expiredBatchIds = new Set(state.batches.filter((batch) =>
-      batch.createdAt < expiry && ["injected", "uncertain"].includes(batch.completionState) && batch.jobIds.every((id) => {
+      batch.createdAt < expiry && batch.completionState !== "injecting" && !batch.jobIds.some((id) => running.has(id)) && batch.jobIds.every((id) => {
         const job = state.jobs.find((candidate) => candidate.id === id);
         return job === undefined || terminal(job.status);
       }),
     ).map((batch) => batch.id));
     if (expiredBatchIds.size === 0) return;
     const removed = state.jobs.filter((job) => expiredBatchIds.has(job.batchId));
+    await Promise.all(removed.map((job) => job.sessionDir ? rm(job.sessionDir, { recursive: true, force: true }) : Promise.resolve()));
     state.batches = state.batches.filter((batch) => !expiredBatchIds.has(batch.id));
     state.jobs = state.jobs.filter((job) => !expiredBatchIds.has(job.batchId));
     await persist();
-    await Promise.all(removed.map((job) => job.sessionDir ? rm(job.sessionDir, { recursive: true, force: true }) : Promise.resolve()));
   };
   const cleanupTimer = setInterval(() => { void cleanupExpired().catch(() => {}); }, 60 * 60 * 1_000);
   cleanupTimer.unref?.();
