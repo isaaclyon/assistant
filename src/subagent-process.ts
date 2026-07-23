@@ -1,9 +1,14 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 import type { SubagentJobRunner } from "./subagents.js";
 
-const MAX_EVENT_STREAM_BYTES = 4 * 1024 * 1024;
+// Pi's JSON mode emits transient reasoning and tool events in addition to the
+// bounded final report. Bound individual events tightly, while leaving enough
+// aggregate headroom for a normal high-thinking research run.
+const MAX_EVENT_BYTES = 4 * 1024 * 1024;
+const MAX_EVENT_STREAM_BYTES = 64 * 1024 * 1024;
 
 export function resolvePiCliPath(resourceRoot: string): string {
   return join(resourceRoot, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
@@ -39,6 +44,7 @@ export function createPiSubagentRunner(options: {
     let streamBytes = 0;
     let buffer = "";
     let streamError: Error | undefined;
+    const decoder = new StringDecoder("utf8");
     let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
     const terminate = (): void => {
       if (child.pid && process.platform !== "win32") {
@@ -51,7 +57,15 @@ export function createPiSubagentRunner(options: {
       }, 5_000);
       forceKillTimer.unref?.();
     };
+    const failStream = (message: string): void => {
+      if (!streamError) streamError = new Error(message);
+      terminate();
+    };
     const processLine = (line: string): void => {
+      if (Buffer.byteLength(line) > MAX_EVENT_BYTES) {
+        failStream("Subagent event exceeded its size limit");
+        return;
+      }
       let event: { type?: string; message?: { role?: string; content?: Array<{ type?: string; text?: string }>; stopReason?: string; errorMessage?: string } };
       try { event = JSON.parse(line) as typeof event; } catch { return; }
       if (event.type !== "message_end" || event.message?.role !== "assistant") return;
@@ -61,11 +75,15 @@ export function createPiSubagentRunner(options: {
     };
     child.stdout.on("data", (chunk: Buffer) => {
       streamBytes += chunk.length;
-      if (streamBytes > MAX_EVENT_STREAM_BYTES) { terminate(); return; }
-      buffer += chunk.toString();
+      if (streamBytes > MAX_EVENT_STREAM_BYTES) {
+        failStream("Subagent event stream exceeded its emergency limit");
+        return;
+      }
+      buffer += decoder.write(chunk);
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
       for (const line of lines) processLine(line);
+      if (Buffer.byteLength(buffer) > MAX_EVENT_BYTES) failStream("Subagent event exceeded its size limit");
     });
     // Drain diagnostics but never retain child stderr, which may include paths or provider data.
     child.stderr.on("data", () => {});
@@ -84,7 +102,7 @@ export function createPiSubagentRunner(options: {
       if (forceKillTimer) clearTimeout(forceKillTimer);
     }
     if (signal.aborted) throw signal.reason;
-    if (streamBytes > MAX_EVENT_STREAM_BYTES) throw new Error("Subagent event stream exceeded its limit");
+    buffer += decoder.end();
     if (buffer.trim()) processLine(buffer);
     if (streamError) throw streamError;
     if (code !== 0) throw new Error(`Subagent exited with code ${code}`);
