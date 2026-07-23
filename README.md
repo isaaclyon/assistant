@@ -70,6 +70,14 @@ belong in a mode-`0600` external manifest; start from the tracked
 
 The Telegram `/restart` command gracefully restarts the bridge and sends a confirmation after the service is back online. The service automatically restarts after failures. Pi conversation history, Telegram configuration, pairing, and Telegram update offsets persist across restarts. The extension reclaims its stale same-working-directory ownership lock when the host returns. Telegram `/new` starts a fresh session in the same thread only when Pi and the Telegram queue are idle; otherwise it reports why replacement is unsafe. The engineering-only Builder Bot also exposes `/deploy` in Telegram autocomplete; it injects the tracked GitHub finish-line prompt so publishing work is driven through review, CI, and merge.
 
+The `background_subagents` tool launches explicitly listed read-only research
+tasks in isolated Pi processes and returns batch/job IDs immediately. Children
+can inspect configured repository roots and public web content but receive no
+shell, file mutation, Telegram, memory-write, scheduling, deployment, or nested
+delegation capability. Completed batches are retained for seven days with
+bounded output, then trigger one parent synthesis response in the originating
+Telegram chat/topic.
+
 ## Deploying updates
 
 Pull requests run `.github/workflows/deploy.yml` checks on GitHub-hosted CI. Merges to `main` rerun those checks, then the `assistant-production` self-hosted runner on `lyon-server` deploys the green commit and verifies the systemd user service. The single runner and a shared deployment lock serialize activation; superseded queued revisions exit successfully instead of rolling production backward. A failed check prevents deployment. The runner itself is managed by `github-actions-assistant.service`; check it with `systemctl --user status github-actions-assistant.service` on the server.

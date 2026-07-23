@@ -26,6 +26,11 @@
         "id": "skills",
         "path": ".pi/extensions/skills.ts",
         "enabled": true
+      },
+      {
+        "id": "subagents",
+        "path": ".pi/extensions/subagents/index.ts",
+        "enabled": true
       }
     ],
     "skills": [
@@ -76,7 +81,7 @@
   "profiles": [
     {
       "id": "personal-isaac",
-      "extensions": ["core-memory", "reload", "restart", "skills"],
+      "extensions": ["core-memory", "reload", "restart", "skills", "subagents"],
       "skills": [
         "agent-browser",
         "check-weather",
@@ -88,7 +93,7 @@
     },
     {
       "id": "personal-emma",
-      "extensions": ["core-memory", "reload", "restart", "skills"],
+      "extensions": ["core-memory", "reload", "restart", "skills", "subagents"],
       "skills": [
         "agent-browser",
         "check-weather",
@@ -100,7 +105,7 @@
     },
     {
       "id": "household-shared",
-      "extensions": ["core-memory", "reload", "restart", "skills"],
+      "extensions": ["core-memory", "reload", "restart", "skills", "subagents"],
       "skills": [
         "agent-browser",
         "check-weather",
@@ -112,7 +117,7 @@
     },
     {
       "id": "builder",
-      "extensions": ["deploy", "reload", "restart", "skills"],
+      "extensions": ["deploy", "reload", "restart", "skills", "subagents"],
       "skills": [
         "agent-browser",
         "check-weather",
