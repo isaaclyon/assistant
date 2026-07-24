@@ -243,3 +243,22 @@ the old placement atomically.
 
 These are not compatibility requirements for the MVP. They should be added only
 in response to a separate concrete need.
+
+## Backup, export, and recovery
+
+Canonical data lives in the selected assistant instance's
+`<stateDir>/places.db`. The file and supported backups are mode `0600`; neither
+belongs in Git.
+
+- Use the store's online backup operation to create a consistent SQLite backup
+  while the bridge is running. It includes categories, published rankings,
+  unfinished insertions, and comparison history.
+- The JSON export is intended for inspection and portability. It contains only
+  published categories and places, so it cannot restore an unfinished ranking
+  or its history.
+- Restore by stopping the affected instance, retaining the damaged database for
+  diagnosis, placing a known-good SQLite backup at `<stateDir>/places.db`, and
+  starting the instance again. The schema version is checked before use.
+- Do not copy only the main database file while the bridge is running in WAL
+  mode. Use the online backup operation or stop the instance before a manual
+  filesystem copy.
