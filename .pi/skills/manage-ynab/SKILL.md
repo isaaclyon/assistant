@@ -69,6 +69,21 @@ clearly instructs you. When an ambiguous transaction is deferred, offer to add
 a concise actionable memo; do not create an interaction log or overwrite an
 existing memo without the user's instruction.
 
+For an ambiguous or truncated payee with no useful history, inspect the
+original imported descriptor when available and search the web using the exact
+fragment plus its locality. Do this only when it may materially disambiguate
+the merchant. Present a match as likely rather than certain and cite the
+supporting evidence. Use merchant identity to narrow the choices, but let the
+purpose of the purchase determine the final category; the same merchant type
+may reasonably map to groceries, coffee, entertainment, or an allowance.
+
+During transaction review, when Isaac names or confirms a category for a
+transaction, treat that as authorization to apply the category and approve the
+transaction in the same update unless he explicitly says to hold it or leave it
+unapproved. An agent-suggested category alone is not authorization to write or
+approve anything. Do not silently rename the payee after identifying it; that
+still requires a clear instruction.
+
 For “how is my budget?” default to the current month and summarize: income/activity if available, total budgeted, total spent/activity, remaining/available, overspent categories, and notable low balances. Do not imply that available money is cash on hand; distinguish category availability from account balances.
 
 ## Explicit transaction requests
