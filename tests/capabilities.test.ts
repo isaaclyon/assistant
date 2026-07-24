@@ -216,5 +216,13 @@ describe("capability profiles", () => {
         expect.stringContaining("extend-this-agent/SKILL.md"),
       ]),
     );
+    expect(
+      profiles.find((profile) => profile.profileId === "personal-isaac")?.extensionPaths,
+    ).toEqual(expect.arrayContaining([expect.stringContaining("extensions/places.ts")]));
+    for (const profileId of ["personal-emma", "household-shared", "builder"]) {
+      expect(profiles.find((profile) => profile.profileId === profileId)?.extensionPaths).not.toEqual(
+        expect.arrayContaining([expect.stringContaining("extensions/places.ts")]),
+      );
+    }
   });
 });

@@ -27,6 +27,7 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 | Human-idle session epoch | `<stateDir>/conversation-session-state.json` | Host |
 | Heartbeat observations | `<stateDir>/checkers/*.json` | Host |
 | Background subagent batches and temporary sessions | `<stateDir>/subagents/` | Host |
+| Private place rankings and active comparisons | `<stateDir>/places.db` | Places extension/store |
 | Personal memory vault | `~/.local/share/pi-telegram-bridge/memory` (override: `PI_TELEGRAM_MEMORY_DIR`) | `personal-memory` skill CLI |
 | Process logs | user journal | systemd |
 

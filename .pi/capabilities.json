@@ -28,6 +28,11 @@
         "enabled": true
       },
       {
+        "id": "places",
+        "path": ".pi/extensions/places.ts",
+        "enabled": true
+      },
+      {
         "id": "subagents",
         "path": ".pi/extensions/subagents/index.ts",
         "enabled": true
@@ -86,7 +91,7 @@
   "profiles": [
     {
       "id": "personal-isaac",
-      "extensions": ["core-memory", "reload", "restart", "skills", "subagents"],
+      "extensions": ["core-memory", "reload", "restart", "skills", "places", "subagents"],
       "skills": [
         "agent-browser",
         "check-weather",
