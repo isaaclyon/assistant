@@ -15,6 +15,7 @@ interface RegisteredCommand {
     name: string;
     args: string;
     reply: (text: string) => Promise<void>;
+    openSection: (sectionId: string) => Promise<void>;
     enqueuePrompt: (prompt: string) => Promise<void>;
   }) => Promise<void> | void;
 }
@@ -36,7 +37,7 @@ afterEach(async () => {
 });
 
 describe("/places command", () => {
-  it("is menu-visible and queues a state-safe button flow", async () => {
+  it("is menu-visible and opens the direct places section", async () => {
     const module = (await import(
       `${pathToFileURL(join(root, ".pi", "extensions", "places.ts")).href}?command=${Date.now()}`
     )) as { default: (api: unknown) => void };
@@ -47,18 +48,16 @@ describe("/places command", () => {
 
     expect(command).toMatchObject({ showInMenu: true, emoji: "📍" });
     const enqueuePrompt = vi.fn(async (_prompt: string) => {});
+    const openSection = vi.fn(async (_sectionId: string) => {});
     await command?.handler({
       name: "places",
       args: "",
       reply: vi.fn(async (_text: string) => {}),
+      openSection,
       enqueuePrompt,
     });
 
-    expect(enqueuePrompt).toHaveBeenCalledOnce();
-    const prompt = enqueuePrompt.mock.calls[0]?.[0] ?? "";
-    expect(prompt).toContain('places tool with action "menu"');
-    expect(prompt).toContain("telegram_button");
-    expect(prompt).toContain("preserve every ID and revision exactly");
-    expect(prompt).toContain("Do not claim");
+    expect(openSection).toHaveBeenCalledWith("assistant/places");
+    expect(enqueuePrompt).not.toHaveBeenCalled();
   });
 });
