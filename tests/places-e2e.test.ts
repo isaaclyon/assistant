@@ -127,7 +127,7 @@ describe("places end-to-end acceptance", () => {
     legacy.close();
 
     const migrated = openPlacesStore(path);
-    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.schemaVersion).toBe(4);
     expect(migrated.listPlaces("restaurants").map((place) => place.name)).toEqual(["Existing"]);
     expect(migrated.getActiveInsertion("private")).toMatchObject({
       id: "active",

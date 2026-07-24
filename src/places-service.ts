@@ -81,6 +81,9 @@ export interface RepositionPlaceInput {
 function asServiceError(error: unknown): PlacesServiceError {
   if (error instanceof PlacesServiceError) return error;
   const message = error instanceof Error ? error.message : String(error);
+  if (/undo is no longer available/i.test(message)) {
+    return new PlacesServiceError("INVALID_ACTION", message, { cause: error });
+  }
   if (/stale|changed|revision/i.test(message)) {
     return new PlacesServiceError(
       "STALE_ACTION",
@@ -360,11 +363,25 @@ export class PlacesService {
       .listPlaces(insertion.categoryId)
       .filter((place) => place.id !== insertion.sourcePlaceId);
     const category = this.#requireCategory(insertion.categoryId);
-    const step = getPlaceInsertionStep(ranking, insertion.state);
+    let step: ReturnType<typeof getPlaceInsertionStep>;
+    try {
+      step = getPlaceInsertionStep(ranking, insertion.state);
+    } catch (error) {
+      this.#cancelChangedInsertion(insertion);
+      throw new PlacesServiceError(
+        "STALE_ACTION",
+        "The category changed during ranking. The unfinished operation was cancelled; start it again.",
+        { cause: error },
+      );
+    }
     if (step.kind === "compare") {
       const existingPlace = ranking[step.index];
       if (!existingPlace || existingPlace.id !== step.existingPlaceId) {
-        throw new PlacesServiceError("STALE_ACTION", "The ranking changed. Resume to continue.");
+        this.#cancelChangedInsertion(insertion);
+        throw new PlacesServiceError(
+          "STALE_ACTION",
+          "The category changed during ranking. The unfinished operation was cancelled; start it again.",
+        );
       }
       return {
         kind: "compare",
@@ -398,6 +415,23 @@ export class PlacesService {
     const category = this.#store.listCategories().find((entry) => entry.id === categoryId);
     if (!category) throw new PlacesServiceError("NOT_FOUND", "That category no longer exists.");
     return category;
+  }
+
+  #cancelChangedInsertion(insertion: ActiveInsertion): void {
+    try {
+      this.#store.cancelInsertion(insertion.id, insertion.revision, this.#now());
+    } catch (error) {
+      const current = this.#store.getActiveInsertion(this.#ownerKey);
+      if (!current) return;
+      if (current.id !== insertion.id || current.revision !== insertion.revision) {
+        throw new PlacesServiceError(
+          "STALE_ACTION",
+          "The ranking changed again. Resume the current operation.",
+          { cause: error },
+        );
+      }
+      throw asServiceError(error);
+    }
   }
 
   #requireActive(insertionId: string, revision: number): ActiveInsertion {

@@ -7,7 +7,8 @@ Do not use it to authorize deployment or restart the bridge.
 
 - The deployed revision is recorded.
 - The selected private instance has the `places` extension enabled.
-- `<stateDir>/places.db` has been backed up with the supported online backup.
+- `<stateDir>/places.db` has been backed up with the supported online backup:
+  `PI_TELEGRAM_BRIDGE_STATE_DIR=<stateDir> npm run places -- backup <private-backup-path>`.
 - `/places` appears in Telegram's command menu.
 
 ## Add and comparison flow
@@ -47,11 +48,14 @@ Do not use it to authorize deployment or restart the bridge.
 
 ## Backup and recovery
 
-1. Create an online SQLite backup and verify its file mode is `0600`.
+1. Create an online SQLite backup with
+   `PI_TELEGRAM_BRIDGE_STATE_DIR=<stateDir> npm run places -- backup <private-backup-path>`
+   and verify its file mode is `0600`.
 2. Open the backup in an isolated test process and confirm published rankings
    and any active insertion are readable.
-3. Verify the JSON export contains published categories/places but no unfinished
-   interaction history.
+3. Run `PI_TELEGRAM_BRIDGE_STATE_DIR=<stateDir> npm run places -- export <private-json-path>`.
+   Verify the JSON export contains published categories/places but no unfinished
+   interaction history and has mode `0600`.
 
 ## Cleanup
 

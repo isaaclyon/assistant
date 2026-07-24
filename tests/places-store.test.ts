@@ -27,7 +27,7 @@ describe("places SQLite store", () => {
   });
 
   it("initializes a private versioned database with default categories", async () => {
-    expect(store.schemaVersion).toBe(3);
+    expect(store.schemaVersion).toBe(4);
     expect(store.listCategories().map((category) => category.name)).toEqual([
       "Restaurants",
       "Coffee",

@@ -29,15 +29,22 @@ idempotent and stale writers fail without partially advancing state. Completed
 and cancelled sessions retain bounded comparison history for undo and audit;
 they are not agent conversation memory.
 
+Later migrations add comparison undo state, provisional move/re-rank metadata,
+and a per-category mutation revision. A completed addition records the category
+revision it produced, so any later edit, insertion, move, re-rank, or deletion
+invalidates its immediate Undo action without relying on timestamp ordering.
+
 Use WAL with full synchronous commits. Create consistent backups through
 SQLite's online backup API, not by copying a live WAL database. A JSON export
 contains only published categories and places; a SQLite backup is required to
 recover active insertions and history. Place contents must not be written to
 logs or committed to the repository.
 
-The MVP enables this store only on a private Telegram surface. Database
-separation is by assistant instance, not by user-selected chat input. Shared or
-collaborative rankings require a later identity and product decision.
+The MVP enables this store only for the `personal-isaac` capability profile on
+its host-enforced private Telegram surface. Database separation is by assistant
+instance, and insertion ownership uses the trusted runtime instance ID and
+principal—not user-selected chat input. Shared or collaborative rankings
+require a later identity and product decision.
 
 ## Consequences
 

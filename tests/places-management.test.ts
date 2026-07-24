@@ -85,11 +85,31 @@ describe("places management", () => {
     const added = service.start({ name: "Undo Me", categoryId: category.id, sentiment: "liked" });
     if (added.kind !== "complete") throw new Error("expected completion");
     if (!added.undoInsertionId) throw new Error("missing undo insertion ID");
+    const undoInsertionId = added.undoInsertionId;
 
-    service.undoAddition(added.undoInsertionId);
+    service.undoAddition(undoInsertionId);
 
     expect(service.listRanking(category.id)).toEqual([]);
+    expect(() => service.undoAddition(undoInsertionId)).toThrow(/no longer available/i);
   });
+
+  it.each(["edit", "delete", "insert"] as const)(
+    "invalidates addition undo after a later %s mutation in the category",
+    (mutation) => {
+      const category = service.listCategories()[0];
+      if (!category) throw new Error("missing category");
+      const added = service.start({ name: "Undo Me", categoryId: category.id, sentiment: "liked" });
+      if (added.kind !== "complete" || !added.undoInsertionId) throw new Error("expected completion");
+      const undoInsertionId = added.undoInsertionId;
+      if (mutation === "edit") service.editPlace(added.place.id, { notes: "changed" });
+      if (mutation === "delete") service.deletePlace(added.place.id);
+      if (mutation === "insert") {
+        const other = service.start({ name: "Other", categoryId: category.id, sentiment: "disliked" });
+        if (other.kind !== "complete") throw new Error("expected completion");
+      }
+      expect(() => service.undoAddition(undoInsertionId)).toThrow(/no longer available/i);
+    },
+  );
 
   it("renames and deletes only empty categories", () => {
     const category = service.createCategory("Bakeries");

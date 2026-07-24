@@ -13,6 +13,7 @@
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "deploy": "bash scripts/deploy.sh",
     "jobs:check": "node dist/src/jobs-check.js",
+    "places": "node dist/src/places-cli.js",
     "service:install": "npm run build && node dist/src/install-service.js",
     "postinstall": "node scripts/patch-codex-conversion.mjs && node scripts/patch-telegram-tool-activity.mjs && node scripts/patch-telegram-new-session-dedup.mjs && node scripts/patch-telegram-agent-settled.mjs && node scripts/patch-telegram-subagent-target-scope.mjs",
     "start": "node dist/src/daemon.js",

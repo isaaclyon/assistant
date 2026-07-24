@@ -126,6 +126,30 @@ describe("PlacesService", () => {
     });
   });
 
+  it("cancels with a clear restart path if the category changes mid-comparison", () => {
+    const categoryId = service.listCategories()[0]?.id;
+    if (!categoryId) throw new Error("missing category");
+    service.start({ name: "Existing", categoryId, sentiment: "liked" });
+    const comparison = service.start({ name: "Candidate", categoryId, sentiment: "liked" });
+    if (comparison.kind !== "compare") throw new Error("expected comparison");
+
+    store.deletePlace(comparison.existingPlace.id);
+
+    expect(() => service.resume()).toThrow(/cancelled; start it again/i);
+    expect(store.getActiveInsertion("private")).toBeUndefined();
+    expect(service.listRanking(categoryId)).toEqual([]);
+  });
+
+  it("does not expose an active insertion to another trusted runtime owner", () => {
+    const categoryId = service.listCategories()[0]?.id;
+    if (!categoryId) throw new Error("missing category");
+    service.start({ name: "Existing", categoryId, sentiment: "liked" });
+    service.start({ name: "Private draft", categoryId, sentiment: "liked" });
+    const other = new PlacesService(store, { ownerKey: "instance:other:principal:isaac" });
+
+    expect(() => other.resume()).toThrowError(expect.objectContaining({ code: "NO_ACTIVE_INSERTION" }));
+  });
+
   it("creates normalized unique categories", () => {
     expect(service.createCategory(" Bakeries ").name).toBe("Bakeries");
     expect(() => service.createCategory("bakeries")).toThrowError(

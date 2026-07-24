@@ -91,7 +91,7 @@
   "profiles": [
     {
       "id": "personal-isaac",
-      "extensions": ["core-memory", "reload", "restart", "skills", "subagents"],
+      "extensions": ["core-memory", "reload", "restart", "skills", "places", "subagents"],
       "skills": [
         "agent-browser",
         "check-weather",
@@ -130,7 +130,7 @@
     },
     {
       "id": "builder",
-      "extensions": ["deploy", "reload", "restart", "skills", "places", "subagents"],
+      "extensions": ["deploy", "reload", "restart", "skills", "subagents"],
       "skills": [
         "agent-browser",
         "check-weather",

@@ -14,13 +14,18 @@ place's position within that sentiment band.
 
 ## Ownership and privacy
 
-- Rankings belong to one configured assistant instance. They are not shared
+- The MVP is enabled only for the `personal-isaac` capability profile. Rankings
+  belong to that configured assistant instance. They are not shared
   across personal assistants, the household assistant, or unrelated Telegram
   chats.
 - The MVP is enabled only for a private Telegram surface. Group rankings and
   collaborative comparisons are deferred.
-- An active interaction is bound to its instance, chat, and Telegram actor. A
-  message or button from another context cannot continue it.
+- The host binds that profile to Isaac's configured private Telegram surface
+  and actor before the extension loads. Active insertion ownership is keyed by
+  the trusted instance ID and principal, never by model- or user-supplied IDs.
+  Emma, household, builder, and unrelated chat contexts do not load the tool.
+  The legacy compatibility singleton uses a fixed local owner key only when the
+  host has already bound the `isaac` principal and private Telegram surface.
 - Place data remains in that instance's local state tree. It is not sent to a
   discovery, maps, or restaurant API.
 - Data remains until the user deletes it or removes the local database. Backup
@@ -73,8 +78,9 @@ liked place always ranks above an alright place even if those two places have
 never been compared directly. Position numbers are derived from the ordering
 and are never user-editable state.
 
-The MVP has no ties. A comparison offers the new place, the existing place,
-Back, and Cancel. It does not offer `equal`, `skip`, or `haven't decided`,
+The MVP has no ties. A first comparison offers the new place, the existing
+place, and Cancel. After at least one accepted answer, it also offers Back. It
+does not offer `equal`, `skip`, or `haven't decided`,
 because those answers do not produce a deterministic binary insertion. The
 user may cancel and resume later if they cannot choose.
 
@@ -177,7 +183,8 @@ No unnecessary comparison is requested.
 
 ### Back
 
-- Before comparisons begin, **Back** returns to the preceding input step.
+- Before comparisons begin, ordinary conversational prompts may return to a
+  preceding input question, but no persisted comparison Back action is shown.
 - During comparisons, **Back** removes the most recent comparison answer and
   restores exactly that comparison.
 - Back never changes an already published ranking.
@@ -186,6 +193,11 @@ No unnecessary comparison is requested.
 
 - Canceling an unfinished insertion asks for confirmation after the place name
   has been entered.
+- The confirmation is a short-lived, one-use token bound to the insertion and
+- Tokens live only in the selected extension session, whose Telegram surface
+  is restricted by the host to one configured private actor. They expire after
+  ten minutes, are capped at 32 pending operations, and are cleared on reload,
+  session replacement, or shutdown.
 - Confirmation deletes the draft and its insertion answers. The published
   ranking remains unchanged.
 - Declining cancellation returns to the current step.
@@ -193,6 +205,8 @@ No unnecessary comparison is requested.
 ### Undo addition
 
 - Immediately after completion, **Undo addition** asks for confirmation.
+- Delete-place and delete-category actions use the same operation-bound,
+  one-use confirmation mechanism.
 - Confirming removes that newly added place and its comparison history.
 - The action is available until another place mutation occurs in that category.
   After that, normal confirmed deletion is used instead.
@@ -222,9 +236,9 @@ the old placement atomically.
 - Empty categories and bands finish without a comparison.
 - Invalid text, missing records, or impossible ranking state produce a bounded
   error and do not partially write data.
-- A comparison target deleted or changed by another accepted operation makes
-  the current action stale; the bot recomputes or asks the current comparison
-  rather than applying an answer to a different target.
+- A comparison target deleted or changed by another writer makes the current
+  insertion stale. The bot cancels that provisional insertion and asks the
+  user to restart it rather than applying an answer to a different target.
 - Telegram message limits are handled by pagination; ranking output is never
   silently truncated.
 - Database unavailability leaves the action unaccepted and tells the user to
@@ -250,9 +264,11 @@ Canonical data lives in the selected assistant instance's
 `<stateDir>/places.db`. The file and supported backups are mode `0600`; neither
 belongs in Git.
 
-- Use the store's online backup operation to create a consistent SQLite backup
-  while the bridge is running. It includes categories, published rankings,
-  unfinished insertions, and comparison history.
+- Use `PI_TELEGRAM_BRIDGE_STATE_DIR=<stateDir> npm run places -- backup <path>`
+  to create a consistent online SQLite backup while the bridge is running. It
+  includes categories, published rankings, unfinished insertions, and history.
+- Use `PI_TELEGRAM_BRIDGE_STATE_DIR=<stateDir> npm run places -- export <path>`
+  for a private-mode JSON export of published data.
 - The JSON export is intended for inspection and portability. It contains only
   published categories and places, so it cannot restore an unfinished ranking
   or its history.

@@ -1,6 +1,7 @@
 import { chmodSync } from "node:fs";
-import { chmod, mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { chmod, link, mkdir, unlink } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { backup as backupDatabase, DatabaseSync } from "node:sqlite";
 
 import {
@@ -15,7 +16,7 @@ import {
   type Sentiment,
 } from "./places-ranking.js";
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 export interface PlaceCategory {
   id: string;
@@ -178,6 +179,7 @@ interface InsertionRow {
   completion_action_id: string | null;
   source_place_id: string | null;
   undone_at: number | null;
+  completion_category_revision: number | null;
 }
 
 interface ComparisonRow {
@@ -270,6 +272,7 @@ function migrate(db: DatabaseSync): number {
           name            TEXT NOT NULL,
           normalized_name TEXT NOT NULL UNIQUE,
           sort_order      INTEGER NOT NULL UNIQUE,
+          mutation_revision INTEGER NOT NULL DEFAULT 0,
           created_at      INTEGER NOT NULL,
           updated_at      INTEGER NOT NULL
         ) STRICT;
@@ -297,6 +300,7 @@ function migrate(db: DatabaseSync): number {
           notes                TEXT,
           source_place_id      TEXT,
           undone_at            INTEGER,
+          completion_category_revision INTEGER,
           state_json           TEXT NOT NULL,
           revision             INTEGER NOT NULL,
           status               TEXT NOT NULL CHECK (status IN ('active', 'completed', 'cancelled')),
@@ -363,6 +367,20 @@ function migrate(db: DatabaseSync): number {
       throw error;
     }
   }
+  if (row.user_version >= 1 && row.user_version <= 3) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(`
+        ALTER TABLE category ADD COLUMN mutation_revision INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE insertion_session ADD COLUMN completion_category_revision INTEGER;
+        PRAGMA user_version = 4;
+        COMMIT;
+      `);
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
   return SCHEMA_VERSION;
 }
 
@@ -394,6 +412,16 @@ export function openPlacesStore(dbPath: string): PlacesStore {
     const row = db.prepare("SELECT * FROM place WHERE id = ?").get(id) as unknown as PlaceRow | undefined;
     return row ? placeFromRow(row) : undefined;
   };
+  const getCategoryRevision = (categoryId: string): number => {
+    const row = db.prepare("SELECT mutation_revision AS value FROM category WHERE id = ?").get(categoryId) as unknown as { value: number } | undefined;
+    if (!row) throw new Error("Category not found");
+    return row.value;
+  };
+  const bumpCategoryRevision = (categoryId: string): number => {
+    const result = db.prepare("UPDATE category SET mutation_revision = mutation_revision + 1 WHERE id = ?").run(categoryId);
+    if (result.changes !== 1) throw new Error("Category not found");
+    return getCategoryRevision(categoryId);
+  };
   const insertionRanking = (
     categoryId: string,
     sourcePlaceId: string | null,
@@ -405,6 +433,7 @@ export function openPlacesStore(dbPath: string): PlacesStore {
     db.prepare("DELETE FROM place WHERE id = ?").run(id);
     db.prepare("UPDATE place SET position = -position - 1 WHERE category_id = ? AND position > ?").run(existing.categoryId, existing.position);
     db.prepare("UPDATE place SET position = -position - 2 WHERE category_id = ? AND position < 0").run(existing.categoryId);
+    bumpCategoryRevision(existing.categoryId);
   };
 
   const insertPlaceInternal = (input: InsertPlaceInput): StoredPlace => {
@@ -427,6 +456,7 @@ export function openPlacesStore(dbPath: string): PlacesStore {
       (id, category_id, name, normalized_name, sentiment, notes, position, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(input.id, input.categoryId, parsed.name, parsed.normalized, input.sentiment, input.notes ?? null, input.index, input.now, input.now);
+    bumpCategoryRevision(input.categoryId);
     const inserted = getPlace(input.id);
     if (!inserted) throw new Error("Inserted place could not be read back");
     return inserted;
@@ -448,7 +478,7 @@ export function openPlacesStore(dbPath: string): PlacesStore {
     renameCategory(id, name, now) {
       const parsed = requireName(name, "Category name");
       return transaction(db, () => {
-        const result = db.prepare("UPDATE category SET name = ?, normalized_name = ?, updated_at = ? WHERE id = ?")
+        const result = db.prepare("UPDATE category SET name = ?, normalized_name = ?, updated_at = ?, mutation_revision = mutation_revision + 1 WHERE id = ?")
           .run(parsed.name, parsed.normalized, now, id);
         if (result.changes !== 1) throw new Error("Category not found");
         const row = db.prepare("SELECT id, name, normalized_name, created_at, updated_at FROM category WHERE id = ?").get(id) as unknown as CategoryRow;
@@ -480,6 +510,7 @@ export function openPlacesStore(dbPath: string): PlacesStore {
             now,
             id,
           );
+        bumpCategoryRevision(existing.categoryId);
         const updated = getPlace(id);
         if (!updated) throw new Error("Updated place could not be read back");
         return updated;
@@ -595,8 +626,9 @@ export function openPlacesStore(dbPath: string): PlacesStore {
         if (actualIndex !== input.index) throw new Error("Completion index does not match insertion state");
         if (insertion.sourcePlaceId) deletePlaceInternal(insertion.sourcePlaceId);
         const place = insertPlaceInternal({ id: row.candidate_id, categoryId: row.category_id, name: row.name, sentiment: insertion.sentiment, notes: row.notes, index: actualIndex, now: input.now });
-        db.prepare("UPDATE insertion_session SET status = 'completed', completion_action_id = ?, updated_at = ? WHERE id = ?")
-          .run(input.actionId, input.now, input.insertionId);
+        const categoryRevision = getCategoryRevision(row.category_id);
+        db.prepare("UPDATE insertion_session SET status = 'completed', completion_action_id = ?, completion_category_revision = ?, updated_at = ? WHERE id = ?")
+          .run(input.actionId, categoryRevision, input.now, input.insertionId);
         return place;
       });
     },
@@ -606,12 +638,10 @@ export function openPlacesStore(dbPath: string): PlacesStore {
         if (!row || row.status !== "completed" || row.source_place_id !== null) {
           throw new Error("Completed addition not found");
         }
-        if (row.undone_at !== null) return;
+        if (row.undone_at !== null) throw new Error("Undo is no longer available");
         const place = getPlace(row.candidate_id);
-        if (!place) throw new Error("Added place no longer exists");
-        const latest = db.prepare("SELECT id FROM insertion_session WHERE category_id = ? AND status = 'completed' AND undone_at IS NULL ORDER BY updated_at DESC, id DESC LIMIT 1").get(row.category_id) as unknown as { id: string } | undefined;
-        if (latest?.id !== insertionId || place.updatedAt !== row.updated_at) {
-          throw new Error("The category changed after this addition; delete the place instead");
+        if (!place || row.completion_category_revision === null || getCategoryRevision(row.category_id) !== row.completion_category_revision) {
+          throw new Error("Undo is no longer available because the category changed");
         }
         deletePlaceInternal(place.id);
         db.prepare("UPDATE insertion_session SET undone_at = ?, updated_at = ? WHERE id = ?")
@@ -630,8 +660,14 @@ export function openPlacesStore(dbPath: string): PlacesStore {
     },
     async backup(destinationPath) {
       await mkdir(dirname(destinationPath), { recursive: true, mode: 0o700 });
-      await backupDatabase(db, destinationPath);
-      await chmod(destinationPath, 0o600);
+      const temporaryPath = join(dirname(destinationPath), `.places-backup-${randomUUID()}.tmp`);
+      try {
+        await backupDatabase(db, temporaryPath);
+        await chmod(temporaryPath, 0o600);
+        await link(temporaryPath, destinationPath);
+      } finally {
+        await unlink(temporaryPath).catch(() => {});
+      }
     },
     close() {
       if (db.isOpen) db.close();
