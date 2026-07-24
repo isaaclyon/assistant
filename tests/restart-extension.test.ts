@@ -62,7 +62,8 @@ describe("/restart extension", () => {
     expect(command?.description).toContain("Restart");
   });
 
-  it("replies then triggers the bound restart capability", async () => {
+  it("replies and returns before triggering the bound restart capability", async () => {
+    vi.useFakeTimers();
     const restart = vi.fn();
     const unbind = bindBridgeRestart(restart);
     try {
@@ -76,9 +77,13 @@ describe("/restart extension", () => {
 
       expect(reply).toHaveBeenCalledOnce();
       expect(reply.mock.calls[0]?.[0]).toMatch(/restart/i);
+      expect(restart).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1_000);
       expect(restart).toHaveBeenCalledOnce();
     } finally {
       unbind();
+      vi.useRealTimers();
     }
   });
 

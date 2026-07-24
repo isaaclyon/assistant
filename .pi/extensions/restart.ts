@@ -35,10 +35,11 @@ export default function extend(_pi: ExtensionAPI): void {
         await ctx.reply("Restart unavailable: bridge restart capability is not bound.");
         return;
       }
-      // Reply before triggering the restart so the acknowledgement is sent
-      // before the process tears down its Telegram polling.
+      // Return control to Telegram polling before process teardown so the
+      // /restart update is acknowledged instead of replayed after startup.
       await ctx.reply("Restarting the bridge… it will reconnect in a few seconds.");
-      restart();
+      const timer = setTimeout(restart, 1_000);
+      timer.unref();
     },
   });
 }
