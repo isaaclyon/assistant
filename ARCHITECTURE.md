@@ -24,6 +24,7 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 | Bridge environment overrides | `~/.config/pi-telegram-bridge/environment` | User/systemd |
 | Scheduled job definitions | `<stateDir>/jobs.json` | Agent/user |
 | Scheduled job run state | `<stateDir>/jobs-state.json` | Host |
+| Human-idle session epoch | `<stateDir>/conversation-session-state.json` | Host |
 | Heartbeat observations | `<stateDir>/checkers/*.json` | Host |
 | Background subagent batches and temporary sessions | `<stateDir>/subagents/` | Host |
 | Personal memory vault | `~/.local/share/pi-telegram-bridge/memory` (override: `PI_TELEGRAM_MEMORY_DIR`) | `personal-memory` skill CLI |
@@ -50,6 +51,17 @@ repository inspection and public-web retrieval; the host persists bounded batch
 state, owns timeout/cancellation/retention, and injects one target-scoped parent
 synthesis turn after all jobs become terminal. See
 [ADR-0021](docs/adr/0021-bounded-read-only-background-subagents.md).
+
+When `PI_TELEGRAM_SESSION_IDLE_HOURS` is enabled, the host records only accepted
+human prompt time and replacement correlation under each instance state tree.
+Jobs do not advance the clock. Immediately before a qualifying Telegram or job
+prompt, one serialized policy may call official `runtime.newSession()` and then
+dispatch the unchanged event in the fresh session. The fork's narrow prompt
+preparation capability keeps Telegram turns queued and durable across the async
+replacement. Its session-bound readiness guard prevents job rotation across
+queued Telegram work, active/pending turns, compaction, or Pi pending messages;
+background-subagent completions bypass the policy. See
+[ADR-0022](docs/adr/0022-rotate-sessions-after-human-inactivity.md).
 
 In fleet mode, exactly one `jobsRole: coordinator` process owns cron, at,
 heartbeat, and webhook trigger evaluation plus mutable run state. Version-3 jobs
@@ -103,12 +115,23 @@ hooks, signing, and unbounded execution. It never pushes; see
 2. Continue the most recent session in the bridge-only session directory.
 3. Point Codex conversion at its bridge-only settings file.
 4. Resolve the instance's default-deny capability profile from the immutable release and build an `AgentSessionRuntime` with the pinned dependencies.
-5. Bind the process-local bridge runtime marker, then bind extensions in RPC mode, emitting `session_start`.
-6. Bind exact Telegram surface/actor policy, then let pi-telegram resume the selected named profile lock or connect it when no owner exists.
-7. Compile and append core memory before each agent start.
-8. Recover bounded background-subagent state and bind the parent management tool.
-9. Monitor polling ownership every five seconds. A live external Pi owner is respected; when it exits, the host reconnects automatically.
-10. Wait for SIGINT, SIGTERM, or an extension shutdown request.
+5. Load the optional human-idle session epoch, failing safely on malformed state, and bind the serialized session-replacement policy.
+6. Bind the process-local bridge runtime marker, then bind extensions in RPC mode, emitting `session_start`.
+7. Bind exact Telegram surface/actor policy and prompt preparation, then let pi-telegram resume the selected named profile lock or connect it when no owner exists.
+8. Compile and append core memory before each agent start.
+9. Recover bounded background-subagent state and bind the parent management tool.
+10. Monitor polling ownership every five seconds. A live external Pi owner is respected; when it exits, the host reconnects automatically.
+11. Wait for SIGINT, SIGTERM, or an extension shutdown request.
+
+## Session lifecycle
+
+Pi compaction remains token-driven and may carry a summary within a session.
+Idle rotation is an independent, event-driven host policy: it never creates an
+empty session at the timeout, copies no prior context, emits no standalone
+Telegram notice, and leaves historical session files intact. Automatic and
+manual replacements use Pi's official shutdown/rebind/start lifecycle rather
+than editing JSONL. Pending old-session correlation makes replacement retryable
+without a repeated-rotation loop after a post-replacement state-write failure.
 
 ## Deployment
 

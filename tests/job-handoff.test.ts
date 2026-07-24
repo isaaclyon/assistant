@@ -26,6 +26,7 @@ describe("durable instance job handoff", () => {
       coordinatorStateDir,
       eventId: "at:couple-reminder:2026-07-21T18:00:00Z",
       jobId: "couple-reminder",
+      jobType: "at",
       target: "both-personal",
       prompt: "Remember the appointment",
       now: () => new Date("2026-07-21T12:00:00.000Z"),
@@ -48,8 +49,8 @@ describe("durable instance job handoff", () => {
         inject: emmaInject,
       }),
     ).resolves.toEqual({ processed: 1, failed: 0, uncertain: 0 });
-    expect(isaacInject).toHaveBeenCalledWith("Remember the appointment");
-    expect(emmaInject).toHaveBeenCalledWith("Remember the appointment");
+    expect(isaacInject).toHaveBeenCalledWith("Remember the appointment", "at");
+    expect(emmaInject).toHaveBeenCalledWith("Remember the appointment", "at");
   });
 
   it("retries only a fan-out recipient that was not already enqueued", async () => {

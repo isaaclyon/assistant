@@ -26,6 +26,7 @@ describe("legacy instance-state migration", () => {
       ["restart-pending.json", ""],
       ["jobs.json", "{}\n"],
       ["jobs-state.json", "{}\n"],
+      ["conversation-session-state.json", '{"version":1}\n'],
       ["webhook-secret", "secret\n"],
       ["deploy.lock", ""],
     ] as const) {
@@ -44,6 +45,7 @@ describe("legacy instance-state migration", () => {
       destination,
       copiedEntries: [
         "checkers",
+        "conversation-session-state.json",
         "inbox.db",
         "inbox.db-shm",
         "inbox.db-wal",

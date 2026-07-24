@@ -19,6 +19,7 @@ export interface BridgeConfig {
   codexConfigPath: string;
   cwd: string;
   sessionDir: string;
+  sessionIdleMs?: number;
   stateDir: string;
   webhookHost: string;
   webhookPort: number;
@@ -43,6 +44,7 @@ export interface BridgeInstanceConfig {
   configRoot: string;
   stateDir: string;
   sessionDir: string;
+  sessionIdleMs?: number;
   inboxPath: string;
   codexConfigPath: string;
   restartMarkerPath: string;
@@ -54,6 +56,20 @@ export interface BridgeInstanceConfig {
 }
 
 type BridgeEnvironment = Readonly<Record<string, string | undefined>>;
+
+const MAX_SESSION_IDLE_HOURS = 8_760;
+
+function resolveSessionIdleMs(value: string | undefined): number {
+  const raw = value?.trim();
+  if (!raw) return 0;
+  const hours = Number(raw);
+  if (!Number.isFinite(hours) || hours < 0 || hours > MAX_SESSION_IDLE_HOURS) {
+    throw new Error(
+      `PI_TELEGRAM_SESSION_IDLE_HOURS must be 0 (disabled) or a finite number up to ${MAX_SESSION_IDLE_HOURS}: ${raw}`,
+    );
+  }
+  return hours * 60 * 60 * 1_000;
+}
 
 function resolveFromHome(value: string | undefined, fallback: string, home: string): string {
   const selected = value?.trim() || fallback;
@@ -95,6 +111,7 @@ export function resolveBridgeConfig(
     codexConfigPath,
     cwd,
     sessionDir: join(stateDir, "sessions"),
+    sessionIdleMs: resolveSessionIdleMs(env.PI_TELEGRAM_SESSION_IDLE_HOURS),
     stateDir,
     webhookHost: env.PI_TELEGRAM_BRIDGE_WEBHOOK_HOST?.trim() || "127.0.0.1",
     webhookPort,
@@ -162,6 +179,7 @@ export function resolveBridgeInstanceConfig(
     stateRoot,
     configRoot,
     ...paths,
+    sessionIdleMs: resolveSessionIdleMs(env.PI_TELEGRAM_SESSION_IDLE_HOURS),
     webhookHost: env.PI_TELEGRAM_BRIDGE_WEBHOOK_HOST?.trim() || "127.0.0.1",
     webhookPort,
   };

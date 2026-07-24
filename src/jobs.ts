@@ -333,7 +333,8 @@ export interface JobSchedulerOptions {
 
 export interface JobDispatch {
   jobId: string;
-  target: string;
+  jobType: JobDefinition["type"];
+  target?: string;
   eventId: string;
 }
 
@@ -376,10 +377,12 @@ export async function startJobScheduler({
   const dispatchFor = (
     job: JobDefinition,
     eventId: string,
-  ): JobDispatch | undefined =>
-    job.target === undefined
-      ? undefined
-      : { jobId: job.id, target: job.target, eventId };
+  ): JobDispatch => ({
+    jobId: job.id,
+    jobType: job.type,
+    ...(job.target === undefined ? {} : { target: job.target }),
+    eventId,
+  });
   const heartbeatRunner = createHeartbeatRunner({
     stateDir,
     runCheck,

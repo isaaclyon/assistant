@@ -168,6 +168,13 @@ export async function prepareBridgeFleet(
                   credentialSummary.webhookPort,
                 ),
               }),
+          ...(credentialSummary.sessionIdleHours === undefined
+            ? {}
+            : {
+                PI_TELEGRAM_SESSION_IDLE_HOURS: String(
+                  credentialSummary.sessionIdleHours,
+                ),
+              }),
         },
         options.configRoot,
         options.resourceRoot,

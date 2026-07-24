@@ -26,6 +26,7 @@ describe("credential environment scopes", () => {
       [
         `PI_TELEGRAM_CREDENTIAL_SCOPE=${scope}`,
         "PI_TELEGRAM_BRIDGE_WEBHOOK_PORT=0",
+        "PI_TELEGRAM_SESSION_IDLE_HOURS=8",
         ...keys.map((key) => `${key}=${secret}`),
         "",
       ].join("\n"),
@@ -37,13 +38,30 @@ describe("credential environment scopes", () => {
     expect(result).toEqual({
       scope,
       webhookPort: 0,
+      sessionIdleHours: 8,
       keys: [
         "PI_TELEGRAM_CREDENTIAL_SCOPE",
         "PI_TELEGRAM_BRIDGE_WEBHOOK_PORT",
+        "PI_TELEGRAM_SESSION_IDLE_HOURS",
         ...keys,
       ],
     });
     expect(JSON.stringify(result)).not.toContain(secret);
+  });
+
+  it("rejects malformed or unreasonable session idle timeouts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "bridge-idle-config-"));
+    const path = join(root, "instance.env");
+    for (const value of ["nope", "-1", "Infinity", "8761"]) {
+      await writeFile(
+        path,
+        `PI_TELEGRAM_CREDENTIAL_SCOPE=engineering\nPI_TELEGRAM_SESSION_IDLE_HOURS=${value}\n`,
+        { mode: 0o600 },
+      );
+      await expect(
+        validateCredentialEnvironmentFile(path, "engineering"),
+      ).rejects.toThrow(/session idle timeout.*0 through 8760/i);
+    }
   });
 
   it("rejects a personal credential in Shared without exposing its value", async () => {

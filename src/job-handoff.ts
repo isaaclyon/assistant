@@ -15,6 +15,7 @@ interface JobHandoffFile {
   version: 1;
   dispatchId: string;
   jobId: string;
+  jobType?: "cron" | "at" | "heartbeat" | "webhook";
   target: string;
   prompt: string;
   createdAt: string;
@@ -37,6 +38,7 @@ export interface EnqueueJobHandoffOptions {
   coordinatorStateDir: string;
   eventId: string;
   jobId: string;
+  jobType?: JobHandoffFile["jobType"];
   target: string;
   prompt: string;
   now?: () => Date;
@@ -89,6 +91,7 @@ export async function enqueueJobHandoff({
   coordinatorStateDir,
   eventId,
   jobId,
+  jobType,
   target,
   prompt,
   now = () => new Date(),
@@ -150,6 +153,7 @@ export async function enqueueJobHandoff({
         version: 1,
         dispatchId,
         jobId,
+        ...(jobType === undefined ? {} : { jobType }),
         target: recipient,
         prompt,
         createdAt: status.createdAt,
@@ -188,6 +192,8 @@ function parseHandoff(raw: string): JobHandoffFile | undefined {
     value.version !== 1 ||
     typeof value.dispatchId !== "string" ||
     typeof value.jobId !== "string" ||
+    (value.jobType !== undefined &&
+      !["cron", "at", "heartbeat", "webhook"].includes(String(value.jobType))) ||
     typeof value.target !== "string" ||
     typeof value.prompt !== "string" ||
     value.prompt.trim().length === 0 ||
@@ -202,7 +208,7 @@ function parseHandoff(raw: string): JobHandoffFile | undefined {
 export interface DrainJobHandoffsOptions {
   stateDir: string;
   instanceId: string;
-  inject: (prompt: string) => Promise<void>;
+  inject: (prompt: string, jobType?: JobHandoffFile["jobType"]) => Promise<void>;
 }
 
 export interface DrainJobHandoffsResult {
@@ -246,7 +252,7 @@ export async function drainJobHandoffs({
     const processingPath = join(processingDir, name);
     await rename(pendingPath, processingPath);
     try {
-      await inject(handoff.prompt);
+      await inject(handoff.prompt, handoff.jobType);
       await rename(processingPath, join(completedDir, name));
       processed += 1;
     } catch {

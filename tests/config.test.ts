@@ -29,6 +29,7 @@ describe("resolveBridgeConfig", () => {
     expect(config.sessionDir).toBe(
       "/home/tester/.local/state/pi-telegram-bridge/sessions",
     );
+    expect(config.sessionIdleMs).toBe(0);
     expect(config.codexConfigPath).toBe(
       "/home/tester/.local/state/pi-telegram-bridge/pi-codex-conversion.json",
     );
@@ -51,9 +52,22 @@ describe("resolveBridgeConfig", () => {
       cwd: "/workspace",
       sessionDir: "/state/sessions",
       stateDir: "/state",
+      sessionIdleMs: 0,
       webhookHost: "127.0.0.1",
       webhookPort: 8776,
     });
+  });
+
+  it("parses an opt-in bounded session idle timeout", () => {
+    expect(
+      resolveBridgeConfig({ PI_TELEGRAM_SESSION_IDLE_HOURS: "8" }, "/home/tester")
+        .sessionIdleMs,
+    ).toBe(8 * 60 * 60 * 1_000);
+    for (const value of ["nope", "-1", "Infinity", "8761"]) {
+      expect(() =>
+        resolveBridgeConfig({ PI_TELEGRAM_SESSION_IDLE_HOURS: value }, "/home/tester"),
+      ).toThrow(/PI_TELEGRAM_SESSION_IDLE_HOURS.*0.*8760/i);
+    }
   });
 
   it("honors webhook listener overrides and rejects invalid ports", () => {
@@ -127,6 +141,7 @@ describe("resolveBridgeInstanceConfig", () => {
       runtimeMetadataPath: "/state/instances/isaac/runtime.json",
       checkerStateDir: "/state/instances/isaac/checkers",
       environmentFilePath: "/private-config/instances/isaac.env",
+      sessionIdleMs: 0,
     });
   });
 
@@ -197,6 +212,7 @@ describe("resolveBridgeInstanceConfig", () => {
       cwd: "/srv/current-assistant",
       sessionDir: "/state/current-assistant/sessions",
       stateDir: "/state/current-assistant",
+      sessionIdleMs: 0,
       webhookHost: "127.0.0.1",
       webhookPort: 8776,
     });
