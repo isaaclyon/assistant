@@ -8,13 +8,14 @@ import {
   applyPlaceInsertion,
   getPlaceInsertionStep,
   PLACE_SENTIMENTS,
+  undoPlaceComparison,
   type PlaceComparisonWinner,
   type PlaceInsertionState,
   type RankedPlace,
   type Sentiment,
 } from "./places-ranking.js";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export interface PlaceCategory {
   id: string;
@@ -55,6 +56,7 @@ export interface StoredComparison {
   existingPlaceId: string;
   winner: PlaceComparisonWinner;
   createdAt: number;
+  undoneAt: number | null;
 }
 
 interface CreateInsertionInput {
@@ -76,6 +78,13 @@ interface RecordComparisonInput {
   existingPlaceId: string;
   winner: PlaceComparisonWinner;
   state: PlaceInsertionState;
+  now: number;
+}
+
+interface UndoComparisonInput {
+  insertionId: string;
+  expectedRevision: number;
+  actionId: string;
   now: number;
 }
 
@@ -112,6 +121,7 @@ export interface PlacesStore {
   createInsertion(input: CreateInsertionInput): ActiveInsertion;
   getActiveInsertion(ownerKey: string): ActiveInsertion | undefined;
   recordComparison(input: RecordComparisonInput): ActiveInsertion;
+  undoComparison(input: UndoComparisonInput): ActiveInsertion;
   listComparisons(insertionId: string): StoredComparison[];
   completeInsertion(input: CompleteInsertionInput): StoredPlace;
   cancelInsertion(insertionId: string, expectedRevision: number, now: number): void;
@@ -163,6 +173,7 @@ interface ComparisonRow {
   existing_place_id: string;
   winner: string;
   created_at: number;
+  undone_at: number | null;
 }
 
 export function normalizePlaceName(name: string): string {
@@ -286,8 +297,12 @@ function migrate(db: DatabaseSync): number {
           existing_place_id TEXT NOT NULL,
           winner           TEXT NOT NULL CHECK (winner IN ('candidate', 'existing')),
           created_at       INTEGER NOT NULL,
+          undone_at        INTEGER,
+          undo_action_id   TEXT,
           PRIMARY KEY (insertion_id, sequence)
         ) STRICT;
+        CREATE UNIQUE INDEX unique_comparison_undo_action
+          ON comparison(undo_action_id) WHERE undo_action_id IS NOT NULL;
       `);
       const seed = db.prepare(
         "INSERT INTO category (id, name, normalized_name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, 0, 0)",
@@ -297,6 +312,22 @@ function migrate(db: DatabaseSync): number {
       }
       db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
       db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  if (row.user_version === 1) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(`
+        ALTER TABLE comparison ADD COLUMN undone_at INTEGER;
+        ALTER TABLE comparison ADD COLUMN undo_action_id TEXT;
+        CREATE UNIQUE INDEX unique_comparison_undo_action
+          ON comparison(undo_action_id) WHERE undo_action_id IS NOT NULL;
+        PRAGMA user_version = 2;
+        COMMIT;
+      `);
     } catch (error) {
       db.exec("ROLLBACK");
       throw error;
@@ -434,11 +465,36 @@ export function openPlacesStore(dbPath: string): PlacesStore {
         return insertionFromRow(updated);
       });
     },
+    undoComparison(input) {
+      return transaction(db, () => {
+        const duplicate = db.prepare("SELECT insertion_id FROM comparison WHERE undo_action_id = ?").get(input.actionId) as unknown as { insertion_id: string } | undefined;
+        if (duplicate) {
+          if (duplicate.insertion_id !== input.insertionId) throw new Error("Undo action ID belongs to another insertion");
+          const repeated = getInsertionRow(input.insertionId);
+          if (!repeated) throw new Error("Insertion not found");
+          return insertionFromRow(repeated);
+        }
+        const row = getInsertionRow(input.insertionId);
+        if (!row || row.status !== "active") throw new Error("Active insertion not found");
+        if (row.revision !== input.expectedRevision) throw new Error("Stale insertion revision");
+        const current = insertionFromRow(row);
+        const previousState = undoPlaceComparison(current.state);
+        const comparison = db.prepare("SELECT sequence FROM comparison WHERE insertion_id = ? AND undone_at IS NULL ORDER BY sequence DESC LIMIT 1").get(input.insertionId) as unknown as { sequence: number } | undefined;
+        if (!comparison) throw new Error("There is no comparison to undo");
+        db.prepare("UPDATE comparison SET undone_at = ?, undo_action_id = ? WHERE insertion_id = ? AND sequence = ?")
+          .run(input.now, input.actionId, input.insertionId, comparison.sequence);
+        db.prepare("UPDATE insertion_session SET state_json = ?, revision = revision + 1, updated_at = ? WHERE id = ?")
+          .run(JSON.stringify(previousState), input.now, input.insertionId);
+        const updated = getInsertionRow(input.insertionId);
+        if (!updated) throw new Error("Updated insertion could not be read back");
+        return insertionFromRow(updated);
+      });
+    },
     listComparisons(insertionId) {
-      const rows = db.prepare("SELECT sequence, action_id, existing_place_id, winner, created_at FROM comparison WHERE insertion_id = ? ORDER BY sequence").all(insertionId) as unknown as ComparisonRow[];
+      const rows = db.prepare("SELECT sequence, action_id, existing_place_id, winner, created_at, undone_at FROM comparison WHERE insertion_id = ? ORDER BY sequence").all(insertionId) as unknown as ComparisonRow[];
       return rows.map((row) => {
         if (row.winner !== "candidate" && row.winner !== "existing") throw new Error("Stored comparison has invalid winner");
-        return { sequence: row.sequence, actionId: row.action_id, existingPlaceId: row.existing_place_id, winner: row.winner, createdAt: row.created_at };
+        return { sequence: row.sequence, actionId: row.action_id, existingPlaceId: row.existing_place_id, winner: row.winner, createdAt: row.created_at, undoneAt: row.undone_at };
       });
     },
     completeInsertion(input) {

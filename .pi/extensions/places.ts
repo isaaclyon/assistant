@@ -1,0 +1,183 @@
+import { StringEnum } from "@earendil-works/pi-ai";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { join } from "node:path";
+import { Type } from "typebox";
+
+import {
+  PlacesService,
+  PlacesServiceError,
+} from "../../src/places-service.ts";
+import { openPlacesStore, type PlacesStore } from "../../src/places-store.ts";
+
+const ActionSchema = StringEnum([
+  "menu",
+  "categories",
+  "create_category",
+  "start",
+  "resume",
+  "answer",
+  "back",
+  "cancel",
+  "ranking",
+] as const);
+const SentimentSchema = StringEnum(["liked", "alright", "disliked"] as const);
+const WinnerSchema = StringEnum(["candidate", "existing"] as const);
+
+export default function placesExtension(pi: ExtensionAPI): void {
+  let store: PlacesStore | undefined;
+  let service: PlacesService | undefined;
+
+  pi.on("session_start", () => {
+    store?.close();
+    const stateDir = process.env.PI_TELEGRAM_BRIDGE_STATE_DIR;
+    if (!stateDir) return;
+    store = openPlacesStore(join(stateDir, "places.db"));
+    service = new PlacesService(store, { ownerKey: "private-telegram-surface" });
+  });
+  pi.on("session_shutdown", () => {
+    store?.close();
+    store = undefined;
+    service = undefined;
+  });
+
+  pi.registerTool({
+    name: "places",
+    label: "Places",
+    description:
+      "Maintain the user's private restaurant, coffee-shop, bar, and other place rankings. Supports categories, adding a place, durable pairwise comparisons, resume/cancel, and paginated rankings.",
+    promptSnippet: "Add, compare, resume, cancel, or list private place rankings",
+    promptGuidelines: [
+      "Use places whenever the user asks to add, rank, compare, resume, cancel, or list restaurants, coffee shops, bars, or other saved places.",
+      "After a places result with kind=compare, ask exactly that comparison and preserve insertionId, revision, and existingPlace.id in the button prompts; never invent ranking state.",
+      "Render places choices as telegram_button prompt actions when responding on Telegram, while keeping the visible response concise.",
+    ],
+    parameters: Type.Object({
+      action: ActionSchema,
+      name: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+      category_id: Type.Optional(Type.String()),
+      sentiment: Type.Optional(SentimentSchema),
+      notes: Type.Optional(Type.String({ maxLength: 4_000 })),
+      insertion_id: Type.Optional(Type.String()),
+      revision: Type.Optional(Type.Integer({ minimum: 0 })),
+      existing_place_id: Type.Optional(Type.String()),
+      winner: Type.Optional(WinnerSchema),
+      offset: Type.Optional(Type.Integer({ minimum: 0 })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
+    }),
+    async execute(_toolCallId, params) {
+      if (!service) {
+        return toolResult({
+          ok: false,
+          error: {
+            code: "UNAVAILABLE",
+            message: "Places is unavailable outside the configured bridge runtime.",
+          },
+        });
+      }
+      try {
+        let result: unknown;
+        switch (params.action) {
+          case "menu": {
+            let active: unknown;
+            try {
+              active = service.resume();
+            } catch (error) {
+              if (!(error instanceof PlacesServiceError) || error.code !== "NO_ACTIVE_INSERTION") {
+                throw error;
+              }
+            }
+            result = { categories: service.listCategories(), ...(active ? { active } : {}) };
+            break;
+          }
+          case "categories":
+            result = { categories: service.listCategories() };
+            break;
+          case "create_category":
+            if (!params.name) throw invalid("create_category requires name");
+            result = { category: service.createCategory(params.name) };
+            break;
+          case "start":
+            if (!params.name || !params.category_id || !params.sentiment) {
+              throw invalid("start requires name, category_id, and sentiment");
+            }
+            result = service.start({
+              name: params.name,
+              categoryId: params.category_id,
+              sentiment: params.sentiment,
+              ...(params.notes !== undefined ? { notes: params.notes } : {}),
+            });
+            break;
+          case "resume":
+            result = service.resume();
+            break;
+          case "answer":
+            if (
+              !params.insertion_id ||
+              params.revision === undefined ||
+              !params.existing_place_id ||
+              !params.winner
+            ) {
+              throw invalid(
+                "answer requires insertion_id, revision, existing_place_id, and winner",
+              );
+            }
+            result = service.answer({
+              insertionId: params.insertion_id,
+              revision: params.revision,
+              existingPlaceId: params.existing_place_id,
+              winner: params.winner,
+            });
+            break;
+          case "back":
+            if (!params.insertion_id || params.revision === undefined) {
+              throw invalid("back requires insertion_id and revision");
+            }
+            result = service.back(params.insertion_id, params.revision);
+            break;
+          case "cancel":
+            if (!params.insertion_id || params.revision === undefined) {
+              throw invalid("cancel requires insertion_id and revision");
+            }
+            service.cancel(params.insertion_id, params.revision);
+            result = { cancelled: true };
+            break;
+          case "ranking": {
+            if (!params.category_id) throw invalid("ranking requires category_id");
+            const ranking = service.listRanking(params.category_id);
+            const offset = params.offset ?? 0;
+            const limit = params.limit ?? 25;
+            result = {
+              categoryId: params.category_id,
+              offset,
+              limit,
+              total: ranking.length,
+              places: ranking.slice(offset, offset + limit),
+            };
+            break;
+          }
+        }
+        return toolResult({ ok: true, result });
+      } catch (error) {
+        const safe =
+          error instanceof PlacesServiceError
+            ? error
+            : invalid(error instanceof Error ? error.message : "Invalid places action");
+        return toolResult({
+          ok: false,
+          error: { code: safe.code, message: safe.message },
+        });
+      }
+    },
+  });
+}
+
+function invalid(message: string): PlacesServiceError {
+  return new PlacesServiceError("INVALID_ACTION", message);
+}
+
+function toolResult(details: unknown) {
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(details) }],
+    details,
+  };
+}
