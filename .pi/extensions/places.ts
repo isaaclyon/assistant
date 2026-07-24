@@ -8,6 +8,7 @@ import {
   PlacesServiceError,
 } from "../../src/places-service.ts";
 import { openPlacesStore, type PlacesStore } from "../../src/places-store.ts";
+import { registerReloadSafeTelegramCommand } from "../lib/telegram-command.ts";
 
 const ActionSchema = StringEnum([
   "menu",
@@ -38,6 +39,16 @@ export default function placesExtension(pi: ExtensionAPI): void {
     store?.close();
     store = undefined;
     service = undefined;
+  });
+
+  registerReloadSafeTelegramCommand({
+    name: "places",
+    description: "Add, compare, and view your private place rankings.",
+    showInMenu: true,
+    emoji: "📍",
+    handler: async (ctx) => {
+      await ctx.enqueuePrompt(PLACES_MENU_PROMPT);
+    },
   });
 
   pi.registerTool({
@@ -156,7 +167,7 @@ export default function placesExtension(pi: ExtensionAPI): void {
             break;
           }
         }
-        return toolResult({ ok: true, result });
+        return toolResult({ ok: true, result: addButtonActions(result) });
       } catch (error) {
         const safe =
           error instanceof PlacesServiceError
@@ -169,6 +180,63 @@ export default function placesExtension(pi: ExtensionAPI): void {
       }
     },
   });
+}
+
+const PLACES_MENU_PROMPT = `# Places menu
+
+Open my private places-ranking menu now.
+
+1. Call the places tool with action "menu" before responding.
+2. If an active comparison exists, lead with it and use the exact action prompts returned by the tool.
+3. Otherwise show concise Telegram buttons for Add place and View rankings. Add place should ask for the name, then use action "categories" and ask for sentiment before action "start". View rankings should ask which returned category to open.
+4. Use top-level telegram_button comments with explicit label and prompt attributes. Do not expose internal IDs in visible prose, but preserve every ID and revision exactly inside the button prompt.
+5. Do not claim an add, answer, cancellation, or final rank until the places tool reports success.`;
+
+function addButtonActions(result: unknown): unknown {
+  if (!result || typeof result !== "object") return result;
+  const value = result as Record<string, unknown>;
+  if (value.kind !== "compare") return result;
+  const insertionId = value.insertionId;
+  const revision = value.revision;
+  const candidate = value.candidate;
+  const existing = value.existingPlace;
+  if (
+    typeof insertionId !== "string" ||
+    typeof revision !== "number" ||
+    !candidate ||
+    typeof candidate !== "object" ||
+    !existing ||
+    typeof existing !== "object"
+  ) {
+    return result;
+  }
+  const candidateName = (candidate as { name?: unknown }).name;
+  const existingId = (existing as { id?: unknown }).id;
+  const existingName = (existing as { name?: unknown }).name;
+  if (
+    typeof candidateName !== "string" ||
+    typeof existingId !== "string" ||
+    typeof existingName !== "string"
+  ) {
+    return result;
+  }
+  const answerPrompt = (winner: "candidate" | "existing") =>
+    `Continue my place ranking by calling places with action "answer", insertion_id ${JSON.stringify(insertionId)}, revision ${revision}, existing_place_id ${JSON.stringify(existingId)}, and winner "${winner}". Use the returned exact next step.`;
+  return {
+    ...value,
+    buttonActions: [
+      { label: candidateName, prompt: answerPrompt("candidate") },
+      { label: existingName, prompt: answerPrompt("existing") },
+      {
+        label: "Back",
+        prompt: `Go back one place comparison by calling places with action "back", insertion_id ${JSON.stringify(insertionId)}, and revision ${revision}. Use the returned exact step.`,
+      },
+      {
+        label: "Cancel",
+        prompt: `Ask me to confirm cancelling place insertion ${JSON.stringify(insertionId)} at revision ${revision}. Do not call places cancel until I confirm.`,
+      },
+    ],
+  };
 }
 
 function invalid(message: string): PlacesServiceError {

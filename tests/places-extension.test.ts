@@ -49,6 +49,36 @@ describe("places extension", () => {
       ok: true,
       result: { categories: expect.arrayContaining([expect.objectContaining({ name: "Coffee" })]) },
     });
+    const categoryId = (
+      menu?.details as {
+        result?: { categories?: Array<{ id?: string }> };
+      }
+    ).result?.categories?.[0]?.id;
+    if (!categoryId) throw new Error("missing category");
+    await tool?.execute("call-first", {
+      action: "start",
+      name: "Existing",
+      category_id: categoryId,
+      sentiment: "liked",
+    });
+    const comparison = await tool?.execute("call-second", {
+      action: "start",
+      name: "Candidate",
+      category_id: categoryId,
+      sentiment: "liked",
+    });
+    expect(comparison?.details).toMatchObject({
+      ok: true,
+      result: {
+        kind: "compare",
+        buttonActions: [
+          expect.objectContaining({ label: "Candidate", prompt: expect.stringContaining("revision 0") }),
+          expect.objectContaining({ label: "Existing", prompt: expect.stringContaining('winner "existing"') }),
+          expect.objectContaining({ label: "Back" }),
+          expect.objectContaining({ label: "Cancel", prompt: expect.stringContaining("confirm") }),
+        ],
+      },
+    });
     const invalid = await tool?.execute("call-2", { action: "start" });
     expect(invalid?.details).toMatchObject({
       ok: false,
