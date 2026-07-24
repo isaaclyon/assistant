@@ -906,13 +906,21 @@ function directResultView(
       : { ...placesMenuView(ctx), text: "That interaction expired. Start again." };
   }
   if (value.kind === "complete") {
-    const place = value.place as { id?: unknown; name?: unknown; position?: unknown } | undefined;
-    const category = value.category as { id?: unknown; name?: unknown; size?: unknown } | undefined;
-    if (typeof place?.id !== "string" || typeof place.name !== "string" || typeof category?.id !== "string") {
+    const place = value.place as { id?: unknown; name?: unknown } | undefined;
+    const category = value.category as { id?: unknown; name?: unknown } | undefined;
+    if (
+      typeof place?.id !== "string" ||
+      typeof place.name !== "string" ||
+      typeof category?.id !== "string" ||
+      typeof value.rank !== "number" ||
+      !Number.isSafeInteger(value.rank) ||
+      typeof value.total !== "number" ||
+      !Number.isSafeInteger(value.total)
+    ) {
       return placesMenuView(ctx);
     }
     return {
-      text: `<b>Ranked ${escapeHtml(place.name)}</b>\n\n#${Number(place.position) + 1} of ${Number(category.size)} in ${escapeHtml(String(category.name ?? "category"))}.`,
+      text: `<b>Ranked ${escapeHtml(place.name)}</b>\n\n#${value.rank} of ${value.total} in ${escapeHtml(String(category.name ?? "category"))}.`,
       replyMarkup: {
         inline_keyboard: [
           [{ text: "📝 Add notes", callback_data: ctx.callbackData("notes", place.id) }],

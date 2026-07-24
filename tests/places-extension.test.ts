@@ -129,6 +129,7 @@ describe("places extension", () => {
     expect(presentedView?.text).toContain("overall impression");
     await section.handleCallback?.({ ...baseContext, action: "sentiment", payload: "disliked" });
     expect(presentedView?.text).toContain("Ranked Direct Place");
+    expect(presentedView?.text).toContain("#1 of 1 in Restaurants");
     const first = await tool?.execute("call-first", {
       action: "start",
       name: "Existing",
