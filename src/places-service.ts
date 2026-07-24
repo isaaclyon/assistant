@@ -70,7 +70,13 @@ export type PlacesInteractionResult =
       category: PlaceCategory;
       rank: number;
       total: number;
+      undoInsertionId?: string;
     };
+
+export interface RepositionPlaceInput {
+  categoryId?: string;
+  sentiment?: Sentiment;
+}
 
 function asServiceError(error: unknown): PlacesServiceError {
   if (error instanceof PlacesServiceError) return error;
@@ -118,6 +124,13 @@ export class PlacesService {
     return this.#store.listCategories();
   }
 
+  listCategorySummaries(): Array<PlaceCategory & { placeCount: number }> {
+    return this.listCategories().map((category) => ({
+      ...category,
+      placeCount: this.#store.listPlaces(category.id).length,
+    }));
+  }
+
   createCategory(name: string): PlaceCategory {
     const normalized = normalizePlaceName(name);
     if (this.listCategories().some((category) => category.normalizedName === normalized)) {
@@ -130,9 +143,66 @@ export class PlacesService {
     }
   }
 
+  renameCategory(id: string, name: string): PlaceCategory {
+    this.#requireCategory(id);
+    const normalized = normalizePlaceName(name);
+    if (
+      this.listCategories().some(
+        (category) => category.id !== id && category.normalizedName === normalized,
+      )
+    ) {
+      throw new PlacesServiceError("DUPLICATE_CATEGORY", "That category already exists.");
+    }
+    try {
+      return this.#store.renameCategory(id, name, this.#now());
+    } catch (error) {
+      throw asServiceError(error);
+    }
+  }
+
+  deleteCategory(id: string): void {
+    this.#requireCategory(id);
+    try {
+      this.#store.deleteCategory(id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/empty category/i.test(message)) {
+        throw new PlacesServiceError("INVALID_ACTION", message, { cause: error });
+      }
+      throw asServiceError(error);
+    }
+  }
+
   listRanking(categoryId: string): StoredPlace[] {
     this.#requireCategory(categoryId);
     return this.#store.listPlaces(categoryId);
+  }
+
+  getPlace(id: string): StoredPlace {
+    const place = this.#store.getPlace(id);
+    if (!place) throw new PlacesServiceError("NOT_FOUND", "That place no longer exists.");
+    return place;
+  }
+
+  editPlace(
+    id: string,
+    changes: { name?: string; notes?: string | null },
+  ): StoredPlace {
+    this.getPlace(id);
+    try {
+      return this.#store.updatePlace(id, changes, this.#now());
+    } catch (error) {
+      throw asServiceError(error);
+    }
+  }
+
+  deletePlace(id: string): void {
+    this.getPlace(id);
+    try {
+      this.#store.deletePlace(id);
+    } catch (error) {
+      throw asServiceError(error);
+    }
   }
 
   start(input: StartPlaceInput): PlacesInteractionResult {
@@ -173,6 +243,47 @@ export class PlacesService {
     }
   }
 
+  reposition(placeId: string, input: RepositionPlaceInput): PlacesInteractionResult {
+    if (this.#store.getActiveInsertion(this.#ownerKey)) {
+      throw new PlacesServiceError(
+        "ACTIVE_INSERTION_EXISTS",
+        "Another place ranking is unfinished. Resume or cancel it first.",
+      );
+    }
+    const source = this.getPlace(placeId);
+    const category = this.#requireCategory(input.categoryId ?? source.categoryId);
+    const sentiment = input.sentiment ?? source.sentiment;
+    const ranking = this.#store
+      .listPlaces(category.id)
+      .filter((place) => place.id !== source.id);
+    if (
+      ranking.some((place) => place.normalizedName === source.normalizedName)
+    ) {
+      throw new PlacesServiceError(
+        "DUPLICATE_PLACE",
+        "A place with that name already exists in the target category.",
+      );
+    }
+    const insertionId = this.#createId();
+    try {
+      const insertion = this.#store.createInsertion({
+        id: insertionId,
+        ownerKey: this.#ownerKey,
+        candidateId: source.id,
+        name: source.name,
+        categoryId: category.id,
+        sentiment,
+        notes: source.notes,
+        sourcePlaceId: source.id,
+        state: createPlaceInsertion(ranking, sentiment),
+        now: this.#now(),
+      });
+      return this.#next(insertion);
+    } catch (error) {
+      throw asServiceError(error);
+    }
+  }
+
   resume(): PlacesInteractionResult {
     const insertion = this.#store.getActiveInsertion(this.#ownerKey);
     if (!insertion) {
@@ -187,7 +298,9 @@ export class PlacesService {
 
   answer(input: AnswerPlaceInput): PlacesInteractionResult {
     const insertion = this.#requireActive(input.insertionId, input.revision);
-    const ranking = this.#store.listPlaces(insertion.categoryId);
+    const ranking = this.#store
+      .listPlaces(insertion.categoryId)
+      .filter((place) => place.id !== insertion.sourcePlaceId);
     try {
       const state = answerPlaceComparison(
         ranking,
@@ -234,8 +347,18 @@ export class PlacesService {
     }
   }
 
+  undoAddition(insertionId: string): void {
+    try {
+      this.#store.undoAddition(insertionId, this.#now());
+    } catch (error) {
+      throw asServiceError(error);
+    }
+  }
+
   #next(insertion: ActiveInsertion): PlacesInteractionResult {
-    const ranking = this.#store.listPlaces(insertion.categoryId);
+    const ranking = this.#store
+      .listPlaces(insertion.categoryId)
+      .filter((place) => place.id !== insertion.sourcePlaceId);
     const category = this.#requireCategory(insertion.categoryId);
     const step = getPlaceInsertionStep(ranking, insertion.state);
     if (step.kind === "compare") {
@@ -265,6 +388,9 @@ export class PlacesService {
       category,
       rank: place.position + 1,
       total: ranking.length + 1,
+      ...(insertion.sourcePlaceId === null
+        ? { undoInsertionId: insertion.id }
+        : {}),
     };
   }
 

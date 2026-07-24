@@ -13,8 +13,16 @@ import { registerReloadSafeTelegramCommand } from "../lib/telegram-command.ts";
 const ActionSchema = StringEnum([
   "menu",
   "categories",
+  "category_summaries",
   "create_category",
+  "rename_category",
+  "delete_category",
   "start",
+  "place",
+  "edit_place",
+  "delete_place",
+  "reposition",
+  "undo_addition",
   "resume",
   "answer",
   "back",
@@ -61,11 +69,13 @@ export default function placesExtension(pi: ExtensionAPI): void {
       "Use places whenever the user asks to add, rank, compare, resume, cancel, or list restaurants, coffee shops, bars, or other saved places.",
       "After a places result with kind=compare, ask exactly that comparison and preserve insertionId, revision, and existingPlace.id in the button prompts; never invent ranking state.",
       "Render places choices as telegram_button prompt actions when responding on Telegram, while keeping the visible response concise.",
+      "Require explicit user confirmation before calling places delete_place, delete_category, undo_addition, or cancel.",
     ],
     parameters: Type.Object({
       action: ActionSchema,
       name: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
       category_id: Type.Optional(Type.String()),
+      place_id: Type.Optional(Type.String()),
       sentiment: Type.Optional(SentimentSchema),
       notes: Type.Optional(Type.String({ maxLength: 4_000 })),
       insertion_id: Type.Optional(Type.String()),
@@ -103,9 +113,23 @@ export default function placesExtension(pi: ExtensionAPI): void {
           case "categories":
             result = { categories: service.listCategories() };
             break;
+          case "category_summaries":
+            result = { categories: service.listCategorySummaries() };
+            break;
           case "create_category":
             if (!params.name) throw invalid("create_category requires name");
             result = { category: service.createCategory(params.name) };
+            break;
+          case "rename_category":
+            if (!params.category_id || !params.name) {
+              throw invalid("rename_category requires category_id and name");
+            }
+            result = { category: service.renameCategory(params.category_id, params.name) };
+            break;
+          case "delete_category":
+            if (!params.category_id) throw invalid("delete_category requires category_id");
+            service.deleteCategory(params.category_id);
+            result = { deleted: true };
             break;
           case "start":
             if (!params.name || !params.category_id || !params.sentiment) {
@@ -117,6 +141,38 @@ export default function placesExtension(pi: ExtensionAPI): void {
               sentiment: params.sentiment,
               ...(params.notes !== undefined ? { notes: params.notes } : {}),
             });
+            break;
+          case "place":
+            if (!params.place_id) throw invalid("place requires place_id");
+            result = { place: service.getPlace(params.place_id) };
+            break;
+          case "edit_place":
+            if (!params.place_id || (params.name === undefined && params.notes === undefined)) {
+              throw invalid("edit_place requires place_id and name or notes");
+            }
+            result = {
+              place: service.editPlace(params.place_id, {
+                ...(params.name !== undefined ? { name: params.name } : {}),
+                ...(params.notes !== undefined ? { notes: params.notes } : {}),
+              }),
+            };
+            break;
+          case "delete_place":
+            if (!params.place_id) throw invalid("delete_place requires place_id");
+            service.deletePlace(params.place_id);
+            result = { deleted: true };
+            break;
+          case "reposition":
+            if (!params.place_id) throw invalid("reposition requires place_id");
+            result = service.reposition(params.place_id, {
+              ...(params.category_id !== undefined ? { categoryId: params.category_id } : {}),
+              ...(params.sentiment !== undefined ? { sentiment: params.sentiment } : {}),
+            });
+            break;
+          case "undo_addition":
+            if (!params.insertion_id) throw invalid("undo_addition requires insertion_id");
+            service.undoAddition(params.insertion_id);
+            result = { undone: true };
             break;
           case "resume":
             result = service.resume();
@@ -195,6 +251,28 @@ Open my private places-ranking menu now.
 function addButtonActions(result: unknown): unknown {
   if (!result || typeof result !== "object") return result;
   const value = result as Record<string, unknown>;
+  if (value.kind === "complete") {
+    const category = value.category;
+    const undoInsertionId = value.undoInsertionId;
+    const categoryId =
+      category && typeof category === "object"
+        ? (category as { id?: unknown }).id
+        : undefined;
+    const buttonActions: Array<{ label: string; prompt: string }> = [];
+    if (typeof categoryId === "string") {
+      buttonActions.push({
+        label: "View ranking",
+        prompt: `Show this place ranking by calling places with action "ranking" and category_id ${JSON.stringify(categoryId)}.`,
+      });
+    }
+    if (typeof undoInsertionId === "string") {
+      buttonActions.push({
+        label: "Undo addition",
+        prompt: `Ask me to confirm undoing the newly added place from insertion ${JSON.stringify(undoInsertionId)}. Only after confirmation call places with action "undo_addition" and that insertion_id.`,
+      });
+    }
+    return { ...value, ...(buttonActions.length > 0 ? { buttonActions } : {}) };
+  }
   if (value.kind !== "compare") return result;
   const insertionId = value.insertionId;
   const revision = value.revision;

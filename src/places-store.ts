@@ -15,7 +15,7 @@ import {
   type Sentiment,
 } from "./places-ranking.js";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 export interface PlaceCategory {
   id: string;
@@ -44,6 +44,7 @@ export interface ActiveInsertion {
   categoryId: string;
   sentiment: Sentiment;
   notes: string | null;
+  sourcePlaceId: string | null;
   state: PlaceInsertionState;
   revision: number;
   createdAt: number;
@@ -67,6 +68,7 @@ interface CreateInsertionInput {
   categoryId: string;
   sentiment: Sentiment;
   notes?: string | null;
+  sourcePlaceId?: string;
   state: PlaceInsertionState;
   now: number;
 }
@@ -115,7 +117,15 @@ export interface PlacesStore {
   readonly schemaVersion: number;
   listCategories(): PlaceCategory[];
   createCategory(id: string, name: string, now: number): PlaceCategory;
+  renameCategory(id: string, name: string, now: number): PlaceCategory;
+  deleteCategory(id: string): void;
   listPlaces(categoryId: string): StoredPlace[];
+  getPlace(id: string): StoredPlace | undefined;
+  updatePlace(
+    id: string,
+    changes: { name?: string; notes?: string | null },
+    now: number,
+  ): StoredPlace;
   insertPlace(input: InsertPlaceInput): StoredPlace;
   deletePlace(id: string): void;
   createInsertion(input: CreateInsertionInput): ActiveInsertion;
@@ -124,6 +134,7 @@ export interface PlacesStore {
   undoComparison(input: UndoComparisonInput): ActiveInsertion;
   listComparisons(insertionId: string): StoredComparison[];
   completeInsertion(input: CompleteInsertionInput): StoredPlace;
+  undoAddition(insertionId: string, now: number): void;
   cancelInsertion(insertionId: string, expectedRevision: number, now: number): void;
   exportPublishedData(): PublishedPlacesExport;
   backup(destinationPath: string): Promise<void>;
@@ -165,6 +176,8 @@ interface InsertionRow {
   updated_at: number;
   status: string;
   completion_action_id: string | null;
+  source_place_id: string | null;
+  undone_at: number | null;
 }
 
 interface ComparisonRow {
@@ -233,6 +246,7 @@ function insertionFromRow(row: InsertionRow): ActiveInsertion {
     categoryId: row.category_id,
     sentiment: row.sentiment,
     notes: row.notes,
+    sourcePlaceId: row.source_place_id,
     state,
     revision: row.revision,
     createdAt: row.created_at,
@@ -281,6 +295,8 @@ function migrate(db: DatabaseSync): number {
           category_id          TEXT NOT NULL REFERENCES category(id),
           sentiment            TEXT NOT NULL CHECK (sentiment IN ('liked', 'alright', 'disliked')),
           notes                TEXT,
+          source_place_id      TEXT,
+          undone_at            INTEGER,
           state_json           TEXT NOT NULL,
           revision             INTEGER NOT NULL,
           status               TEXT NOT NULL CHECK (status IN ('active', 'completed', 'cancelled')),
@@ -333,6 +349,20 @@ function migrate(db: DatabaseSync): number {
       throw error;
     }
   }
+  if (row.user_version === 1 || row.user_version === 2) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(`
+        ALTER TABLE insertion_session ADD COLUMN source_place_id TEXT;
+        ALTER TABLE insertion_session ADD COLUMN undone_at INTEGER;
+        PRAGMA user_version = 3;
+        COMMIT;
+      `);
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
   return SCHEMA_VERSION;
 }
 
@@ -363,6 +393,18 @@ export function openPlacesStore(dbPath: string): PlacesStore {
   const getPlace = (id: string): StoredPlace | undefined => {
     const row = db.prepare("SELECT * FROM place WHERE id = ?").get(id) as unknown as PlaceRow | undefined;
     return row ? placeFromRow(row) : undefined;
+  };
+  const insertionRanking = (
+    categoryId: string,
+    sourcePlaceId: string | null,
+  ): StoredPlace[] =>
+    listPlaces(categoryId).filter((place) => place.id !== sourcePlaceId);
+  const deletePlaceInternal = (id: string): void => {
+    const existing = getPlace(id);
+    if (!existing) return;
+    db.prepare("DELETE FROM place WHERE id = ?").run(id);
+    db.prepare("UPDATE place SET position = -position - 1 WHERE category_id = ? AND position > ?").run(existing.categoryId, existing.position);
+    db.prepare("UPDATE place SET position = -position - 2 WHERE category_id = ? AND position < 0").run(existing.categoryId);
   };
 
   const insertPlaceInternal = (input: InsertPlaceInput): StoredPlace => {
@@ -403,27 +445,65 @@ export function openPlacesStore(dbPath: string): PlacesStore {
         return categoryFromRow(row);
       });
     },
+    renameCategory(id, name, now) {
+      const parsed = requireName(name, "Category name");
+      return transaction(db, () => {
+        const result = db.prepare("UPDATE category SET name = ?, normalized_name = ?, updated_at = ? WHERE id = ?")
+          .run(parsed.name, parsed.normalized, now, id);
+        if (result.changes !== 1) throw new Error("Category not found");
+        const row = db.prepare("SELECT id, name, normalized_name, created_at, updated_at FROM category WHERE id = ?").get(id) as unknown as CategoryRow;
+        return categoryFromRow(row);
+      });
+    },
+    deleteCategory(id) {
+      transaction(db, () => {
+        const count = db.prepare("SELECT COUNT(*) AS value FROM place WHERE category_id = ?").get(id) as unknown as { value: number };
+        if (count.value > 0) throw new Error("Only an empty category can be deleted");
+        const result = db.prepare("DELETE FROM category WHERE id = ?").run(id);
+        if (result.changes !== 1) throw new Error("Category not found");
+      });
+    },
     listPlaces,
+    getPlace,
+    updatePlace(id, changes, now) {
+      return transaction(db, () => {
+        const existing = getPlace(id);
+        if (!existing) throw new Error("Place not found");
+        const parsed = changes.name === undefined
+          ? undefined
+          : requireName(changes.name, "Place name");
+        db.prepare("UPDATE place SET name = ?, normalized_name = ?, notes = ?, updated_at = ? WHERE id = ?")
+          .run(
+            parsed?.name ?? existing.name,
+            parsed?.normalized ?? existing.normalizedName,
+            changes.notes === undefined ? existing.notes : changes.notes,
+            now,
+            id,
+          );
+        const updated = getPlace(id);
+        if (!updated) throw new Error("Updated place could not be read back");
+        return updated;
+      });
+    },
     insertPlace(input) {
       return transaction(db, () => insertPlaceInternal(input));
     },
     deletePlace(id) {
       transaction(db, () => {
-        const existing = getPlace(id);
-        if (!existing) return;
-        db.prepare("DELETE FROM place WHERE id = ?").run(id);
-        db.prepare("UPDATE place SET position = -position - 1 WHERE category_id = ? AND position > ?").run(existing.categoryId, existing.position);
-        db.prepare("UPDATE place SET position = -position - 2 WHERE category_id = ? AND position < 0").run(existing.categoryId);
+        deletePlaceInternal(id);
       });
     },
     createInsertion(input) {
       const parsed = requireName(input.name, "Place name");
-      getPlaceInsertionStep(listPlaces(input.categoryId), input.state);
+      getPlaceInsertionStep(
+        insertionRanking(input.categoryId, input.sourcePlaceId ?? null),
+        input.state,
+      );
       return transaction(db, () => {
         db.prepare(`INSERT INTO insertion_session
-          (id, owner_key, candidate_id, name, normalized_name, category_id, sentiment, notes, state_json, revision, status, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'active', ?, ?)`)
-          .run(input.id, input.ownerKey, input.candidateId, parsed.name, parsed.normalized, input.categoryId, input.sentiment, input.notes ?? null, JSON.stringify(input.state), input.now, input.now);
+          (id, owner_key, candidate_id, name, normalized_name, category_id, sentiment, notes, source_place_id, state_json, revision, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'active', ?, ?)`)
+          .run(input.id, input.ownerKey, input.candidateId, parsed.name, parsed.normalized, input.categoryId, input.sentiment, input.notes ?? null, input.sourcePlaceId ?? null, JSON.stringify(input.state), input.now, input.now);
         const row = getInsertionRow(input.id);
         if (!row) throw new Error("Created insertion could not be read back");
         return insertionFromRow(row);
@@ -445,8 +525,8 @@ export function openPlacesStore(dbPath: string): PlacesStore {
         const row = getInsertionRow(input.insertionId);
         if (!row || row.status !== "active") throw new Error("Active insertion not found");
         if (row.revision !== input.expectedRevision) throw new Error("Stale insertion revision");
-        const ranking = listPlaces(row.category_id);
         const current = insertionFromRow(row);
+        const ranking = insertionRanking(row.category_id, current.sourcePlaceId);
         const expectedState = answerPlaceComparison(
           ranking,
           current.state,
@@ -509,14 +589,33 @@ export function openPlacesStore(dbPath: string): PlacesStore {
         if (row.status !== "active") throw new Error("Active insertion not found");
         if (row.revision !== input.expectedRevision) throw new Error("Stale insertion revision");
         const insertion = insertionFromRow(row);
-        const ranking = listPlaces(row.category_id);
+        const ranking = insertionRanking(row.category_id, insertion.sourcePlaceId);
         const result = applyPlaceInsertion(ranking, insertion.state, { id: row.candidate_id, sentiment: insertion.sentiment });
         const actualIndex = result.findIndex((place) => place.id === row.candidate_id);
         if (actualIndex !== input.index) throw new Error("Completion index does not match insertion state");
+        if (insertion.sourcePlaceId) deletePlaceInternal(insertion.sourcePlaceId);
         const place = insertPlaceInternal({ id: row.candidate_id, categoryId: row.category_id, name: row.name, sentiment: insertion.sentiment, notes: row.notes, index: actualIndex, now: input.now });
         db.prepare("UPDATE insertion_session SET status = 'completed', completion_action_id = ?, updated_at = ? WHERE id = ?")
           .run(input.actionId, input.now, input.insertionId);
         return place;
+      });
+    },
+    undoAddition(insertionId, now) {
+      transaction(db, () => {
+        const row = getInsertionRow(insertionId);
+        if (!row || row.status !== "completed" || row.source_place_id !== null) {
+          throw new Error("Completed addition not found");
+        }
+        if (row.undone_at !== null) return;
+        const place = getPlace(row.candidate_id);
+        if (!place) throw new Error("Added place no longer exists");
+        const latest = db.prepare("SELECT id FROM insertion_session WHERE category_id = ? AND status = 'completed' AND undone_at IS NULL ORDER BY updated_at DESC, id DESC LIMIT 1").get(row.category_id) as unknown as { id: string } | undefined;
+        if (latest?.id !== insertionId || place.updatedAt !== row.updated_at) {
+          throw new Error("The category changed after this addition; delete the place instead");
+        }
+        deletePlaceInternal(place.id);
+        db.prepare("UPDATE insertion_session SET undone_at = ?, updated_at = ? WHERE id = ?")
+          .run(now, now, insertionId);
       });
     },
     cancelInsertion(insertionId, expectedRevision, now) {
