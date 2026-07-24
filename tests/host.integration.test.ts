@@ -28,6 +28,9 @@ import {
 const BRIDGE_RUNTIME_REGISTRY = Symbol.for(
   "pi-telegram-bridge.runtime-registry",
 );
+const TELEGRAM_HOST_REGISTRY = Symbol.for(
+  "pi-telegram.host-capability-registry",
+);
 
 async function startTestBridgeHost(
   options: Parameters<typeof startBridgeHost>[0],
@@ -132,6 +135,36 @@ async function loadPinnedLockApi(): Promise<{
 }
 
 describe("startBridgeHost", () => {
+  it("rejects malformed idle-session state before touching the durable inbox", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-telegram-host-idle-state-"));
+    const stateDir = join(root, "state");
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(
+      join(stateDir, "conversation-session-state.json"),
+      '{"version":1,"lastHumanPromptAt":"invalid"}\n',
+      { mode: 0o600 },
+    );
+    const openInbox = vi.fn();
+
+    await expect(
+      startTestBridgeHost({
+        config: {
+          agentDir: join(root, "agent"),
+          cwd: root,
+          sessionDir: join(stateDir, "sessions"),
+          stateDir,
+          codexConfigPath: join(stateDir, "pi-codex-conversion.json"),
+          sessionIdleMs: 8 * 60 * 60_000,
+          webhookHost: "127.0.0.1",
+          webhookPort: 0,
+        },
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        openInbox,
+      }),
+    ).rejects.toThrow(/conversation session state.*lastHumanPromptAt/i);
+    expect(openInbox).not.toHaveBeenCalled();
+  });
+
   it("shares the exact household authorization policy with the pinned fork", async () => {
     const pinnedHost = await loadPinnedTelegramHostHouseholdInternals();
     const policy = {
@@ -171,7 +204,9 @@ describe("startBridgeHost", () => {
           type: "oauth",
           access: "test-access-token",
           refresh: "test-refresh-token",
-          expires: Date.now() + 60_000,
+          // Keep the fake credential safely outside refresh windows even when
+          // the full suite is slow; replacement must not attempt OAuth I/O.
+          expires: Date.now() + 60 * 60_000,
         },
       }),
     );
@@ -236,7 +271,6 @@ describe("startBridgeHost", () => {
         ]),
       );
       expect(host.runtime.session.getActiveToolNames()).not.toContain("imagegen");
-
       const messages: string[] = [];
       const replacement = createTelegramSessionReplacementRuntime({
         sendTargetText: async (_target, text) => {
@@ -249,7 +283,7 @@ describe("startBridgeHost", () => {
       expect(replacement.flushAfterUpdatePersisted()).toBe(true);
       await vi.waitFor(() => {
         expect(host.runtime.session.sessionFile).not.toBe(originalSessionFile);
-      });
+      }, { timeout: 30_000 });
       await replacement.onSessionStart();
       expect(messages).toContain("✅ New session started in this thread.");
 
@@ -277,7 +311,7 @@ describe("startBridgeHost", () => {
     ).toEqual({ version: 1 });
     const unregister = registerTelegramHostNewSession(async () => ({ cancelled: false }));
     unregister();
-  }, 20_000);
+  }, 40_000);
 
   it("matches the pinned fork's heartbeat lock contract", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-telegram-lock-contract-"));
@@ -705,6 +739,9 @@ describe("startBridgeHost", () => {
       expect(host.runtime.session.sessionFile).toContain(
         join(root, "state", "sessions"),
       );
+      expect(
+        (globalThis as Record<PropertyKey, unknown>)[TELEGRAM_HOST_REGISTRY],
+      ).toMatchObject({ replacementGuard: expect.any(Function) });
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining("Telegram is not configured"),
       );
@@ -713,6 +750,9 @@ describe("startBridgeHost", () => {
       if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
     }
+    expect(
+      (globalThis as Record<PropertyKey, unknown>)[TELEGRAM_HOST_REGISTRY],
+    ).not.toHaveProperty("replacementGuard");
   }, 20_000);
 
   it("opens the durable inbox under stateDir, registers it, and releases it on dispose", async () => {

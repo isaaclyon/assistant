@@ -65,6 +65,23 @@ export interface TelegramHostNewSessionResult {
 
 export type TelegramHostNewSession = () => Promise<TelegramHostNewSessionResult>;
 
+export interface TelegramHostPromptPreparationResult {
+  sessionReplaced: boolean;
+}
+
+export type TelegramHostPromptPreparation = (input: {
+  trigger: "telegram";
+}) => Promise<TelegramHostPromptPreparationResult>;
+
+export type TelegramSessionReplacementTrigger =
+  | "manual"
+  | "telegram"
+  | `job:${string}`;
+
+type TelegramSessionReplacementGuard = (input: {
+  trigger: TelegramSessionReplacementTrigger;
+}) => string | undefined;
+
 export interface TelegramHostHouseholdGroup {
   kind: "household-group";
   chatId: number;
@@ -80,6 +97,10 @@ interface HostRegistry extends Record<string, unknown> {
   token?: object;
   householdGroup?: TelegramHostHouseholdGroup;
   householdToken?: object;
+  promptPreparation?: TelegramHostPromptPreparation;
+  promptPreparationToken?: object;
+  replacementGuard?: TelegramSessionReplacementGuard;
+  replacementGuardToken?: object;
 }
 
 const HOST_REGISTRY_KEY = Symbol.for("pi-telegram.host-capability-registry");
@@ -91,6 +112,10 @@ function isHostRegistry(value: unknown): value is HostRegistry {
   const token = candidate.token;
   const householdGroup = candidate.householdGroup;
   const householdToken = candidate.householdToken;
+  const promptPreparation = candidate.promptPreparation;
+  const promptPreparationToken = candidate.promptPreparationToken;
+  const replacementGuard = candidate.replacementGuard;
+  const replacementGuardToken = candidate.replacementGuardToken;
   return (
     candidate.version === 1 &&
     (provider === undefined || typeof provider === "function") &&
@@ -100,14 +125,35 @@ function isHostRegistry(value: unknown): value is HostRegistry {
       (typeof householdGroup === "object" && householdGroup !== null)) &&
     (householdToken === undefined ||
       (typeof householdToken === "object" && householdToken !== null)) &&
-    (householdGroup === undefined) === (householdToken === undefined)
+    (householdGroup === undefined) === (householdToken === undefined) &&
+    (promptPreparation === undefined || typeof promptPreparation === "function") &&
+    (promptPreparationToken === undefined ||
+      (typeof promptPreparationToken === "object" && promptPreparationToken !== null)) &&
+    (promptPreparation === undefined) === (promptPreparationToken === undefined)
+    && (replacementGuard === undefined || typeof replacementGuard === "function")
+    && (replacementGuardToken === undefined ||
+      (typeof replacementGuardToken === "object" && replacementGuardToken !== null))
+    && (replacementGuard === undefined) === (replacementGuardToken === undefined)
   );
 }
 
+export function getTelegramSessionReplacementBlockingReason(
+  trigger: TelegramSessionReplacementTrigger,
+): string | undefined {
+  const registry = (globalThis as Record<PropertyKey, unknown>)[HOST_REGISTRY_KEY];
+  if (registry === undefined) return undefined;
+  if (!isHostRegistry(registry)) {
+    throw new Error(
+      "Telegram host capability registry is occupied by an incompatible value.",
+    );
+  }
+  return registry.replacementGuard?.({ trigger });
+}
+
 function bindHostCapability(
-  field: "provider" | "householdGroup",
-  tokenField: "token" | "householdToken",
-  value: TelegramHostNewSession | TelegramHostHouseholdGroup,
+  field: "provider" | "householdGroup" | "promptPreparation",
+  tokenField: "token" | "householdToken" | "promptPreparationToken",
+  value: TelegramHostNewSession | TelegramHostHouseholdGroup | TelegramHostPromptPreparation,
   registeredError: string,
 ): () => void {
   const store = globalThis as Record<PropertyKey, unknown>;
@@ -153,6 +199,17 @@ export function bindTelegramHostHouseholdGroup(
     "householdToken",
     policy,
     "Telegram host household group capability is already registered",
+  );
+}
+
+export function bindTelegramHostPromptPreparation(
+  prepare: TelegramHostPromptPreparation,
+): () => void {
+  return bindHostCapability(
+    "promptPreparation",
+    "promptPreparationToken",
+    prepare,
+    "Telegram host prompt preparation capability is already registered",
   );
 }
 

@@ -66,6 +66,7 @@ capability profiles.
    ```text
    PI_TELEGRAM_CREDENTIAL_SCOPE=isaac-personal
    PI_TELEGRAM_BRIDGE_WEBHOOK_PORT=0
+   PI_TELEGRAM_SESSION_IDLE_HOURS=8
    PI_CREDENTIAL_ISAAC_EXAMPLE=replace-through-a-secret-manager
    PI_CREDENTIAL_HOUSEHOLD_EXAMPLE=replace-through-a-secret-manager
    ```
@@ -74,8 +75,8 @@ capability profiles.
    `PI_CREDENTIAL_HOUSEHOLD_*`; shared files only
    `PI_CREDENTIAL_HOUSEHOLD_*`; builder files only
    `PI_CREDENTIAL_ENGINEERING_*`. Optional operational keys are the webhook
-   host/port and memory path/auto-commit settings. Validation reports key names,
-   never values.
+   host/port, memory path/auto-commit settings, and human-idle session timeout.
+   Validation reports key names, never values.
 
    Port `0` requests an ephemeral listener and may be reused. Any fixed
    host/port pair must be unique across the fleet; preflight rejects collisions.
@@ -88,6 +89,30 @@ Credential rotation is file replacement followed by fleet deployment or a
 targeted service restart. Write a new mode-`0600` file atomically, run preflight,
 restart only the affected instance, and verify its exact runtime metadata. Keep
 the prior value available in the secret manager until the smoke test succeeds.
+
+## Inactivity-based session rotation
+
+Rotation is disabled by default. To enable an eight-hour human-idle boundary for
+one instance, atomically add `PI_TELEGRAM_SESSION_IDLE_HOURS=8` to that
+instance's mode-`0600` environment file, restart only that service, and verify
+the journal reports rotation enabled with the bounded duration. Values may be
+positive finite hours up to 8,760; malformed, negative, non-finite, and larger
+values fail startup.
+
+The timeout is evaluated only when a Telegram prompt or scheduled job is ready.
+No timer creates an empty session. Jobs can trigger one rotation but never move
+the human-idle clock; a later human follow-up stays in that fresh session and
+starts the next interval. Rotation is silent and copies no summary. Pi's normal
+token compaction remains independent.
+
+To disable or roll back, remove the setting or set it to `0`, atomically replace
+the environment file, restart that instance, and verify the journal reports
+rotation disabled. Do not delete `conversation-session-state.json`; it is inert
+while disabled and preserves a safe epoch if the setting is re-enabled. If
+startup reports malformed policy state, leave the durable inbox untouched,
+inspect and restore the state file from a trusted backup (or move it aside only
+after accepting a new baseline), then restart. Historical Pi session files need
+no migration or cleanup.
 
 ## State migration
 

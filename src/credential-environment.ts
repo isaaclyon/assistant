@@ -12,6 +12,7 @@ const OPERATIONAL_KEYS = new Set([
   "PI_TELEGRAM_BRIDGE_WEBHOOK_PORT",
   "PI_TELEGRAM_MEMORY_DIR",
   "PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT",
+  "PI_TELEGRAM_SESSION_IDLE_HOURS",
 ]);
 
 const CREDENTIAL_PREFIXES: Record<CredentialScope, readonly string[]> = {
@@ -26,6 +27,7 @@ export interface CredentialEnvironmentSummary {
   keys: string[];
   webhookHost?: string;
   webhookPort?: number;
+  sessionIdleHours?: number;
 }
 
 function isCredentialScope(value: string): value is CredentialScope {
@@ -52,6 +54,7 @@ export async function validateCredentialEnvironmentFile(
   let declaredScope: string | undefined;
   let webhookHost: string | undefined;
   let webhookPort: number | undefined;
+  let sessionIdleHours: number | undefined;
   const seenKeys = new Set<string>();
   for (const [index, sourceLine] of (await readFile(path, "utf8")).split(/\r?\n/).entries()) {
     const line = sourceLine.trim();
@@ -85,6 +88,15 @@ export async function validateCredentialEnvironmentFile(
       }
       webhookPort = parsed;
     }
+    if (key === "PI_TELEGRAM_SESSION_IDLE_HOURS") {
+      const parsed = Number(match[2]!.trim());
+      if (!Number.isFinite(parsed) || parsed < 0 || parsed > 8_760) {
+        throw new Error(
+          `Credential environment line ${index + 1} has an invalid session idle timeout; expected 0 through 8760 hours`,
+        );
+      }
+      sessionIdleHours = parsed;
+    }
     if (OPERATIONAL_KEYS.has(key)) continue;
     if (
       !CREDENTIAL_PREFIXES[expectedScope].some((prefix) => key.startsWith(prefix))
@@ -104,5 +116,6 @@ export async function validateCredentialEnvironmentFile(
     keys,
     ...(webhookHost ? { webhookHost } : {}),
     ...(webhookPort === undefined ? {} : { webhookPort }),
+    ...(sessionIdleHours === undefined ? {} : { sessionIdleHours }),
   };
 }

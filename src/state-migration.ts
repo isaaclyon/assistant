@@ -17,6 +17,7 @@ const LEGACY_STATE_ENTRIES = new Set([
   "inbox.db-shm",
   "inbox.db-wal",
   "jobs-state.json",
+  "conversation-session-state.json",
   "jobs.json",
   "pi-codex-conversion.json",
   "restart-pending.json",

@@ -5,6 +5,8 @@ import {
   bindBridgeRuntimeMarker,
   bindTelegramHostHouseholdGroup,
   bindTelegramHostNewSession,
+  bindTelegramHostPromptPreparation,
+  getTelegramSessionReplacementBlockingReason,
 } from "../src/telegram-capabilities.js";
 
 const RESTART_REGISTRY = Symbol.for("pi-telegram-bridge.restart-registry");
@@ -39,6 +41,23 @@ describe("bindBridgeRestart", () => {
     // Rebinding after unbind must succeed, then clean up for other tests.
     bindBridgeRestart(vi.fn())();
   });
+
+  it("reads the fork-owned replacement guard without exposing runtime state", () => {
+    const unbind = bindTelegramHostNewSession(async () => ({ cancelled: false }));
+    const registry = (globalThis as Record<PropertyKey, unknown>)[
+      HOST_REGISTRY
+    ] as Record<string, unknown>;
+    registry.replacementGuard = ({ trigger }: { trigger: string }) =>
+      trigger.startsWith("job:") ? "Telegram work is queued." : undefined;
+    registry.replacementGuardToken = {};
+    expect(getTelegramSessionReplacementBlockingReason("job:cron")).toBe(
+      "Telegram work is queued.",
+    );
+    expect(getTelegramSessionReplacementBlockingReason("telegram")).toBeUndefined();
+    delete registry.replacementGuard;
+    delete registry.replacementGuardToken;
+    unbind();
+  });
 });
 
 describe("bindBridgeRuntimeMarker", () => {
@@ -53,7 +72,7 @@ describe("bindBridgeRuntimeMarker", () => {
 });
 
 describe("Telegram host capability bindings", () => {
-  it("binds session replacement and household policy independently", () => {
+  it("binds session replacement, prompt preparation, and household policy independently", () => {
     const unbindSession = bindTelegramHostNewSession(async () => ({
       cancelled: false,
     }));
@@ -65,6 +84,9 @@ describe("Telegram host capability bindings", () => {
         { userId: 202, label: "Emma" },
       ],
     });
+    const unbindPreparation = bindTelegramHostPromptPreparation(async () => ({
+      sessionReplaced: false,
+    }));
     const registry = (globalThis as Record<PropertyKey, unknown>)[
       HOST_REGISTRY
     ];
@@ -81,6 +103,8 @@ describe("Telegram host capability bindings", () => {
         ],
       },
       householdToken: expect.any(Object),
+      promptPreparation: expect.any(Function),
+      promptPreparationToken: expect.any(Object),
     });
 
     unbindHousehold();
@@ -90,6 +114,8 @@ describe("Telegram host capability bindings", () => {
       token: expect.any(Object),
     });
     expect(registry).not.toHaveProperty("householdGroup");
+    unbindPreparation();
+    expect(registry).not.toHaveProperty("promptPreparation");
     unbindSession();
     expect(registry).toEqual({ version: 1 });
   });

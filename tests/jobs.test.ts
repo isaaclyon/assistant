@@ -268,6 +268,7 @@ describe("startJobScheduler", () => {
       expect.stringContaining("Call the dentist"),
       {
         jobId: "emma-reminder",
+        jobType: "at",
         target: "emma",
         eventId: `at:emma-reminder:${Date.parse("2026-07-18T15:00:00Z")}`,
       },

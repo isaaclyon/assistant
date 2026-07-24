@@ -16,6 +16,10 @@ import { join, sep } from "node:path";
 
 import { loadCapabilityProfile } from "./capabilities.js";
 import {
+  ConversationSessionPolicy,
+  type ConversationSessionTrigger,
+} from "./conversation-session-policy.js";
+import {
   type BridgeConfig,
   type BridgeInstanceConfig,
   type TelegramLockView,
@@ -38,12 +42,15 @@ import {
 import {
   type InboundInboxCapability,
   type TelegramHostHouseholdGroup,
+  type TelegramSessionReplacementTrigger,
   bindBridgeRestart,
   bindBridgeRuntimeMarker,
   bindBridgeSubagents,
   bindTelegramHostHouseholdGroup,
   bindTelegramHostNewSession,
+  bindTelegramHostPromptPreparation,
   bindTelegramInboundInbox,
+  getTelegramSessionReplacementBlockingReason,
 } from "./telegram-capabilities.js";
 
 /**
@@ -162,6 +169,22 @@ export async function startBridgeHost({
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   await mkdir(config.sessionDir, { recursive: true, mode: 0o700 });
   await ensureCodexConfig(config.codexConfigPath);
+  const instanceLabel = "instanceId" in config ? config.instanceId : "singleton";
+  const sessionIdleMs = config.sessionIdleMs ?? 0;
+  const conversationSessionPolicy = sessionIdleMs > 0
+    ? await ConversationSessionPolicy.open({
+        path: join(config.stateDir, "conversation-session-state.json"),
+        timeoutMs: sessionIdleMs,
+        nowMs,
+        instanceId: instanceLabel,
+        logger,
+      })
+    : undefined;
+  logger.info(
+    conversationSessionPolicy
+      ? `Idle session rotation enabled for ${instanceLabel} (${sessionIdleMs / 3_600_000} hour(s)).`
+      : `Idle session rotation disabled for ${instanceLabel}.`,
+  );
 
   const capabilityProfile =
     "capabilityProfile" in config ? config.capabilityProfile : undefined;
@@ -403,24 +426,65 @@ export async function startBridgeHost({
   }
 
   let sessionReplacementInFlight = false;
+  const replaceSession = async (
+    trigger: TelegramSessionReplacementTrigger,
+  ): Promise<{
+    cancelled: boolean;
+    sessionId: string;
+  }> => {
+    const blockingReason = getTelegramSessionReplacementBlockingReason(trigger);
+    if (blockingReason) throw new Error(blockingReason);
+    if (sessionReplacementInFlight) {
+      throw new Error("A Pi session replacement is already in progress.");
+    }
+    if (!runtime.session.isIdle) {
+      throw new Error("Pi became busy before session replacement could start.");
+    }
+    sessionReplacementInFlight = true;
+    try {
+      const result = await runtime.newSession();
+      return { ...result, sessionId: runtime.session.sessionId };
+    } finally {
+      sessionReplacementInFlight = false;
+    }
+  };
   let unregisterTelegramHost: () => void;
   try {
     unregisterTelegramHost = bindTelegramHostNewSession(async () => {
-      if (sessionReplacementInFlight) {
-        throw new Error("A Pi session replacement is already in progress.");
+      if (conversationSessionPolicy) {
+        const result = await conversationSessionPolicy.manualNew(
+          runtime.session.sessionId,
+          () => replaceSession("manual"),
+        );
+        return { cancelled: result.cancelled };
       }
-      if (!runtime.session.isIdle) {
-        throw new Error("Pi became busy before session replacement could start.");
-      }
-      sessionReplacementInFlight = true;
-      try {
-        return await runtime.newSession();
-      } finally {
-        sessionReplacementInFlight = false;
-      }
+      const result = await replaceSession("manual");
+      return { cancelled: result.cancelled };
     });
   } catch (error) {
     await runtime.dispose();
+    unbindRestart();
+    unbindRuntimeMarker();
+    unbindHouseholdGroup();
+    unregisterInbox();
+    inbox.close();
+    throw error;
+  }
+  let unregisterPromptPreparation: () => void = () => {};
+  try {
+    if (conversationSessionPolicy) {
+      unregisterPromptPreparation = bindTelegramHostPromptPreparation(
+        async () =>
+          conversationSessionPolicy.prepare(
+            "telegram",
+            runtime.session.sessionId,
+            () => replaceSession("telegram"),
+          ),
+      );
+    }
+  } catch (error) {
+    await runtime.dispose();
+    unregisterTelegramHost();
     unbindRestart();
     unbindRuntimeMarker();
     unbindHouseholdGroup();
@@ -471,6 +535,7 @@ export async function startBridgeHost({
         await runtime.dispose();
       } finally {
         unbindSubagents?.();
+        unregisterPromptPreparation();
         unregisterTelegramHost();
         unbindRestart();
         unbindRuntimeMarker();
@@ -625,10 +690,20 @@ export async function startBridgeHost({
     // Scheduled jobs and webhook triggers inject prompts through the same RPC
     // seam as /telegram-connect above; the fork's proactive push delivers the
     // final reply to the paired chat because these turns have no Telegram turn.
-    const injectJobPrompt = async (prompt: string): Promise<void> => {
+    const injectJobPrompt = async (
+      prompt: string,
+      trigger: ConversationSessionTrigger = "job:scheduled",
+    ): Promise<void> => {
       for (let attempt = 1; ; attempt += 1) {
         await runtime.session.waitForIdle();
         try {
+          if (conversationSessionPolicy) {
+            await conversationSessionPolicy.prepare(
+              trigger,
+              runtime.session.sessionId,
+              () => replaceSession(trigger),
+            );
+          }
           await runtime.session.prompt(prompt, { source: "rpc" });
           return;
         } catch (error) {
@@ -644,7 +719,8 @@ export async function startBridgeHost({
       const drain = drainJobHandoffs({
         stateDir: config.stateDir,
         instanceId: config.instanceId,
-        inject: injectJobPrompt,
+        inject: (prompt, jobType) =>
+          injectJobPrompt(prompt, `job:${jobType ?? "handoff"}`),
       }).then((result) => {
         if (result.uncertain > 0) {
           logger.warn(
@@ -730,10 +806,18 @@ export async function startBridgeHost({
     }
     const dispatchJobPrompt = async (
       prompt: string,
-      dispatch?: { jobId: string; target: string; eventId: string },
+      dispatch?: {
+        jobId: string;
+        jobType: "cron" | "at" | "heartbeat" | "webhook";
+        target?: string;
+        eventId: string;
+      },
     ): Promise<void> => {
-      if (!("instanceId" in config) || dispatch === undefined) {
-        await injectJobPrompt(prompt);
+      if (!("instanceId" in config) || dispatch?.target === undefined) {
+        await injectJobPrompt(
+          prompt,
+          `job:${dispatch?.jobType ?? "scheduled"}`,
+        );
         return;
       }
       await enqueueJobHandoff({
@@ -741,6 +825,7 @@ export async function startBridgeHost({
         coordinatorStateDir: config.stateDir,
         eventId: dispatch.eventId,
         jobId: dispatch.jobId,
+        jobType: dispatch.jobType,
         target: dispatch.target,
         prompt,
       });
