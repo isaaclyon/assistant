@@ -96,6 +96,12 @@ user may cancel and resume later if they cannot choose.
 - **Resume ranking**, only when an unfinished insertion exists
 - **Cancel**, only when an interaction is active
 
+The command and deterministic buttons use pi-telegram's registered-section
+callbacks directly. Menu navigation, category/sentiment choices, comparisons,
+Back, browsing, and pagination do not start model turns. Free-text collection
+for names, notes, and new categories still enters the agent so natural-language
+requests and the button flow share the same typed places operations.
+
 Only one unfinished place insertion may exist for an interaction owner. Asking
 to add another place first offers Resume or Cancel existing ranking; it never
 silently replaces the unfinished work.

@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openPlacesStore } from "../src/places-store.js";
+import { resolveTelegramExtensionPath } from "../src/package-paths.js";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -14,7 +15,27 @@ interface ToolDefinition {
   execute: (
     id: string,
     params: Record<string, unknown>,
-  ) => Promise<{ content: Array<{ type: string; text: string }>; details: unknown }>;
+  ) => Promise<{ content: Array<{ type: string; text: string }>; details: unknown; terminate?: boolean }>;
+}
+
+interface SectionContext {
+  action: string;
+  payload: string;
+  callbackData: (action: string, payload?: string) => string;
+  answerCallback: (text?: string) => Promise<void>;
+  edit: (view: SectionView) => Promise<void>;
+  enqueuePrompt: (prompt: string) => Promise<void>;
+}
+
+interface SectionView {
+  text: string;
+  replyMarkup?: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> };
+}
+
+interface SectionRegistration {
+  id: string;
+  render: (ctx: SectionContext) => SectionView | Promise<SectionView>;
+  handleCallback?: (ctx: SectionContext) => Promise<"handled" | "pass"> | "handled" | "pass";
 }
 
 describe("places extension", () => {
@@ -32,6 +53,15 @@ describe("places extension", () => {
   });
 
   it("registers a lifecycle-owned tool with actionable results", async () => {
+    const sectionsPath = join(dirname(resolveTelegramExtensionPath()), "lib", "sections.ts");
+    const sections = (await import(pathToFileURL(sectionsPath).href)) as {
+      createAndBindTelegramSectionRegistry: () => {
+        clear(): void;
+        getSections(): Array<{ id: string; registration: SectionRegistration }>;
+      };
+      bindTelegramSectionPresenter: (presenter: (sectionId: string) => Promise<void>) => () => void;
+    };
+    const sectionRegistry = sections.createAndBindTelegramSectionRegistry();
     const stateDir = await mkdtemp(join(tmpdir(), "places-extension-"));
     process.env.PI_TELEGRAM_BRIDGE_STATE_DIR = stateDir;
     process.env.PI_TELEGRAM_PRINCIPAL = "isaac";
@@ -54,6 +84,23 @@ describe("places extension", () => {
     expect(tool?.name).toBe("places");
     expect(tool?.promptGuidelines?.join(" ")).toContain("telegram_button");
     handlers.get("session_start")?.();
+    const section = sectionRegistry.getSections().find((entry) => entry.id === "assistant/places")?.registration;
+    if (!section) throw new Error("missing places section");
+    let presentedView: SectionView | undefined;
+    const callbackData = (action: string, payload?: string) => `section:0:${action}${payload ? `:${payload}` : ""}`;
+    const baseContext: SectionContext = {
+      action: "",
+      payload: "",
+      callbackData,
+      answerCallback: async () => {},
+      edit: async (view) => {
+        presentedView = view;
+      },
+      enqueuePrompt: async () => {},
+    };
+    const unbindPresenter = sections.bindTelegramSectionPresenter(async () => {
+      presentedView = await section.render(baseContext);
+    });
     const menu = await tool?.execute("call-1", { action: "menu" });
     expect(menu?.details).toMatchObject({
       ok: true,
@@ -72,6 +119,16 @@ describe("places extension", () => {
       }
     ).result?.categories?.[0]?.id;
     if (!categoryId) throw new Error("missing category");
+    const directCategories = await tool?.execute("call-direct-categories", {
+      action: "categories",
+      name: "Direct Place",
+    });
+    expect(directCategories?.terminate).toBe(true);
+    expect(presentedView?.text).toContain("Choose a category");
+    await section.handleCallback?.({ ...baseContext, action: "category", payload: categoryId });
+    expect(presentedView?.text).toContain("overall impression");
+    await section.handleCallback?.({ ...baseContext, action: "sentiment", payload: "disliked" });
+    expect(presentedView?.text).toContain("Ranked Direct Place");
     const first = await tool?.execute("call-first", {
       action: "start",
       name: "Existing",
@@ -107,6 +164,10 @@ describe("places extension", () => {
         ],
       },
     });
+    expect(comparison?.terminate).toBe(true);
+    expect(presentedView?.text).toContain("Which is better?");
+    expect(presentedView?.replyMarkup?.inline_keyboard[0]?.[0]?.callback_data)
+      .toMatch(/^section:0:direct:/u);
     expect((comparison?.details as { result?: { buttonActions?: Array<{ label: string }> } }).result?.buttonActions)
       .not.toEqual(expect.arrayContaining([expect.objectContaining({ label: "Back" })]));
     const comparisonValue = (comparison?.details as {
@@ -200,5 +261,7 @@ describe("places extension", () => {
     const singleton = await tool?.execute("call-5", { action: "menu" });
     expect(singleton?.details).toMatchObject({ ok: true });
     await rm(stateDir, { recursive: true, force: true });
+    unbindPresenter();
+    sectionRegistry.clear();
   });
 });

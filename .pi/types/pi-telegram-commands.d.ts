@@ -9,6 +9,7 @@ export interface TelegramExtensionCommandContext {
   name: string;
   args: string;
   reply: (text: string) => Promise<void>;
+  openSection: (sectionId: string) => Promise<void>;
   enqueuePrompt: (prompt: string) => Promise<void>;
 }
 

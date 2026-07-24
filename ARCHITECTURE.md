@@ -46,6 +46,11 @@ immutable release and executes them directly with Node, while atomically retaini
 only the latest observation and temporal markers. See
 [ADR-0019](docs/adr/0019-stateful-heartbeat-observations.md).
 
+The places extension presents its deterministic Telegram UI through a
+pi-telegram registered section. Slash commands and active-turn tool handoffs
+can open that section directly, so menu navigation and ranking callbacks stay
+outside the model loop while free-text interpretation remains agent-owned.
+
 Background read-only delegation runs isolated Pi child processes with discovery
 and built-in tools disabled. A child-only extension exposes canonicalized
 repository inspection and public-web retrieval; the host persists bounded batch
