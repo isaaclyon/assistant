@@ -143,6 +143,12 @@ without a repeated-rotation loop after a post-replacement state-write failure.
 
 Pushes to `main` run checks on a GitHub-hosted runner. After they pass, the `assistant-production` self-hosted runner builds one immutable release for the exact merged SHA. If the external instance manifest exists, it preflights every instance and the job graph, installs all units, stops the compatibility singleton, and activates instances sequentially. Readiness requires exact instance ID, full release SHA, and stable systemd PID from private runtime metadata. Any failure restores every changed unit. Mutable state/workspaces and separate builder worktrees are preserved. Without a manifest, the compatibility singleton deployment remains available. See ADR-0005 and [the fleet runbook](docs/household-fleet.md).
 
+After every fleet instance is ready and the canonical checkout advances, the
+deployment runner sends one fixed completion message through the jobs
+coordinator's Telegram profile. Notification failure fails the deployment job
+without rolling back an already healthy fleet, so missing operational feedback
+is visible rather than silently ignored.
+
 Before activating a release with jobs schema version 2, deployment validates the
 external jobs file and referenced compiled checkers from the immutable release.
 The host has bounded read-only compatibility for version-1 cron, at, and webhook

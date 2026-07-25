@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 EXPECTED_SHA="${1:-}"
 DEPLOY_PATH="${DEPLOY_PATH:-$HOME/projects/assistant}"
+AGENT_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 SERVICE="pi-telegram-bridge.service"
 UNIT_PATH="$HOME/.config/systemd/user/$SERVICE"
 RELEASE_ROOT="$HOME/.local/share/pi-telegram-bridge/releases"
@@ -161,6 +162,8 @@ if [[ -f "$FLEET_MANIFEST" ]]; then
     .pi/skills \
     .pi/settings.json \
     .agents/skills
+  "$NODE_BINARY" "$RELEASE_PATH/dist/src/deployment-notify.js" \
+    "$FLEET_MANIFEST" "$AGENT_DIR" "$EXPECTED_SHA"
   echo "==> Fleet deployment complete at $(git rev-parse --short HEAD)"
   find "$RELEASE_ROOT" -mindepth 1 -maxdepth 1 -type d \
     ! -name "$EXPECTED_SHA" -printf '%T@ %p\n' \
