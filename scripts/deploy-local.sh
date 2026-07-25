@@ -142,8 +142,12 @@ fi
 # The canonical checkout remains the agent cwd and source of repo-local
 # capabilities. Build artifacts and dependencies live in the immutable release.
 if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
-  echo "Canonical checkout has tracked edits; refusing to discard live agent work." >&2
-  exit 1
+  if [[ "${PI_TELEGRAM_BRIDGE_DISCARD_TRACKED_EDITS:-0}" != "1" ]]; then
+    echo "Canonical checkout has tracked edits; refusing to discard live agent work." >&2
+    exit 1
+  fi
+  echo "==> Discarding explicitly authorized tracked edits in the canonical checkout"
+  git reset --hard "$CURRENT_SHA"
 fi
 
 FLEET_MANIFEST="${PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST:-$HOME/.config/pi-telegram-bridge/instances.json}"

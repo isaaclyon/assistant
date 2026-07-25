@@ -41,4 +41,5 @@ jobs:
       - name: Deploy and verify the user service
         env:
           DEPLOY_PATH: /home/isaaclyon/projects/assistant
+          PI_TELEGRAM_BRIDGE_DISCARD_TRACKED_EDITS: "1"
         run: bash scripts/deploy-local.sh "$GITHUB_SHA"
