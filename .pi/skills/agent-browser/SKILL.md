@@ -32,6 +32,45 @@ reports whether a session is running. Profile data persists outside the release
 under the user's data directory; never print, inspect, or commit its cookies or
 credentials.
 
+## 1Password login credentials
+
+The stock-Chrome helper automatically registers the tracked `onepassword`
+credential provider. For an approved Login item in the instance's dedicated
+agent vault, resolve the username and password just in time through
+`agent-browser auth login`:
+
+```bash
+node "$HELPER" run default -- auth login opentable \
+  --credential-provider onepassword \
+  --item "OpenTable" \
+  --url https://www.opentable.com/
+```
+
+The item reference is its exact 1Password title or ID. The provider accepts only
+HTTPS and requires the requested hostname to match the Login item's saved
+website hostname (or a subdomain). It returns only username and password to
+agent-browser; it does not return TOTP seeds or other item fields. Never call
+`op item get` directly, print plugin responses, or place a service-account token
+in a command, environment variable, Telegram message, or repository file.
+
+Agent-browser does not currently provide a protected TOTP-fill protocol. If a
+site requests TOTP or another second factor, stop and use the secure interactive
+browser handoff rather than exposing the code to the model or process arguments.
+
+Initial token installation is an operator action from a trusted local terminal,
+not Telegram. It writes private mode-`0600` files outside releases:
+
+```bash
+PROVIDER="<release-or-checkout>/.pi/skills/agent-browser/scripts/onepassword-credentials.mjs"
+node "$PROVIDER" setup \
+  --scope isaac-personal \
+  --vault "Personal Agent Credentials"
+```
+
+The prompt disables terminal echo. Do not use `--token-stdin` outside automated
+tests. Installation or rotation does not require a bridge restart because the
+provider reads the private files only when a credential is requested.
+
 Fall back to direct `agent-browser` commands only when the helper is unavailable
 or managed launch is specifically required. CDP attachment cannot provide the
 fresh-browser containment required by `--allowed-domains`, so stay on the user's

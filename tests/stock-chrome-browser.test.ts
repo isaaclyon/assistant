@@ -50,7 +50,10 @@ exec "$@"
     );
 
     const agentBrowser = join(bin, "agent-browser");
-    await writeFile(agentBrowser, "#!/bin/sh\nprintf '%s\\n' \"$*\"\n");
+    await writeFile(
+      agentBrowser,
+      "#!/usr/bin/env node\nconsole.log(JSON.stringify({ args: process.argv.slice(2), plugins: JSON.parse(process.env.AGENT_BROWSER_PLUGINS) }));\n",
+    );
     await Promise.all([chrome, xvfbRun, agentBrowser].map((path) => chmod(path, 0o755)));
 
     const env = {
@@ -81,7 +84,23 @@ exec "$@"
         [helper, "run", "default", "--", "snapshot", "-i"],
         { env },
       );
-      expect(run.stdout.trim()).toBe(`--cdp ${state.port} snapshot -i`);
+      const invocation = JSON.parse(run.stdout);
+      expect(invocation.args).toEqual([
+        "--cdp",
+        String(state.port),
+        "snapshot",
+        "-i",
+      ]);
+      expect(invocation.plugins).toEqual([
+        {
+          name: "onepassword",
+          command: join(
+            process.cwd(),
+            ".pi/skills/agent-browser/scripts/onepassword-credentials.mjs",
+          ),
+          capabilities: ["credential.read"],
+        },
+      ]);
 
       await writeFile(join(state.profilePath, "persistent-marker"), "kept");
       await execFileAsync(process.execPath, [helper, "stop", "default"], { env });

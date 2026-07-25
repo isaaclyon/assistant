@@ -22,6 +22,7 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 | Telegram token/pairing/offset | `~/.pi/agent/telegram.json` | pi-telegram |
 | Telegram polling ownership | `~/.pi/agent/locks.json` | pi-telegram |
 | Bridge environment overrides | `~/.config/pi-telegram-bridge/environment` | User/systemd |
+| 1Password agent vault token/config | `<configRoot>/onepassword/<credential-scope>.{token,json}` | User / credential provider |
 | Scheduled job definitions | `<stateDir>/jobs.json` | Agent/user |
 | Scheduled job run state | `<stateDir>/jobs-state.json` | Host |
 | Human-idle session epoch | `<stateDir>/conversation-session-state.json` | Host |
@@ -38,6 +39,15 @@ pairing, offsets, and locks remain in named profiles in the private Pi agent
 directory. Per-instance mode-`0600` environment files live under
 `<configRoot>/instances/<id>.env`; the strict mode-`0600` instance manifest is
 `<configRoot>/instances.json` by default.
+
+The stock-Chrome helper registers a repo-owned 1Password credential provider.
+Its service-account token is deliberately not placed in the instance
+environment: a trusted local setup command stores it in a scope-specific
+mode-`0600` file outside immutable releases. The provider derives the active
+credential scope from the host identity, reads the token only for a just-in-time
+lookup, passes it to `op` through the child environment rather than arguments,
+and returns only username/password after HTTPS and saved-website domain checks.
+See [ADR-0024](docs/adr/0024-use-1password-for-browser-login-credentials.md).
 
 Stateful heartbeat jobs separate their cron trigger, tracked TypeScript checker,
 host-evaluated rule, and agent-prompt reaction. Checkers emit bounded structured
