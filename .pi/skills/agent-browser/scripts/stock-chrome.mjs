@@ -12,10 +12,14 @@ import {
 import { constants } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
 
 const START_TIMEOUT_MS = 15_000;
 const SESSION_PATTERN = /^[a-z0-9][a-z0-9._-]{0,62}$/;
+const onePasswordProvider = fileURLToPath(
+  new URL("./onepassword-credentials.mjs", import.meta.url),
+);
 
 function fail(message) {
   process.stderr.write(`${message}\n`);
@@ -265,8 +269,27 @@ async function main() {
       "agent-browser",
       process.env.STOCK_BROWSER_AGENT_BROWSER,
     );
+    let plugins = [];
+    if (process.env.AGENT_BROWSER_PLUGINS) {
+      try {
+        plugins = JSON.parse(process.env.AGENT_BROWSER_PLUGINS);
+      } catch {
+        throw new Error("AGENT_BROWSER_PLUGINS must be valid JSON");
+      }
+      if (!Array.isArray(plugins)) {
+        throw new Error("AGENT_BROWSER_PLUGINS must be a JSON array");
+      }
+    }
+    if (!plugins.some((plugin) => plugin?.name === "onepassword")) {
+      plugins.push({
+        name: "onepassword",
+        command: onePasswordProvider,
+        capabilities: ["credential.read"],
+      });
+    }
     const result = spawnSync(agentBrowser, ["--cdp", String(state.port), ...args], {
       stdio: "inherit",
+      env: { ...process.env, AGENT_BROWSER_PLUGINS: JSON.stringify(plugins) },
     });
     if (result.error) throw result.error;
     process.exitCode = result.status ?? 1;
