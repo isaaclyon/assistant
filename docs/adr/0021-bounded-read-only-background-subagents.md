@@ -26,8 +26,11 @@ limits, and seven-day retention. State transitions are atomically persisted in
 a mode-0600 JSON file. Shutdown cancels and awaits all children; startup marks
 unobserved running jobs interrupted and never reports them as completed.
 
-Children run the pinned Pi CLI with discovery, built-in tools, skills, and
-context files disabled. The only loaded child extension provides dedicated,
+Children run the pinned Pi CLI in single-shot text mode, with discovery,
+built-in tools, skills, and context files disabled. Text mode returns only the
+final assistant report rather than Pi's unbounded cumulative JSON event stream.
+The child stdout is still capped before it is retained. The only loaded child
+extension provides dedicated,
 bounded repository list/read/literal-search/image inspection, public HTTP(S)
 search/retrieval, and a small non-sensitive runtime snapshot. Repository paths
 are canonicalized beneath the selected workspace or immutable resource root;

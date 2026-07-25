@@ -4,11 +4,10 @@ import { StringDecoder } from "node:string_decoder";
 
 import type { SubagentJobRunner } from "./subagents.js";
 
-// Pi's JSON mode emits transient reasoning and tool events in addition to the
-// bounded final report. Bound individual events tightly, while leaving enough
-// aggregate headroom for a normal high-thinking research run.
-const MAX_EVENT_BYTES = 4 * 1024 * 1024;
-const MAX_EVENT_STREAM_BYTES = 64 * 1024 * 1024;
+// Text mode emits only the final assistant response. Keep a separate process
+// output guard so a misbehaving extension/provider cannot make the bridge hold
+// an unbounded stdout buffer.
+const MAX_CHILD_OUTPUT_BYTES = 256 * 1024;
 
 export function resolvePiCliPath(resourceRoot: string): string {
   return join(resourceRoot, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
@@ -24,7 +23,7 @@ export function createPiSubagentRunner(options: {
   const extension = options.childExtensionPath ?? join(options.resourceRoot, ".pi", "extensions", "subagents", "child.ts");
   return async (job, signal, onPartial) => {
     const args = [
-      cli, "--mode", "json", "--print", "--no-builtin-tools", "--no-extensions",
+      cli, "--mode", "text", "--print", "--no-builtin-tools", "--no-extensions",
       "--no-skills", "--no-context-files", "--extension", extension,
       "--tools", "repo_read,repo_list,repo_search,repo_image,web_fetch,web_search,system_info",
       "--model", job.model, "--thinking", job.thinking,
@@ -40,10 +39,8 @@ export function createPiSubagentRunner(options: {
         PI_SUBAGENT_READ_ROOTS: JSON.stringify([...new Set([options.cwd, options.resourceRoot])]),
       },
     });
-    let output = "";
-    let streamBytes = 0;
-    let buffer = "";
-    let streamError: Error | undefined;
+    const outputChunks: Buffer[] = [];
+    let outputBytes = 0;
     const decoder = new StringDecoder("utf8");
     let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
     const terminate = (): void => {
@@ -57,35 +54,17 @@ export function createPiSubagentRunner(options: {
       }, 5_000);
       forceKillTimer.unref?.();
     };
-    const failStream = (message: string): void => {
-      if (!streamError) streamError = new Error(message);
-      terminate();
+    const appendOutput = (text: string): void => {
+      if (outputBytes >= MAX_CHILD_OUTPUT_BYTES || !text) return;
+      const bytes = Buffer.from(text);
+      const remaining = MAX_CHILD_OUTPUT_BYTES - outputBytes;
+      const chunk = bytes.byteLength <= remaining ? bytes : bytes.subarray(0, remaining);
+      outputChunks.push(chunk);
+      outputBytes += chunk.byteLength;
     };
-    const processLine = (line: string): void => {
-      if (Buffer.byteLength(line) > MAX_EVENT_BYTES) {
-        failStream("Subagent event exceeded its size limit");
-        return;
-      }
-      let event: { type?: string; message?: { role?: string; content?: Array<{ type?: string; text?: string }>; stopReason?: string; errorMessage?: string } };
-      try { event = JSON.parse(line) as typeof event; } catch { return; }
-      if (event.type !== "message_end" || event.message?.role !== "assistant") return;
-      const candidate = event.message.content?.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n") ?? "";
-      if (candidate) { output = candidate; onPartial(candidate); }
-      if (event.message.stopReason === "error") streamError = new Error(event.message.errorMessage ?? "Subagent model failed");
-    };
-    child.stdout.on("data", (chunk: Buffer) => {
-      streamBytes += chunk.length;
-      if (streamBytes > MAX_EVENT_STREAM_BYTES) {
-        failStream("Subagent event stream exceeded its emergency limit");
-        return;
-      }
-      buffer += decoder.write(chunk);
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) processLine(line);
-      if (Buffer.byteLength(buffer) > MAX_EVENT_BYTES) failStream("Subagent event exceeded its size limit");
-    });
-    // Drain diagnostics but never retain child stderr, which may include paths or provider data.
+    child.stdout.on("data", (chunk: Buffer) => appendOutput(decoder.write(chunk)));
+    // Drain diagnostics but never retain child stderr, which may include paths
+    // or provider data.
     child.stderr.on("data", () => {});
     if (signal.aborted) terminate();
     else signal.addEventListener("abort", terminate, { once: true });
@@ -101,12 +80,12 @@ export function createPiSubagentRunner(options: {
       signal.removeEventListener("abort", terminate);
       if (forceKillTimer) clearTimeout(forceKillTimer);
     }
+    appendOutput(decoder.end());
     if (signal.aborted) throw signal.reason;
-    buffer += decoder.end();
-    if (buffer.trim()) processLine(buffer);
-    if (streamError) throw streamError;
     if (code !== 0) throw new Error(`Subagent exited with code ${code}`);
+    const output = Buffer.concat(outputChunks).toString("utf8").trim();
     if (!output) throw new Error("Subagent exited without a final report");
+    onPartial(output);
     return { output };
   };
 }

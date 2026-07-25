@@ -34,31 +34,23 @@ afterEach(async () => {
 });
 
 describe("createPiSubagentRunner", () => {
-  it("passes only the documented child tools to Pi", async () => {
+  it("uses text mode and passes only the documented child tools to Pi", async () => {
     const { root, cli } = await fakePi(`
       const index = process.argv.indexOf("--tools");
-      process.stdout.write(JSON.stringify({
-        type: "message_end",
-        message: { role: "assistant", content: [{ type: "text", text: process.argv[index + 1] }], stopReason: "stop" }
-      }) + "\\n");
+      const mode = process.argv[process.argv.indexOf("--mode") + 1];
+      process.stdout.write(JSON.stringify({ mode, tools: process.argv[index + 1] }));
     `);
     const runner = createPiSubagentRunner({ cwd: root, resourceRoot: root, piCliPath: cli });
 
     await expect(runner(job(join(root, "session")), new AbortController().signal, vi.fn()))
-      .resolves.toEqual({ output: "repo_read,repo_list,repo_search,repo_image,web_fetch,web_search,system_info" });
+      .resolves.toEqual({ output: JSON.stringify({ mode: "text", tools: "repo_read,repo_list,repo_search,repo_image,web_fetch,web_search,system_info" }) });
   });
 
-  it("allows verbose bounded intermediate events before a final report", async () => {
+  it("does not parse or reject large JSON-looking output as an event stream", async () => {
     const { root, cli } = await fakePi(`
-      import { once } from "node:events";
-      const event = JSON.stringify({ type: "message_update", delta: "x".repeat(1024) }) + "\\n";
-      for (let index = 0; index < 6_000; index++) {
-        if (!process.stdout.write(event)) await once(process.stdout, "drain");
-      }
-      process.stdout.write(JSON.stringify({
-        type: "message_end",
-        message: { role: "assistant", content: [{ type: "text", text: "final report" }], stopReason: "stop" }
-      }) + "\\n");
+      const mode = process.argv[process.argv.indexOf("--mode") + 1];
+      if (mode === "json") process.stdout.write(JSON.stringify({ type: "message_update", delta: "x".repeat(5 * 1024 * 1024) }));
+      else process.stdout.write("final report\\n");
     `);
     const runner = createPiSubagentRunner({ cwd: root, resourceRoot: root, piCliPath: cli });
     const onPartial = vi.fn();
@@ -66,15 +58,5 @@ describe("createPiSubagentRunner", () => {
     await expect(runner(job(join(root, "session")), new AbortController().signal, onPartial))
       .resolves.toEqual({ output: "final report" });
     expect(onPartial).toHaveBeenCalledWith("final report");
-  });
-
-  it("rejects one unbounded event even below the total emergency ceiling", async () => {
-    const { root, cli } = await fakePi(`
-      process.stdout.write(JSON.stringify({ type: "message_update", delta: "x".repeat(5 * 1024 * 1024) }) + "\\n");
-    `);
-    const runner = createPiSubagentRunner({ cwd: root, resourceRoot: root, piCliPath: cli });
-
-    await expect(runner(job(join(root, "session")), new AbortController().signal, vi.fn()))
-      .rejects.toThrow("Subagent event exceeded its size limit");
   });
 });
