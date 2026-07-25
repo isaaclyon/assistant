@@ -41,6 +41,19 @@ and never infer or persist a new preference from one booking.
    live inventory on the restaurant's official booking flow or established
    platforms such as OpenTable, Resy, or Tock. Use the persistent `default`
    browser session rather than creating a profile per site.
+   For OpenTable searches, use the bundled
+   `scripts/opentable-search.mjs` helper with a short direct-URL shortlist. It
+   opens the restaurant pages in parallel tabs and extracts live reservation
+   buttons; it never clicks a reservation button. Example:
+
+   ```bash
+   node .pi/skills/reserve-restaurant/scripts/opentable-search.mjs \
+     --date 2026-07-25 --time 19:00 --covers 2 \
+     --restaurant 'Matteo|https://www.opentable.com/r/matteo-ristorante-italiano-salt-lake-city'
+   ```
+
+   Use the output only as ephemeral availability and continue to verify the
+   selected slot in the browser immediately before booking.
 4. Verify each offered slot for the exact date, local time, and party size.
    Check seating type and any visible deposit, prepayment, cancellation,
    no-show, minimum-spend, prix-fixe, age, or dining-duration terms.
