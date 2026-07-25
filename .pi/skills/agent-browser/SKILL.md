@@ -71,6 +71,52 @@ The prompt disables terminal echo. Do not use `--token-stdin` outside automated
 tests. Installation or rotation does not require a bridge restart because the
 provider reads the private files only when a credential is requested.
 
+## Secure interactive handoff
+
+Use the tracked handoff helper when the user must enter a passkey, TOTP, payment
+details, or another secret that cannot safely pass through the model. It attaches
+temporary x11vnc/noVNC processes to the exact stock-Chrome Xvfb display, binds
+both listeners to loopback, requires a random VNC password, and expires after ten
+minutes by default:
+
+```bash
+HANDOFF="${PI_TELEGRAM_BRIDGE_RESOURCE_ROOT:-$PWD}/.pi/skills/agent-browser/scripts/browser-handoff.mjs"
+node "$HANDOFF" start default --minutes 10
+```
+
+Start the stock-Chrome session first if it is not already running. The result
+contains a `webPort`, `passwordPath`, expiry, and noVNC path. Never read the
+password file with an agent tool or send its contents through Telegram. Give the
+user commands shaped like these, substituting the returned values and their
+trusted SSH host:
+
+```bash
+# Retrieve the one-time VNC password directly in the user's terminal.
+ssh <ssh-host> 'cat <passwordPath>'
+
+# Keep this tunnel open while using noVNC.
+ssh -N -L 6080:127.0.0.1:<webPort> <ssh-host>
+```
+
+The user then opens
+`http://127.0.0.1:6080/vnc.html?autoconnect=1&resize=scale` and enters the VNC
+password locally. If port 6080 is busy, the user may choose another local port
+without changing the remote `webPort`.
+
+While handoff is active, pause all agent-browser commands so automation cannot
+race the user's input. Ask the user to say when they are finished, then stop the
+handoff immediately:
+
+```bash
+node "$HANDOFF" stop default
+```
+
+`status` reports the bounded session without revealing the password. The helper
+also stops itself at expiry and removes its password/state files. Never bind
+noVNC, VNC, or CDP to a non-loopback address, omit the SSH tunnel, relay the VNC
+password, or improvise a public URL. If the user cannot use SSH, stop and offer a
+manual action on their own device instead.
+
 Fall back to direct `agent-browser` commands only when the helper is unavailable
 or managed launch is specifically required. CDP attachment cannot provide the
 fresh-browser containment required by `--allowed-domains`, so stay on the user's
