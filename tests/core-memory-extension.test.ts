@@ -9,6 +9,8 @@ import { bindBridgeRuntimeMarker } from "../src/telegram-capabilities.js";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const sandboxes: string[] = [];
 const previousMemoryDirectory = process.env.PI_TELEGRAM_MEMORY_DIR;
+const previousPrincipal = process.env.PI_TELEGRAM_PRINCIPAL;
+const previousMemoryView = process.env.PI_TELEGRAM_MEMORY_VIEW;
 
 type BeforeAgentStart = (event: {
   systemPrompt: string;
@@ -20,6 +22,10 @@ afterEach(async () => {
   } else {
     process.env.PI_TELEGRAM_MEMORY_DIR = previousMemoryDirectory;
   }
+  if (previousPrincipal === undefined) delete process.env.PI_TELEGRAM_PRINCIPAL;
+  else process.env.PI_TELEGRAM_PRINCIPAL = previousPrincipal;
+  if (previousMemoryView === undefined) delete process.env.PI_TELEGRAM_MEMORY_VIEW;
+  else process.env.PI_TELEGRAM_MEMORY_VIEW = previousMemoryView;
   await Promise.all(
     sandboxes.splice(0).map((path) => rm(path, { recursive: true, force: true })),
   );
@@ -61,6 +67,8 @@ async function fixture(): Promise<{ vault: string; handler: BeforeAgentStart }> 
   sandboxes.push(sandbox);
   const vault = join(sandbox, "memory");
   process.env.PI_TELEGRAM_MEMORY_DIR = vault;
+  process.env.PI_TELEGRAM_PRINCIPAL = "isaac";
+  process.env.PI_TELEGRAM_MEMORY_VIEW = "owner-and-household";
   return { vault, handler: await loadHandler() };
 }
 

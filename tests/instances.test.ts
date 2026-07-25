@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -383,6 +383,7 @@ describe("bridge instance manifest", () => {
       JSON.stringify({ version: 1, instances: [personalInstance()] }),
       { mode: 0o644 },
     );
+    await chmod(path, 0o644);
 
     await expect(loadBridgeInstanceManifest(path)).rejects.toThrow(
       "Bridge instance manifest must not be accessible by group or other users",
