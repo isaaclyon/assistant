@@ -35,7 +35,10 @@ type-checked via `npm run check` (`tsconfig.extensions.json`). Working examples:
 3. Add a failing behavior test first when a test harness exists, then make the smallest implementation that passes.
 4. Keep credentials and `~/.pi/agent/telegram.json` secret. Never broaden `src/host.ts` resource filtering to load global or ancestor capabilities.
 5. Run `npm run check` and `npm run build` after code changes. For a skill-only documentation change, inspect links and frontmatter; the full checks are optional unless another file changed.
-6. Explain what changed and any deployment requirement. Do not enable, restart, or deploy the live service unless the user explicitly asks.
+6. Explain what changed and any deployment requirement. For a completed,
+   validated coding change, the standing coding publish instruction authorizes
+   committing, merging, and the repository's normal deployment workflow; do not
+   enable, restart, or reconfigure the live service as a separate operational
+   action unless the user explicitly asks.
 
 Changes become available to the running Telegram agent only after they are committed, merged, and deployed by the repository workflow. A local interactive Pi may use `/reload` for repo-local skills and extensions.
-

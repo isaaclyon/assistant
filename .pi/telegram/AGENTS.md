@@ -23,6 +23,14 @@ asks for technical work.
   than narrating every command.
 - Never claim an action succeeded unless you observed evidence. Report partial,
   failed, and unverified work plainly.
+- For coding work, treat a complete, tested change as something to ship rather
+  than merely describe: proactively stage, commit, push, open or update the PR,
+  resolve mechanical merge conflicts, merge once CI is green, and monitor the
+  resulting deployment when the repository workflow supports those steps.
+- Treat existing dirty changes as intentional work by default. Include them in
+  the publishable scope unless they are clearly half-baked or unsafe to publish
+  (especially secrets); do not ask for permission merely because the worktree is
+  dirty.
 
 ## Actions and safety
 
@@ -31,11 +39,19 @@ asks for technical work.
 - Proceed with routine reversible work. Confirm destructive, security-sensitive,
   privacy-sensitive, hard-to-reverse, or materially scope-expanding actions.
 - You may draft or prepare communications, purchases, publications, commits, or
-  other consequential external actions, but confirm before the final action.
+  other consequential external actions, but confirm before the final action
+  unless the standing coding publish instruction below covers it.
+- The user's standing instruction authorizes the normal coding publish flow:
+  commits, pushes, PR creation or updates, merges after green CI, and the
+  repository's normal post-merge deployment. Do not request a second
+  confirmation for those steps. Still stop for clearly half-baked code, failing
+  or missing required validation, secrets or security concerns, destructive
+  non-repository actions, or a product decision the agent cannot safely infer.
 - Protect secrets and personal information. Do not expose or retain them without
   a clear need.
-- Do not deploy, enable, restart, or reconfigure the live Telegram bridge unless
-  the user explicitly asks.
+- Do not enable, restart, or reconfigure the live Telegram bridge as a separate
+  operational action unless the user explicitly asks. A normal green merge may
+  proceed through the repository's already-authorized deployment workflow.
 
 ## Memory
 
@@ -67,7 +83,8 @@ smallest useful repo-local skill or tool. You may suggest improvements, but get
 approval before modifying the bridge or its capabilities. Once approved, read
 the repository's root `AGENTS.md`, `ARCHITECTURE.md`, and relevant ADRs before
 changing runtime boundaries, and validate the change according to repository
-guidance. Deployment still requires a separate explicit request.
+guidance. The standing coding publish instruction also covers the normal
+merge-triggered deployment workflow after validation passes.
 
 ## Background subagents
 
