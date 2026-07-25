@@ -2,17 +2,43 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_HELPER = `${process.env.PI_TELEGRAM_BRIDGE_RESOURCE_ROOT ?? process.cwd()}/.pi/skills/agent-browser/scripts/stock-chrome.mjs`;
 
 export function buildReservationUrl(baseUrl, { date, time, covers }) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`Invalid date: ${date}`);
-  if (!/^\d{2}:\d{2}$/.test(time)) throw new Error(`Invalid time: ${time}`);
-  if (!Number.isInteger(covers) || covers < 1) throw new Error(`Invalid party size: ${covers}`);
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!dateMatch) throw new Error(`Invalid date: ${date}`);
+  const [, year, month, day] = dateMatch.map(Number);
+  const parsedDate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsedDate.getUTCFullYear() !== year ||
+    parsedDate.getUTCMonth() !== month - 1 ||
+    parsedDate.getUTCDate() !== day
+  ) {
+    throw new Error(`Invalid date: ${date}`);
+  }
+  const timeMatch = /^(\d{2}):(\d{2})$/.exec(time);
+  if (!timeMatch || Number(timeMatch[1]) > 23 || Number(timeMatch[2]) > 59) {
+    throw new Error(`Invalid time: ${time}`);
+  }
+  if (!Number.isInteger(covers) || covers < 1 || covers > 20) {
+    throw new Error(`Invalid party size: ${covers}`);
+  }
 
   const url = new URL(baseUrl);
+  if (
+    url.protocol !== "https:" ||
+    url.hostname !== "www.opentable.com" ||
+    url.port ||
+    url.username ||
+    url.password ||
+    !/^\/r\/[^/]+\/?$/.test(url.pathname)
+  ) {
+    throw new Error(`Restaurant URL must be a direct HTTPS OpenTable restaurant URL: ${baseUrl}`);
+  }
   url.searchParams.set("dateTime", `${date}T${time}:00`);
   url.searchParams.set("covers", String(covers));
   return url.toString();
@@ -25,6 +51,16 @@ export function parseAvailability(snapshot) {
     results.push({ time: match[2], label: match[1] });
   }
   return results;
+}
+
+export function analyzeSnapshot(snapshot) {
+  const availability = parseAvailability(snapshot);
+  if (availability.length > 0) return { status: "available", availability };
+  if (/access denied|captcha|verify you are human|this site can.t be reached|err_/i.test(snapshot)) {
+    return { status: "blocked", availability };
+  }
+  if (!snapshot.trim()) return { status: "unverified", availability };
+  return { status: "no_slots_visible", availability };
 }
 
 function usage() {
@@ -45,7 +81,17 @@ function parseArgs(argv) {
     if (arg === "--restaurant") {
       const separator = value.indexOf("|");
       if (separator < 1) throw new Error(`Restaurant must be Name|URL: ${value}`);
-      args.restaurants.push({ name: value.slice(0, separator), url: value.slice(separator + 1) });
+      const name = value.slice(0, separator).trim();
+      if (!name || name.length > 100 || args.restaurants.length >= 10) {
+        throw new Error("Restaurant names must be 1-100 characters; at most 10 are allowed");
+      }
+      const url = value.slice(separator + 1);
+      buildReservationUrl(url, {
+        date: args.date ?? "2000-01-01",
+        time: args.time ?? "00:00",
+        covers: args.covers ?? 1,
+      });
+      args.restaurants.push({ name, url });
     } else if (arg === "--covers") {
       args.covers = Number(value);
     } else if (arg === "--date" || arg === "--time" || arg === "--session") {
@@ -61,48 +107,58 @@ function parseArgs(argv) {
 async function runHelper(helper, session, command, ...args) {
   const result = await execFileAsync("node", [helper, "run", session, "--", command, ...args], {
     maxBuffer: 2 * 1024 * 1024,
+    timeout: 35_000,
   });
   return result.stdout;
 }
 
-async function search(args) {
+export async function searchOpenTable(args) {
   const helper = process.env.PI_AGENT_BROWSER_HELPER ?? DEFAULT_HELPER;
   const session = args.session ?? "default";
-  await execFileAsync("node", [helper, "start", session]);
+  const initial = JSON.parse(
+    (await execFileAsync("node", [helper, "status", session], { timeout: 5_000 })).stdout,
+  );
+  const startedHere = initial.status !== "running";
+  await execFileAsync("node", [helper, "start", session], { timeout: 20_000 });
 
   const tabs = [];
   try {
-    for (const restaurant of args.restaurants) {
+    for (const [index, restaurant] of args.restaurants.entries()) {
       const url = buildReservationUrl(restaurant.url, args);
-      await runHelper(helper, session, "tab", "new", url);
-      const tabState = JSON.parse(await runHelper(helper, session, "tab", "--json"));
-      const active = tabState.data?.tabs?.find((tab) => tab.active);
-      if (active) tabs.push({ ...restaurant, tabId: active.tabId, url });
+      const tabId = `ot-${process.pid}-${index}`;
+      await runHelper(helper, session, "tab", "new", "--label", tabId, url);
+      tabs.push({ ...restaurant, tabId, url });
     }
 
     const results = [];
     for (const tab of tabs) {
       await runHelper(helper, session, "tab", tab.tabId);
-      await runHelper(helper, session, "wait", "1500");
-      try {
-        await runHelper(helper, session, "wait", "--load", "networkidle");
-      } catch {
-        // OpenTable can keep analytics requests open; the snapshot is still useful.
-      }
+      await runHelper(helper, session, "wait", "3000");
       const snapshot = await runHelper(helper, session, "snapshot", "-i");
-      results.push({ ...tab, availability: parseAvailability(snapshot) });
+      results.push({
+        ...tab,
+        ...analyzeSnapshot(snapshot),
+        checkedAt: new Date().toISOString(),
+      });
     }
     return results;
   } finally {
-    await execFileAsync("node", [helper, "stop", session]).catch(() => undefined);
+    for (const tab of tabs.reverse()) {
+      await runHelper(helper, session, "tab", "close", tab.tabId).catch(() => undefined);
+    }
+    if (startedHere) {
+      await execFileAsync("node", [helper, "stop", session], { timeout: 10_000 }).catch(
+        () => undefined,
+      );
+    }
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const args = parseArgs(process.argv.slice(2));
     if (args.help) console.log(usage());
-    else console.log(JSON.stringify(await search(args), null, 2));
+    else console.log(JSON.stringify(await searchOpenTable(args), null, 2));
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;

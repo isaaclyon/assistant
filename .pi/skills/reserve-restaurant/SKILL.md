@@ -52,8 +52,10 @@ and never infer or persist a new preference from one booking.
      --restaurant 'Matteo|https://www.opentable.com/r/matteo-ristorante-italiano-salt-lake-city'
    ```
 
-   Use the output only as ephemeral availability and continue to verify the
-   selected slot in the browser immediately before booking.
+   Use the output only as ephemeral availability. `blocked` and `unverified`
+   results are not availability checks, and `no_slots_visible` means only that
+   the rendered page exposed no slot buttons. Continue to verify any selected
+   slot in the browser immediately before booking.
 4. Verify each offered slot for the exact date, local time, and party size.
    Check seating type and any visible deposit, prepayment, cancellation,
    no-show, minimum-spend, prix-fixe, age, or dining-duration terms.
