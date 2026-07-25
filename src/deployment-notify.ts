@@ -9,5 +9,5 @@ if (!manifestPath || !agentDir || !releaseSha) {
 
 const result = await notifyFleetDeployment({ manifestPath, agentDir, releaseSha });
 console.log(
-  `Sent deployment notification through coordinator ${result.coordinatorId}.`,
+  `Sent deployment notification through instance ${result.targetInstanceId}.`,
 );
