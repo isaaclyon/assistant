@@ -12,7 +12,7 @@ export interface FleetDeploymentNotificationOptions {
 }
 
 export interface FleetDeploymentNotificationResult {
-  coordinatorId: string;
+  targetInstanceId: string;
   instanceCount: number;
 }
 
@@ -23,12 +23,16 @@ function requireReleaseSha(value: string): string {
   return value;
 }
 
-function selectCoordinator(instances: BridgeInstanceDefinition[]): BridgeInstanceDefinition {
-  const coordinator = instances.find((instance) => instance.jobsRole === "coordinator");
-  if (!coordinator) {
-    throw new Error("Deployment notification requires a fleet coordinator.");
+function selectNotificationTarget(
+  instances: BridgeInstanceDefinition[],
+): BridgeInstanceDefinition {
+  const targets = instances.filter((instance) => instance.principal === "engineering");
+  if (targets.length !== 1) {
+    throw new Error(
+      "Deployment notification requires exactly one engineering instance.",
+    );
   }
-  return coordinator;
+  return targets[0]!;
 }
 
 export async function notifyFleetDeployment({
@@ -39,15 +43,15 @@ export async function notifyFleetDeployment({
 }: FleetDeploymentNotificationOptions): Promise<FleetDeploymentNotificationResult> {
   const sha = requireReleaseSha(releaseSha);
   const manifest = await loadBridgeInstanceManifest(manifestPath);
-  const coordinator = selectCoordinator(manifest.instances);
+  const target = selectNotificationTarget(manifest.instances);
   const instanceCount = manifest.instances.length;
   await sendTelegramNotification({
     agentDir,
-    telegramProfile: coordinator.telegramProfile,
-    telegramSurface: coordinator.telegramSurface,
+    telegramProfile: target.telegramProfile,
+    telegramSurface: target.telegramSurface,
     text: `✅ Deployment complete: ${sha.slice(0, 7)}. All ${instanceCount} bridge instances are ready.`,
     failureLabel: "Telegram deployment notification",
     ...(fetchImpl ? { fetchImpl } : {}),
   });
-  return { coordinatorId: coordinator.id, instanceCount };
+  return { targetInstanceId: target.id, instanceCount };
 }

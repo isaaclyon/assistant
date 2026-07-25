@@ -8,7 +8,7 @@ import { notifyFleetDeployment } from "../src/deployment-notification.js";
 const SHA = "1234567890abcdef1234567890abcdef12345678";
 
 describe("fleet deployment notification", () => {
-  it("notifies the fleet coordinator after a successful deployment", async () => {
+  it("notifies the engineering instance after a successful deployment", async () => {
     const root = await mkdtemp(join(tmpdir(), "bridge-deploy-notification-"));
     const agentDir = join(root, "agent");
     const manifestPath = join(root, "instances.json");
@@ -62,9 +62,9 @@ describe("fleet deployment notification", () => {
 
     await expect(
       notifyFleetDeployment({ manifestPath, agentDir, releaseSha: SHA, fetchImpl }),
-    ).resolves.toEqual({ coordinatorId: "isaac", instanceCount: 2 });
+    ).resolves.toEqual({ targetInstanceId: "builder", instanceCount: 2 });
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://api.telegram.org/botisaac-token/sendMessage",
+      "https://api.telegram.org/botbuilder-token/sendMessage",
       expect.objectContaining({
         body: JSON.stringify({
           chat_id: 42,
