@@ -1,16 +1,22 @@
 ---
 name: "deploy"
-description: "Publish local changes to GitHub and drive the pull request to a usable finish line. Use only when the user explicitly asks to stage, commit, push, open a PR, wrap up work, get a branch ready for merge, or otherwise finish the GitHub PR flow. Includes proactive merge-conflict checks, CI monitoring, failed-check triage, fixes, re-pushes, and final status reporting."
+description: "Publish completed local changes to GitHub and drive the pull request to a usable finish line. This is part of completing coding work when the change is ready to ship; do not wait for a separate deploy or merge request. Includes proactive merge-conflict checks, CI monitoring, failed-check triage, fixes, re-pushes, merging, post-merge deployment monitoring, and final status reporting."
 ---
 
 # GitHub Finish-Line Publish
 
 ## Operating posture
 
-Act like the user asked for the PR to get all the way to green, not merely to be opened.
+Act like the user asked for the change to get all the way to production, not
+merely for a PR to be opened, whenever the implementation is complete and
+validated.
 
 - Keep ownership of the flow after opening the PR: watch mergeability, watch CI, fix failures you can safely fix, push follow-up commits, and re-check.
-- Be automatic about mechanical waiting and triage, but careful about publishing scope. Do not stage unrelated user changes silently.
+- Be automatic about mechanical waiting, triage, publishing, merging, and
+  normal post-merge deployment monitoring. Assume all existing dirty changes
+  belong to the work intentionally undertaken in this session. Stage them by
+  default; exclude only changes that are clearly half-baked or unsafe to
+  publish (especially secrets), and explain each exclusion.
 - Continue until the PR is green and mergeable, merged if possible to merge, or blocked by something that needs the user or an external system.
 - Explain practical blockers in plain language, including why the blocker needs user input.
 
@@ -33,8 +39,11 @@ Act like the user asked for the PR to get all the way to green, not merely to be
 
 1. Confirm intended scope.
    - Run `git status -sb` and inspect the diff before staging.
-   - If the worktree contains unrelated changes, stage only explicit files. Ask the user only when scope cannot be inferred safely.
-   - Use `git add -A` only when the whole worktree is clearly part of the requested work.
+   - Treat dirty changes as in scope unless they are clearly half-baked,
+     or unsafe to publish (especially secrets). Do not ask merely because the
+     worktree is dirty.
+   - Use `git add -A` when the worktree is ready; otherwise stage the complete
+     inferred scope and leave out only clearly excluded changes.
 2. Pick the branch strategy.
    - If on main/master/default, create a branch: `git checkout -b "{conventional commit prefix}/{description}"`.
    - Otherwise stay on the current branch.
@@ -78,7 +87,8 @@ Act like the user asked for the PR to get all the way to green, not merely to be
 
 ## Merge handling
 
-- Merge only when CI passes and no conflicts appear. Once true, you should merge.
+- Merge only when CI passes, no conflicts appear, and the implementation is
+  not clearly half-baked. Once true, merge without asking for another approval.
 - Use the repository's normal merge style when obvious; otherwise prefer the least surprising GitHub default.
 - After merge, verify the PR's `mergedAt` and merge commit through `gh pr view`.
   If a push-to-default-branch workflow performs deployment or other required
