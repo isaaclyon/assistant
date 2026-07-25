@@ -23,6 +23,7 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 | Telegram polling ownership | `~/.pi/agent/locks.json` | pi-telegram |
 | Bridge environment overrides | `~/.config/pi-telegram-bridge/environment` | User/systemd |
 | 1Password agent vault token/config | `<configRoot>/onepassword/<credential-scope>.{token,json}` | User / credential provider |
+| Temporary browser handoff | `<browserRuntime>/handoff.{json,log}` and `handoff-password` | Browser handoff supervisor |
 | Scheduled job definitions | `<stateDir>/jobs.json` | Agent/user |
 | Scheduled job run state | `<stateDir>/jobs-state.json` | Host |
 | Human-idle session epoch | `<stateDir>/conversation-session-state.json` | Host |
@@ -48,6 +49,14 @@ credential scope from the host identity, reads the token only for a just-in-time
 lookup, passes it to `op` through the child environment rather than arguments,
 and returns only username/password after HTTPS and saved-website domain checks.
 See [ADR-0024](docs/adr/0024-use-1password-for-browser-login-credentials.md).
+
+Interactive browser handoff is a separate short-lived supervisor attached to an
+already-running stock-Chrome Xvfb display. x11vnc and noVNC/websockify bind only
+to loopback and require both the user's SSH authentication and a random VNC
+password retrieved directly over SSH. The password, state, and logs are private
+runtime files removed on stop or bounded expiry; CDP is never tunneled. Agent
+automation pauses while the user controls the display. See
+[ADR-0025](docs/adr/0025-temporary-ssh-tunneled-browser-handoff.md).
 
 Stateful heartbeat jobs separate their cron trigger, tracked TypeScript checker,
 host-evaluated rule, and agent-prompt reaction. Checkers emit bounded structured
