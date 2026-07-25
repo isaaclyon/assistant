@@ -219,6 +219,20 @@ describe("capability profiles", () => {
     expect(
       profiles.find((profile) => profile.profileId === "personal-isaac")?.extensionPaths,
     ).toEqual(expect.arrayContaining([expect.stringContaining("extensions/places.ts")]));
+    expect(
+      profiles.find((profile) => profile.profileId === "personal-isaac")?.skillPaths,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("reserve-restaurant/SKILL.md"),
+      ]),
+    );
+    for (const profileId of ["personal-emma", "household-shared", "builder"]) {
+      expect(profiles.find((profile) => profile.profileId === profileId)?.skillPaths).not.toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("reserve-restaurant/SKILL.md"),
+        ]),
+      );
+    }
     for (const profileId of ["personal-emma", "household-shared", "builder"]) {
       expect(profiles.find((profile) => profile.profileId === profileId)?.extensionPaths).not.toEqual(
         expect.arrayContaining([expect.stringContaining("extensions/places.ts")]),

@@ -75,6 +75,11 @@
         "enabled": true
       },
       {
+        "id": "reserve-restaurant",
+        "path": ".pi/skills/reserve-restaurant/SKILL.md",
+        "enabled": true
+      },
+      {
         "id": "track-improvement-ideas",
         "path": ".pi/skills/track-improvement-ideas/SKILL.md",
         "enabled": true
@@ -98,7 +103,8 @@
         "manage-jobs",
         "manage-ynab",
         "personal-memory",
-        "plan-weekend"
+        "plan-weekend",
+        "reserve-restaurant"
       ],
       "instructions": "telegram-default"
     },
