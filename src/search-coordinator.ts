@@ -29,6 +29,13 @@ const MAX_MEMORY_NOTE_BYTES = 256 * 1024;
 const MAX_WARNINGS = 20;
 const DEFAULT_MAX_MEMORY_NOTES = 10_000;
 const DEFAULT_MAX_SESSION_FILES = 10_000;
+const DEFAULT_CONTEXT_BEFORE = 2;
+const DEFAULT_CONTEXT_AFTER = 2;
+const MAX_CONTEXT_NEIGHBORS = 5;
+const DEFAULT_CONTEXT_MAX_CHARS = 4_000;
+const MIN_CONTEXT_MAX_CHARS = 256;
+const MAX_CONTEXT_MAX_CHARS = 12_000;
+const MAX_CONTEXT_ENTRY_CHARS = 1_200;
 
 export class SearchInputError extends Error {
   readonly code = "INVALID_INPUT";
@@ -36,6 +43,15 @@ export class SearchInputError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "SearchInputError";
+  }
+}
+
+export class SessionContextError extends Error {
+  readonly code = "SESSION_CONTEXT_UNAVAILABLE";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "SessionContextError";
   }
 }
 
@@ -108,6 +124,40 @@ export interface IndexedSessionSearchRequest {
   from?: string;
   to?: string;
   project?: string;
+}
+
+export interface SessionContextRequest {
+  sessionId: string;
+  entryId: string;
+  instanceId: string;
+  principalId: string;
+  roots: string[];
+  before?: number;
+  after?: number;
+  maxChars?: number;
+}
+
+export interface SessionContextEntry {
+  entryId: string;
+  timestamp: string;
+  role: string;
+  project?: string;
+  sourcePath: string;
+  sourceOffset: number;
+  isTarget: boolean;
+  text: string;
+  truncated: boolean;
+}
+
+export interface SessionContextResult {
+  sessionId: string;
+  targetEntryId: string;
+  entries: SessionContextEntry[];
+  beforeReturned: number;
+  afterReturned: number;
+  hasMoreBefore: boolean;
+  hasMoreAfter: boolean;
+  truncated: boolean;
 }
 
 function isWithin(candidate: string, root: string): boolean {
@@ -736,4 +786,110 @@ export function searchIndexedSessions(
     ...(to === undefined ? {} : { to }),
     ...(request.project === undefined ? {} : { project: request.project }),
   });
+}
+
+function validateContextCount(value: number | undefined, label: string, fallback: number): number {
+  const count = value ?? fallback;
+  if (!Number.isInteger(count) || count < 0 || count > MAX_CONTEXT_NEIGHBORS) {
+    throw new SearchInputError(`${label} is invalid`);
+  }
+  return count;
+}
+
+function validateContextString(value: string, label: string): string {
+  if (value.trim() !== value || value.length === 0 || value.length > 256) {
+    throw new SearchInputError(`${label} is invalid`);
+  }
+  return value;
+}
+
+function boundContextText(value: string, maxChars: number): { text: string; truncated: boolean } {
+  const characters = Array.from(value);
+  if (characters.length <= maxChars) return { text: value, truncated: false };
+  return { text: `${characters.slice(0, Math.max(0, maxChars - 1)).join("")}…`, truncated: true };
+}
+
+export async function readSessionContext(
+  index: SearchIndex,
+  request: SessionContextRequest,
+): Promise<SessionContextResult> {
+  const sessionId = validateContextString(request.sessionId, "Session context session ID");
+  const entryId = validateContextString(request.entryId, "Session context entry ID");
+  if (
+    request.roots.length === 0 ||
+    request.roots.some((root) => !isAbsolute(root))
+  ) {
+    throw new SearchInputError("Session context roots are invalid");
+  }
+  const before = validateContextCount(request.before, "Session context before count", DEFAULT_CONTEXT_BEFORE);
+  const after = validateContextCount(request.after, "Session context after count", DEFAULT_CONTEXT_AFTER);
+  const maxChars = request.maxChars ?? DEFAULT_CONTEXT_MAX_CHARS;
+  if (!Number.isInteger(maxChars) || maxChars < MIN_CONTEXT_MAX_CHARS || maxChars > MAX_CONTEXT_MAX_CHARS) {
+    throw new SearchInputError("Session context character budget is invalid");
+  }
+
+  const anchor = index.getSessionDocument(
+    request.instanceId,
+    request.principalId,
+    sessionId,
+    entryId,
+  );
+  if (anchor === undefined) {
+    throw new SessionContextError("Session context entry was not found in the index");
+  }
+  const sourcePath = resolve(anchor.sourcePath);
+  const allowed = request.roots.some((root) => isWithin(sourcePath, resolve(root)));
+  if (!allowed) {
+    throw new SessionContextError("Session context source is outside the active session roots");
+  }
+
+  let parsed;
+  try {
+    parsed = await parseSessionJsonlFile({
+      path: sourcePath,
+      instanceId: request.instanceId,
+      principal: request.principalId,
+      includeSafeCwd: true,
+    });
+  } catch {
+    throw new SessionContextError("Session context source is unavailable");
+  }
+  const documents = parsed.documents.filter((document) => document.sessionId === sessionId);
+  const targetIndex = documents.findIndex((document) => document.entryId === entryId);
+  if (targetIndex < 0) {
+    throw new SessionContextError("Session context entry is no longer available in the source");
+  }
+
+  const start = Math.max(0, targetIndex - before);
+  const end = Math.min(documents.length, targetIndex + after + 1);
+  const selected = documents.slice(start, end);
+  const perEntryBudget = Math.max(1, Math.floor(maxChars / selected.length));
+  const entries = selected.map((document) => {
+    const bounded = boundContextText(
+      document.text,
+      Math.min(MAX_CONTEXT_ENTRY_CHARS, perEntryBudget),
+    );
+    return {
+      entryId: document.entryId,
+      timestamp: document.timestamp,
+      role: document.role,
+      ...(document.cwd === undefined ? {} : { project: basename(document.cwd) }),
+      sourcePath: document.source.path,
+      sourceOffset: document.source.byteOffset,
+      isTarget: document.entryId === entryId,
+      text: bounded.text,
+      truncated: document.truncated || bounded.truncated,
+    };
+  });
+
+  return {
+    sessionId,
+    targetEntryId: entryId,
+    entries,
+    beforeReturned: targetIndex - start,
+    afterReturned: end - targetIndex - 1,
+    hasMoreBefore: start > 0,
+    hasMoreAfter: end < documents.length,
+    truncated: entries.some((entry) => entry.truncated),
+  };
 }

@@ -153,6 +153,15 @@ describe("search index foundation", () => {
       ],
       truncated: false,
     });
+    expect(index.getSessionDocument("isaac", "isaac", "session-1", "entry-1"))
+      .toMatchObject({
+        sessionId: "session-1",
+        entryId: "entry-1",
+        sourcePath: "session-1.jsonl",
+        sourceOffset: 42,
+      });
+    expect(index.getSessionDocument("other", "other", "session-1", "entry-1"))
+      .toBeUndefined();
   });
 
   it("fails closed on an unsupported schema version without exposing indexed text", async () => {

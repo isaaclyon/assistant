@@ -39,6 +39,12 @@ export interface SearchIndex {
   ): SessionSourceState | undefined;
   listSessionSourceStates(instanceId: string, principalId: string): SessionSourceState[];
   getSessionEntryIds(instanceId: string, principalId: string, sourcePath: string): Set<string>;
+  getSessionDocument(
+    instanceId: string,
+    principalId: string,
+    sessionId: string,
+    entryId: string,
+  ): SessionIndexDocument | undefined;
   replaceSessionSource(state: SessionSourceState, documents: SessionIndexDocument[]): void;
   appendSessionSource(state: SessionSourceState, documents: SessionIndexDocument[]): void;
   deleteSessionSource(instanceId: string, principalId: string, sourcePath: string): void;
@@ -244,6 +250,20 @@ interface SessionSourceStateRow {
 
 interface EntryIdRow {
   entry_id: string;
+}
+
+interface SessionDocumentRow {
+  instance_id: string;
+  principal_id: string;
+  session_id: string;
+  entry_id: string;
+  timestamp: string;
+  role: string;
+  project: string | null;
+  cwd: string | null;
+  source_path: string;
+  source_offset: number;
+  searchable_text: string;
 }
 
 interface CorpusStatusRow {
@@ -519,6 +539,12 @@ export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
     SELECT entry_id FROM session_document
     WHERE instance_id = ? AND principal_id = ? AND source_path = ?
     ORDER BY entry_id ASC
+  `);
+  const selectSessionDocument = db.prepare(`
+    SELECT instance_id, principal_id, session_id, entry_id, timestamp, role,
+      project, cwd, source_path, source_offset, searchable_text
+    FROM session_document
+    WHERE instance_id = ? AND principal_id = ? AND session_id = ? AND entry_id = ?
   `);
   const deleteSessionDocumentsForSource = db.prepare(`
     DELETE FROM session_document
@@ -817,6 +843,28 @@ export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
         sourcePath,
       ) as unknown as EntryIdRow[];
       return new Set(rows.map((row) => row.entry_id));
+    },
+    getSessionDocument(instanceId, principalId, sessionId, entryId) {
+      const row = selectSessionDocument.get(
+        instanceId,
+        principalId,
+        sessionId,
+        entryId,
+      ) as unknown as SessionDocumentRow | undefined;
+      if (row === undefined) return undefined;
+      return {
+        instanceId: row.instance_id,
+        principalId: row.principal_id,
+        sessionId: row.session_id,
+        entryId: row.entry_id,
+        timestamp: row.timestamp,
+        role: row.role,
+        project: row.project,
+        cwd: row.cwd,
+        sourcePath: row.source_path,
+        sourceOffset: row.source_offset,
+        searchableText: row.searchable_text,
+      };
     },
     replaceSessionSource(state, documents) {
       db.exec("BEGIN IMMEDIATE");

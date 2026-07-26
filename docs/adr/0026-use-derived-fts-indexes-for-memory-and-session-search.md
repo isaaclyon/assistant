@@ -37,6 +37,7 @@ A repo-local `search` extension exposes three bounded tools:
 
 - `memory_search` for curated durable knowledge;
 - `session_search` for original conversational evidence; and
+- `session_context` for a bounded before/after window around a session result;
 - `search_index` for explicit status, refresh, and rebuild operations.
 
 These are separate assistant choices. The personal-memory CLI continues to own
