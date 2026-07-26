@@ -252,13 +252,12 @@ describe("parseSessionJsonlFile", () => {
     expect(truncated.documents).toEqual([]);
     expect(truncated.nextOffset).toBe(0);
 
-    await rm(path);
     await writeFile(path, `${JSON.stringify(header)}\n`);
     const replaced = await parseSessionJsonlFile({
       path,
       instanceId: "i",
       principal: "p",
-      previousFile: first.file,
+      previousFile: { ...first.file, inode: first.file.inode + 1 },
     });
     expect(replaced.completion).toBe("file-replaced");
     expect(replaced.documents).toEqual([]);
