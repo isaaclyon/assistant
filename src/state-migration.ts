@@ -21,6 +21,7 @@ const LEGACY_STATE_ENTRIES = new Set([
   "jobs.json",
   "pi-codex-conversion.json",
   "restart-pending.json",
+  "search-index.db",
   "sessions",
   "webhook-secret",
 ]);

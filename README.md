@@ -158,19 +158,23 @@ push. Other unstaged Obsidian edits are left alone. A post-write Git failure is
 reported separately because the canonical note has already changed. Deleting a
 note does not erase it from Git history.
 
-All access goes through the tracked skill-local CLI, which takes one JSON
-request line on stdin and returns one bounded JSON line:
+The always-on assistant uses separate indexed `memory_search` and
+`session_search` tools for retrieval. Their private per-instance SQLite/FTS5
+database is disposable and rebuildable from canonical Markdown and session
+JSONL. The tracked skill-local CLI continues to own full-note reads, mutations,
+list/happenings, lint, and core operations; it takes one JSON request line on
+stdin and returns one bounded JSON line:
 
 ```bash
-node .pi/skills/personal-memory/scripts/memory.mjs search <<'EOF'
-{"query":"coffee","limit":5}
+node .pi/skills/personal-memory/scripts/memory.mjs read <<'EOF'
+{"id":"2f5f167d-7a18-4457-8de7-f2f801f1e934"}
 EOF
 ```
 
 The quoted heredoc closes stdin automatically and keeps note content out of
 argv and the process list; avoid `printf '<json>' | …`, which does not.
 
-Subcommands: `add`, `read`, `update`, `delete`, `search`, `list`,
+Subcommands: `add`, `read`, `update`, `delete`, compatibility `search`, `list`,
 `happening-add`, `happenings`, `lint`, `core`. `lint` validates the whole vault,
 including reserved `[^source]` footnotes against bridge session IDs, entry IDs,
 and timestamps. `core` previews a deterministic, title-prefixed projection of Markdown leaf
@@ -185,7 +189,9 @@ for the protocol and note format, and
 [ADR-0015](docs/adr/0015-inject-core-memory-only-in-the-bridge-runtime.md),
 [ADR-0016](docs/adr/0016-filter-personal-memory-by-lifecycle-status.md),
 [ADR-0017](docs/adr/0017-validate-personal-memory-session-provenance.md), and
-[ADR-0018](docs/adr/0018-commit-agent-mediated-memory-mutations-locally.md)
+[ADR-0018](docs/adr/0018-commit-agent-mediated-memory-mutations-locally.md),
+[ADR-0026](docs/adr/0026-use-derived-fts-indexes-for-memory-and-session-search.md),
+and the [search-index runbook](docs/search-index.md)
 for the architecture decisions.
 
 Boundaries to know:

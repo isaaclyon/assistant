@@ -28,6 +28,11 @@
         "enabled": true
       },
       {
+        "id": "search",
+        "path": ".pi/extensions/search.ts",
+        "enabled": true
+      },
+      {
         "id": "places",
         "path": ".pi/extensions/places.ts",
         "enabled": true
@@ -96,7 +101,7 @@
   "profiles": [
     {
       "id": "personal-isaac",
-      "extensions": ["core-memory", "reload", "restart", "skills", "places", "subagents"],
+      "extensions": ["core-memory", "reload", "restart", "skills", "search", "places", "subagents"],
       "skills": [
         "agent-browser",
         "check-weather",
@@ -110,7 +115,7 @@
     },
     {
       "id": "personal-emma",
-      "extensions": ["core-memory", "reload", "restart", "skills", "subagents"],
+      "extensions": ["core-memory", "reload", "restart", "skills", "search", "subagents"],
       "skills": [
         "agent-browser",
         "check-weather",
@@ -123,7 +128,7 @@
     },
     {
       "id": "household-shared",
-      "extensions": ["core-memory", "reload", "restart", "skills", "subagents"],
+      "extensions": ["core-memory", "reload", "restart", "skills", "search", "subagents"],
       "skills": [
         "agent-browser",
         "check-weather",
