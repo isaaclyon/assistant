@@ -116,6 +116,12 @@ describe("search extension", () => {
         timestamp: "2026-07-25T12:02:00.000Z",
         message: { role: "toolResult", content: "tool-only-memory-result" },
       }),
+      JSON.stringify({
+        type: "message",
+        id: "entry-3",
+        timestamp: "2026-07-25T12:03:00.000Z",
+        message: { role: "assistant", content: "The grinder calibration is complete" },
+      }),
       "",
     ].join("\n"));
     await writeFile(join(foreignSessions, "foreign.jsonl"), [
@@ -161,7 +167,12 @@ describe("search extension", () => {
     module.default(pi);
     handlers.get("session_start")?.();
 
-    expect([...tools.keys()].sort()).toEqual(["memory_search", "search_index", "session_search"]);
+    expect([...tools.keys()].sort()).toEqual([
+      "memory_search",
+      "search_index",
+      "session_context",
+      "session_search",
+    ]);
     expect(tools.get("memory_search")?.promptGuidelines?.join(" ")).toContain(
       "preferred memory retrieval",
     );
@@ -170,7 +181,7 @@ describe("search extension", () => {
       limit: 5,
     });
     const session = await tools.get("session_search")!.execute("session-1", {
-      query: "grinder",
+      query: "discussed",
       limit: 5,
     });
     const defaultRoles = await tools.get("session_search")!.execute("session-default-roles", {
@@ -182,6 +193,13 @@ describe("search extension", () => {
       roles: ["toolResult"],
       limit: 5,
     });
+    const context = await tools.get("session_context")!.execute("session-context", {
+      sessionId: "session-1",
+      entryId: "entry-1",
+      before: 0,
+      after: 2,
+      maxChars: 2_000,
+    });
     const foreign = await tools.get("session_search")!.execute("session-foreign", {
       query: "foreign-private-needle",
       limit: 5,
@@ -190,7 +208,7 @@ describe("search extension", () => {
       operation: "status",
     });
     const invalid = await tools.get("session_search")!.execute("session-invalid", {
-      query: "grinder",
+      query: "discussed",
       from: "not-a-timestamp",
     });
 
@@ -210,6 +228,18 @@ describe("search extension", () => {
       ok: true,
       result: { results: [expect.objectContaining({ source: "session", role: "toolResult" })] },
     });
+    expect(context.details).toMatchObject({
+      ok: true,
+      result: {
+        sessionId: "session-1",
+        targetEntryId: "entry-1",
+        entries: [
+          expect.objectContaining({ entryId: "entry-1", isTarget: true }),
+          expect.objectContaining({ entryId: "entry-2", isTarget: false }),
+          expect.objectContaining({ entryId: "entry-3", isTarget: false }),
+        ],
+      },
+    });
     expect(foreign.details).toMatchObject({
       ok: true,
       result: { results: [] },
@@ -219,7 +249,7 @@ describe("search extension", () => {
       result: {
         schemaVersion: 1,
         memoryDocuments: 1,
-        sessionDocuments: 2,
+        sessionDocuments: 3,
       },
     });
     expect(invalid.details).toMatchObject({

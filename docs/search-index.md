@@ -15,6 +15,10 @@ truth.
   refreshes only `PI_TELEGRAM_BRIDGE_SESSION_DIR` for the active
   instance/principal and returns stable session ID, entry ID, timestamp, role,
   project, source path/offset, ranking, and a bounded snippet.
+- `session_context` expands one `session_search` result into a bounded window
+  of nearby turns. It requires the returned session and entry IDs, accepts
+  `before`, `after`, and `maxChars` bounds, and never returns an unbounded
+  conversation.
 - `search_index` reports counts and per-corpus last attempt/success timestamps,
   or explicitly refreshes/rebuilds `memory`, `session`, or `all`.
 
