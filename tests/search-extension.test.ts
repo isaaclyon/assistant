@@ -110,6 +110,12 @@ describe("search extension", () => {
         timestamp: "2026-07-25T12:01:00.000Z",
         message: { role: "user", content: "We discussed grinder calibration" },
       }),
+      JSON.stringify({
+        type: "message",
+        id: "entry-2",
+        timestamp: "2026-07-25T12:02:00.000Z",
+        message: { role: "toolResult", content: "tool-only-memory-result" },
+      }),
       "",
     ].join("\n"));
     await writeFile(join(foreignSessions, "foreign.jsonl"), [
@@ -167,6 +173,15 @@ describe("search extension", () => {
       query: "grinder",
       limit: 5,
     });
+    const defaultRoles = await tools.get("session_search")!.execute("session-default-roles", {
+      query: "tool-only-memory-result",
+      limit: 5,
+    });
+    const explicitToolResult = await tools.get("session_search")!.execute("session-tool-result", {
+      query: "tool-only-memory-result",
+      roles: ["toolResult"],
+      limit: 5,
+    });
     const foreign = await tools.get("session_search")!.execute("session-foreign", {
       query: "foreign-private-needle",
       limit: 5,
@@ -187,6 +202,14 @@ describe("search extension", () => {
       ok: true,
       result: { results: [expect.objectContaining({ source: "session" })] },
     });
+    expect(defaultRoles.details).toMatchObject({
+      ok: true,
+      result: { results: [] },
+    });
+    expect(explicitToolResult.details).toMatchObject({
+      ok: true,
+      result: { results: [expect.objectContaining({ source: "session", role: "toolResult" })] },
+    });
     expect(foreign.details).toMatchObject({
       ok: true,
       result: { results: [] },
@@ -196,7 +219,7 @@ describe("search extension", () => {
       result: {
         schemaVersion: 1,
         memoryDocuments: 1,
-        sessionDocuments: 1,
+        sessionDocuments: 2,
       },
     });
     expect(invalid.details).toMatchObject({
