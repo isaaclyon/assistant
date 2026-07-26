@@ -3,17 +3,23 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 
 type Thinking = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+type Model = typeof MODELS[number];
 interface Target { chatId: number; threadId?: number }
-interface Task { task: string; context?: string; model?: string; thinking?: Thinking }
+interface Task { task: string; context?: string; model?: Model; thinking?: Thinking }
 interface Service {
-  launch(input: { tasks: Task[]; model?: string; thinking?: Thinking; origin?: Target }): Promise<{ batchId: string; jobIds: string[] }>;
+  launch(input: { tasks: Task[]; model?: Model; thinking?: Thinking; origin?: Target }): Promise<{ batchId: string; jobIds: string[] }>;
   list(filter?: { status?: "active" | "terminal" }): unknown[];
   inspect(jobId: string): unknown;
   collect(input: { batchId?: string; jobIds?: string[] }): { jobs: unknown[] };
   cancel(input: { batchId?: string; jobId?: string }): Promise<void>;
 }
 interface TelegramTargetScope { getActiveTarget(): Target | undefined }
-const DEFAULT_MODEL = "openai-codex/gpt-5.6-luna";
+const MODELS = [
+  "openai-codex/gpt-5.6-luna",
+  "openai-codex/gpt-5.6-sol",
+  "openai-codex/gpt-5.6-terra",
+] as const;
+const DEFAULT_MODEL: Model = MODELS[0];
 const SERVICE_KEY = Symbol.for("pi-telegram-bridge.subagent-registry");
 const TARGET_KEY = Symbol.for("pi-telegram-bridge.target-scope-registry");
 
@@ -30,7 +36,7 @@ function getOrigin(): Target | undefined {
     ? (scope as TelegramTargetScope).getActiveTarget()
     : undefined;
 }
-function validateModel(model: string, thinking: Thinking, ctx: ExtensionContext): void {
+function validateModel(model: Model, thinking: Thinking, ctx: ExtensionContext): void {
   const slash = model.indexOf("/");
   const resolved = slash < 1 || slash === model.length - 1
     ? undefined
@@ -42,10 +48,11 @@ function validateModel(model: string, thinking: Thinking, ctx: ExtensionContext)
 }
 
 const ThinkingSchema = StringEnum(["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const);
+const ModelSchema = StringEnum(MODELS);
 const TaskSchema = Type.Object({
   task: Type.String({ minLength: 1, maxLength: 16_384 }),
   context: Type.Optional(Type.String({ maxLength: 32_768 })),
-  model: Type.Optional(Type.String()),
+  model: Type.Optional(ModelSchema),
   thinking: Type.Optional(ThinkingSchema),
 });
 
@@ -62,7 +69,7 @@ export default function backgroundSubagents(pi: ExtensionAPI): void {
     parameters: Type.Object({
       operation: StringEnum(["launch", "list", "inspect", "cancel", "collect"] as const),
       tasks: Type.Optional(Type.Array(TaskSchema)),
-      model: Type.Optional(Type.String()),
+      model: Type.Optional(ModelSchema),
       thinking: Type.Optional(ThinkingSchema),
       status: Type.Optional(StringEnum(["active", "terminal"] as const)),
       job_id: Type.Optional(Type.String()),
