@@ -31,6 +31,7 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 | Background subagent batches and temporary sessions | `<stateDir>/subagents/` | Host |
 | Private place rankings and active comparisons | `<stateDir>/places.db` | Places extension/store |
 | Personal memory vault | `~/.local/share/pi-telegram-bridge/memory` (override: `PI_TELEGRAM_MEMORY_DIR`) | `personal-memory` skill CLI |
+| Derived memory/session search index | `<stateDir>/search-index.db` | Search extension/coordinator |
 | Process logs | user journal | systemd |
 
 Fleet mode replaces singleton state rows with per-instance paths under
@@ -108,9 +109,13 @@ disposable derived state compiled directly from notes. A repo-local extension
 appends it to the system prompt at each `before_agent_start`, but only while the
 host's token-guarded process-local runtime marker is bound; ordinary Pi sessions
 in this repository do not receive it. Compilation errors are logged by Pi and
-the turn continues without core memory. There is no generated file, memory
-daemon, database, or cache. Any future full-text index must be derived and
-disposable, rebuilt from the Markdown. Every note has a `personal` scope with a
+the turn continues without core memory. There is no generated core file or
+memory daemon. A per-instance private SQLite/FTS5 database is a disposable
+search projection over canonical Markdown and configured Pi session JSONL.
+The repo-local search extension exposes separate `memory_search` and
+`session_search` tools plus explicit index maintenance; assistant guidance
+prefers indexed memory retrieval while the scan backend remains a compatibility
+fallback. Every note has a `personal` scope with a
 trusted owner or a `household` scope without an owner. Host-bound principal/view
 values filter every read, search, list, core compilation, and mutation: Isaac
 and Emma each see their own plus household; the household sees only household;
@@ -133,6 +138,9 @@ The bridge reads this opt-in from a user-owned environment file outside release
 deployment, and Git children discard ambient repository-routing variables,
 hooks, signing, and unbounded execution. It never pushes; see
 [ADR-0018](docs/adr/0018-commit-agent-mediated-memory-mutations-locally.md).
+Derived search storage, incremental session reconciliation, and the
+memory/session evidence boundary are defined by
+[ADR-0026](docs/adr/0026-use-derived-fts-indexes-for-memory-and-session-search.md).
 
 ## Startup
 

@@ -193,7 +193,8 @@ be inspected. Forgetting does not remove prior content from Git history.
 // delete — confirmId must equal id; data: {"id":…,"deleted":true}
 {"id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","ifRevision":"sha256:…","confirmId":"2f5f167d-7a18-4457-8de7-f2f801f1e934"}
 
-// search — data: {results, truncated, scanTruncated, warnings, warningsTruncated}
+// search — compatibility filesystem scan; prefer the memory_search tool
+// data: {results, truncated, scanTruncated, warnings, warningsTruncated}
 {"query":"coffee preference","types":["preference"],"statuses":["active"],"limit":10}
 
 // list — data: {memories:[metadata…]} sorted by updated desc
