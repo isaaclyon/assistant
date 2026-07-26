@@ -141,7 +141,7 @@
     },
     {
       "id": "builder",
-      "extensions": ["deploy", "reload", "restart", "skills", "subagents"],
+      "extensions": ["deploy", "reload", "restart", "skills", "search", "subagents"],
       "skills": [
         "agent-browser",
         "check-weather",
