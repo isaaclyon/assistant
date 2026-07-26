@@ -209,6 +209,9 @@ describe("capability profiles", () => {
       ]),
     );
     expect(
+      profiles.find((profile) => profile.profileId === "builder")?.extensionPaths,
+    ).toEqual(expect.arrayContaining([expect.stringContaining("extensions/search.ts")]));
+    expect(
       profiles.find((profile) => profile.profileId === "household-shared")
         ?.skillPaths,
     ).not.toEqual(
