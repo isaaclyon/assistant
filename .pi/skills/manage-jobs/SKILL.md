@@ -15,6 +15,33 @@ The host runs each due job by injecting a prompt as a new agent turn; the final
 reply is delivered to the paired Telegram chat automatically. Write prompts as
 instructions to your future self (they arrive with a short job-fired preamble).
 
+## Use the jobs helper
+
+For normal listing and mutations, use `scripts/jobs-cli.mjs` from this skill
+instead of locating or editing `jobs.json` manually. Send exactly one JSON
+request on stdin. The helper resolves the fleet coordinator, upgrades writes to
+schema 3, prunes fired one-time jobs, writes atomically, waits for host reload,
+and rolls back a rejected edit.
+
+```bash
+printf '%s' '{"operation":"list"}' | node scripts/jobs-cli.mjs
+
+printf '%s' '{"operation":"add_at","id":"vet-call","target":"isaac","in":"45m","prompt":"Remind Isaac to call the vet."}' \
+  | node scripts/jobs-cli.mjs
+
+printf '%s' '{"operation":"upsert","job":{"id":"morning-brief","type":"cron","target":"isaac","schedule":"0 8 * * *","tz":"America/Denver","prompt":"Give Isaac his morning brief."}}' \
+  | node scripts/jobs-cli.mjs
+
+printf '%s' '{"operation":"remove","id":"vet-call"}' | node scripts/jobs-cli.mjs
+```
+
+`add_at` accepts exactly one of `at` (an ISO timestamp) or `in` (a positive
+duration using `s`, `m`, `h`, or `d`). `upsert` accepts a complete cron, at,
+heartbeat, or webhook definition and therefore remains the generic path for all
+job types. Always inspect the returned JSON and report failure rather than
+claiming the schedule changed. Do not pass secrets in command-line arguments;
+stdin keeps structured requests out of process listings.
+
 ## Listing jobs and status
 
 When the user asks what jobs, schedules, reminders, heartbeats, or triggers are
@@ -46,7 +73,10 @@ Use exact timestamps when they matter, translated to the job's timezone when
 practical. Distinguish configuration from observed runtime state and say when a
 state file is missing or malformed rather than guessing.
 
-## Editing rules
+## Manual editing fallback
+
+Use this only if the helper is unavailable or cannot represent the required
+recovery:
 
 1. Read the current file first (it may not exist yet; start from the template below).
 2. Write the full new content to a temp file, then `mv` it over `jobs.json` (atomic — the host must never see a half-written file).
@@ -57,17 +87,17 @@ state file is missing or malformed rather than guessing.
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "jobs": [
-    { "id": "morning-brief", "type": "cron", "schedule": "0 8 * * *", "tz": "America/Denver",
+    { "id": "morning-brief", "type": "cron", "target": "isaac", "schedule": "0 8 * * *", "tz": "America/Denver",
       "prompt": "Give me my morning brief: weather, calendar, top news." },
-    { "id": "vet-call", "type": "at", "at": "2026-07-18T15:00:00-06:00",
+    { "id": "vet-call", "type": "at", "target": "isaac", "at": "2026-07-18T15:00:00-06:00",
       "prompt": "Remind Isaac to call the vet." },
-    { "id": "price-watch", "type": "heartbeat", "schedule": "0 9 * * *", "tz": "America/Denver",
+    { "id": "price-watch", "type": "heartbeat", "target": "isaac", "schedule": "0 9 * * *", "tz": "America/Denver",
       "checker": { "id": "product-price" },
       "rule": { "type": "changed" },
       "onTrigger": { "type": "prompt", "prompt": "Tell me the old and new prices." } },
-    { "id": "gh-events", "type": "webhook",
+    { "id": "gh-events", "type": "webhook", "target": "builder",
       "hmacSecret": "<openssl rand -hex 32>",
       "prompt": "A GitHub webhook arrived. Summarize what happened and whether action is needed." }
   ]
@@ -75,6 +105,7 @@ state file is missing or malformed rather than guessing.
 ```
 
 - `id`: unique, `[a-z0-9-]`, max 64 chars.
+- `target`: required in schema 3; a configured instance ID or supported fan-out target.
 - `type: "cron"` — recurring; `schedule` is a 5-field cron expression, `tz` an optional IANA zone (default: server local time). Occurrences missed while the bridge is down are skipped.
 - `type: "at"` — one-time reminder at an ISO 8601 timestamp; fires once (late if the bridge was down), then stays inert. Prune fired/stale `at` jobs whenever you edit the file.
 - `type: "heartbeat"` — recurring like cron, but runs a structured checker and
