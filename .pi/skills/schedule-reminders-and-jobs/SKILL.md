@@ -1,5 +1,5 @@
 ---
-name: manage-jobs
+name: schedule-reminders-and-jobs
 description: "Creates, edits, lists, and removes scheduled jobs and triggers for this bridge: recurring cron prompts, one-time reminders, stateful heartbeat observations, and incoming webhooks. Use when the user asks to schedule something, set a reminder, run something periodically, watch for a change or sustained condition, or wire up a webhook."
 ---
 
