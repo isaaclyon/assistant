@@ -21,7 +21,7 @@ The host schedules and triggers; the agent authors the job definitions.
   The host watches it (fs.watch plus an mtime check on each tick) and
   hot-reloads with last-good semantics; it never writes that file. Host-owned
   run state (`lastRun`, `fired` for one-shot jobs, `lastLoadError`) lives in a
-  separate `jobs-state.json`, written atomically. A `manage-jobs` skill and a
+  separate `jobs-state.json`, written atomically. A `schedule-reminders-and-jobs` skill and a
   `npm run jobs:check` validator teach the agent the workflow; there are no
   Telegram CRUD commands.
 - A single 30-second tick loop (`src/jobs.ts`, `croner` for cron/DST math)

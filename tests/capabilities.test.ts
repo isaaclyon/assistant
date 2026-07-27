@@ -23,8 +23,8 @@ const validManifest = {
         enabled: true,
       },
       {
-        id: "manage-jobs",
-        path: ".pi/skills/manage-jobs/SKILL.md",
+        id: "schedule-reminders-and-jobs",
+        path: ".pi/skills/schedule-reminders-and-jobs/SKILL.md",
         enabled: true,
       },
     ],
@@ -40,13 +40,13 @@ const validManifest = {
     {
       id: "personal-isaac",
       extensions: ["core-memory", "reload"],
-      skills: ["personal-memory", "manage-jobs"],
+      skills: ["personal-memory", "schedule-reminders-and-jobs"],
       instructions: "telegram-default",
     },
     {
       id: "household-shared",
       extensions: ["reload"],
-      skills: ["manage-jobs"],
+      skills: ["schedule-reminders-and-jobs"],
       instructions: "telegram-default",
     },
   ],
@@ -59,7 +59,7 @@ describe("capability profiles", () => {
     expect(selectCapabilityProfile(manifest, "personal-isaac")).toEqual({
       id: "personal-isaac",
       extensions: ["core-memory", "reload"],
-      skills: ["personal-memory", "manage-jobs"],
+      skills: ["personal-memory", "schedule-reminders-and-jobs"],
       instructions: "telegram-default",
     });
     expect(selectCapabilityProfile(manifest, "household-shared").extensions).toEqual([
@@ -139,7 +139,7 @@ describe("capability profiles", () => {
       ],
       skillPaths: [
         join(canonicalRoot, ".pi", "skills", "personal-memory", "SKILL.md"),
-        join(canonicalRoot, ".pi", "skills", "manage-jobs", "SKILL.md"),
+        join(canonicalRoot, ".pi", "skills", "schedule-reminders-and-jobs", "SKILL.md"),
       ],
       instructionsPath: join(canonicalRoot, ".pi", "telegram", "AGENTS.md"),
     });
@@ -149,7 +149,7 @@ describe("capability profiles", () => {
       profileId: "household-shared",
       extensionPaths: [join(canonicalRoot, ".pi", "extensions", "reload.ts")],
       skillPaths: [
-        join(canonicalRoot, ".pi", "skills", "manage-jobs", "SKILL.md"),
+        join(canonicalRoot, ".pi", "skills", "schedule-reminders-and-jobs", "SKILL.md"),
       ],
     });
   });

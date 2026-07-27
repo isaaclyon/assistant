@@ -7,9 +7,9 @@ import { describe, expect, it } from "vitest";
 import {
   applyJobsRequest,
   resolveCoordinatorStateDir,
-} from "../.pi/skills/manage-jobs/scripts/jobs-cli.mjs";
+} from "../.pi/skills/schedule-reminders-and-jobs/scripts/jobs-cli.mjs";
 
-describe("manage-jobs helper", () => {
+describe("schedule-reminders-and-jobs helper", () => {
   it("resolves the fleet coordinator from the private instance manifest", async () => {
     const root = await mkdtemp(join(tmpdir(), "jobs-cli-fleet-"));
     const manifestPath = join(root, "instances.json");
