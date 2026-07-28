@@ -226,9 +226,17 @@ describe("capability profiles", () => {
       profiles.find((profile) => profile.profileId === "personal-isaac")?.skillPaths,
     ).toEqual(
       expect.arrayContaining([
+        expect.stringContaining("google-calendar/SKILL.md"),
         expect.stringContaining("reserve-restaurant/SKILL.md"),
       ]),
     );
+    for (const profileId of ["personal-emma", "household-shared", "builder"]) {
+      expect(profiles.find((profile) => profile.profileId === profileId)?.skillPaths).not.toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("google-calendar/SKILL.md"),
+        ]),
+      );
+    }
     for (const profileId of ["personal-emma", "household-shared", "builder"]) {
       expect(profiles.find((profile) => profile.profileId === profileId)?.skillPaths).not.toEqual(
         expect.arrayContaining([
