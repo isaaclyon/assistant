@@ -38,6 +38,11 @@
         "enabled": true
       },
       {
+        "id": "google-workspace",
+        "path": ".pi/extensions/google-workspace.ts",
+        "enabled": true
+      },
+      {
         "id": "subagents",
         "path": ".pi/extensions/subagents/index.ts",
         "enabled": true
@@ -101,7 +106,7 @@
   "profiles": [
     {
       "id": "personal-isaac",
-      "extensions": ["core-memory", "reload", "restart", "skills", "search", "places", "subagents"],
+      "extensions": ["core-memory", "reload", "restart", "skills", "search", "places", "google-workspace", "subagents"],
       "skills": [
         "agent-browser",
         "check-weather",

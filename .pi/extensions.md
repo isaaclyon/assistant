@@ -15,3 +15,7 @@ are type-checked by `npm run check` via `tsconfig.extensions.json`.
   finish-line prompt and exposes it in Telegram autocomplete.
 - `skills.ts`: the `/skills` command. Lists available skills with a short
   description of each; menu-visible in Telegram autocomplete.
+- `google-workspace.ts`: one typed, allowlisted Google integration tool backed
+  by externally configured `gogcli`. The foundation exposes only account status;
+  service operations are added by their feature issues. See `docs/google-workspace.md`
+  and ADR-0027.
