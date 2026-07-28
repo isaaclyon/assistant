@@ -64,6 +64,35 @@ describe("credential environment scopes", () => {
     }
   });
 
+  it("accepts non-secret Google runtime pointers without returning their values", async () => {
+    const root = await mkdtemp(join(tmpdir(), "bridge-google-config-"));
+    const path = join(root, "instance.env");
+    await writeFile(
+      path,
+      [
+        "PI_TELEGRAM_CREDENTIAL_SCOPE=isaac-personal",
+        "PI_TELEGRAM_GOG_BINARY=/home/linuxbrew/.linuxbrew/bin/gog",
+        "PI_TELEGRAM_GOG_HOME=/private/gog-home",
+        "PI_TELEGRAM_GOG_KEYRING_PASSWORD_FILE=/private/google-keyring-password",
+        "PI_TELEGRAM_GOOGLE_ACCOUNT=owner@example.com",
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+
+    const result = await validateCredentialEnvironmentFile(path, "isaac-personal");
+
+    expect(result.keys).toEqual([
+      "PI_TELEGRAM_CREDENTIAL_SCOPE",
+      "PI_TELEGRAM_GOG_BINARY",
+      "PI_TELEGRAM_GOG_HOME",
+      "PI_TELEGRAM_GOG_KEYRING_PASSWORD_FILE",
+      "PI_TELEGRAM_GOOGLE_ACCOUNT",
+    ]);
+    expect(JSON.stringify(result)).not.toContain("owner@example.com");
+    expect(JSON.stringify(result)).not.toContain("google-keyring-password");
+  });
+
   it("rejects a personal credential in Shared without exposing its value", async () => {
     const root = await mkdtemp(join(tmpdir(), "bridge-shared-credentials-"));
     const path = join(root, "shared.env");
