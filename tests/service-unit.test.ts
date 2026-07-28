@@ -35,7 +35,7 @@ describe("renderServiceUnit", () => {
       'Environment="PI_TELEGRAM_CODEX_CONFIG=/home/test/.config/telegram-codex.json"',
     );
     expect(unit).toContain(
-      'EnvironmentFile=-"/home/test/.config/pi-telegram-bridge/environment"',
+      'EnvironmentFile="-/home/test/.config/pi-telegram-bridge/environment"',
     );
     expect(unit).not.toContain("PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT=");
     expect(unit.indexOf("EnvironmentFile=")).toBeGreaterThan(
@@ -107,7 +107,7 @@ describe("renderServiceUnit", () => {
       'Environment="PI_TELEGRAM_BRIDGE_STATE_ROOT=/var/lib/pi-telegram-bridge"',
     );
     expect(rendered.contents).toContain(
-      'EnvironmentFile=-"/home/test/.config/pi-telegram-bridge/instances/emma.env"',
+      'EnvironmentFile="-/home/test/.config/pi-telegram-bridge/instances/emma.env"',
     );
     expect(rendered.contents).toContain("Restart=on-failure");
     expect(rendered.contents).toContain("UMask=0077");
