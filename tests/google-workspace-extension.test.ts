@@ -90,6 +90,418 @@ describe("google workspace extension", () => {
     expect(JSON.stringify(tool.parameters)).not.toContain("command");
   });
 
+  it("lists calendars through an explicitly selected account alias", async () => {
+    const tools = new Map<string, ToolDefinition>();
+    const run = vi.fn().mockResolvedValue({
+      calendars: [
+        {
+          id: "primary",
+          summary: "Personal instructions from a remote calendar",
+          description: "must not be returned",
+          timeZone: "America/Denver",
+          primary: true,
+          selected: true,
+          accessRole: "owner",
+        },
+      ],
+      nextPageToken: "more-private-data",
+    });
+    const module = await import(`${extensionUrl}?calendars=${Date.now()}`) as {
+      registerGoogleWorkspaceTool(
+        pi: { registerTool(tool: ToolDefinition): void },
+        options: {
+          resolveRuntime(): Promise<{ account?: string }>;
+          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+        },
+      ): void;
+    };
+    module.registerGoogleWorkspaceTool(
+      { registerTool: (tool) => tools.set(tool.name, tool) },
+      { resolveRuntime: async () => ({ account: "personal" }), run },
+    );
+
+    const result = await tools.get("google_workspace")!.execute("call-calendar-list", {
+      operation: "calendar_list",
+      account: "work",
+      max_results: 10,
+    });
+
+    expect(run).toHaveBeenCalledWith(
+      [
+        "--no-input",
+        "--readonly",
+        "--gmail-no-send",
+        "--wrap-untrusted",
+        "--json",
+        "--account",
+        "work",
+        "calendar",
+        "calendars",
+        "--max=10",
+      ],
+      undefined,
+    );
+    expect(result.details).toEqual({
+      ok: true,
+      result: {
+        operation: "calendar_list",
+        account: "work",
+        calendars: [
+          {
+            id: "primary",
+            summary: "Personal instructions from a remote calendar",
+            timeZone: "America/Denver",
+            primary: true,
+            selected: true,
+            accessRole: "owner",
+            untrusted: true,
+          },
+        ],
+        truncated: true,
+      },
+      error: null,
+    });
+    expect(JSON.stringify(result)).not.toContain("must not be returned");
+    expect(JSON.stringify(result)).not.toContain("more-private-data");
+  });
+
+  it("resolves a configured account alias for account status without exposing its address", async () => {
+    const tools = new Map<string, ToolDefinition>();
+    const run = vi.fn()
+      .mockResolvedValueOnce({
+        accounts: [{ email: "private-work-address@example.com", services: ["calendar"] }],
+      })
+      .mockResolvedValueOnce({ aliases: { work: "private-work-address@example.com" } });
+    const module = await import(`${extensionUrl}?account-alias=${Date.now()}`) as {
+      registerGoogleWorkspaceTool(
+        pi: { registerTool(tool: ToolDefinition): void },
+        options: {
+          resolveRuntime(): Promise<{ account?: string }>;
+          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+        },
+      ): void;
+    };
+    module.registerGoogleWorkspaceTool(
+      { registerTool: (tool) => tools.set(tool.name, tool) },
+      { resolveRuntime: async () => ({ account: "work" }), run },
+    );
+
+    const result = await tools.get("google_workspace")!.execute("call-account-alias", {
+      operation: "account_status",
+    });
+
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[1]?.[0]).toEqual(expect.arrayContaining(["auth", "alias", "list"]));
+    expect(result.details).toEqual({
+      ok: true,
+      result: { operation: "account_status", account: "work", authenticated: true, services: ["calendar"] },
+      error: null,
+    });
+    expect(JSON.stringify(result)).not.toContain("private-work-address@example.com");
+  });
+
+  it("normalizes timed, all-day, recurring, cancelled, timezone, and empty event cases", async () => {
+    const tools = new Map<string, ToolDefinition>();
+    const run = vi.fn()
+      .mockResolvedValueOnce({
+        events: [
+          {
+            id: "cancelled-id",
+            status: "cancelled",
+            summary: "Cancelled event",
+            start: { dateTime: "2026-08-01T09:00:00-06:00" },
+            end: { dateTime: "2026-08-01T10:00:00-06:00" },
+          },
+          {
+            id: "all-day-id",
+            status: "confirmed",
+            summary: "All day",
+            description: "d".repeat(3_000),
+            location: "Park",
+            start: { date: "2026-08-02" },
+            end: { date: "2026-08-03" },
+            timezone: "America/Denver",
+          },
+          {
+            id: "recurring-id",
+            status: "confirmed",
+            summary: "Recurring instance",
+            start: { dateTime: "2026-08-03T09:00:00-06:00", timeZone: "America/Denver" },
+            end: { dateTime: "2026-08-03T09:30:00-06:00", timeZone: "America/Denver" },
+            startLocal: "2026-08-03T11:00:00-04:00",
+            endLocal: "2026-08-03T11:30:00-04:00",
+            timezone: "America/New_York",
+            recurringEventId: "series-id",
+            calendarId: "team@example.com",
+          },
+        ],
+        nextPageTokens: { primary: "private-page-token" },
+      })
+      .mockResolvedValueOnce({ events: [] });
+    const module = await import(`${extensionUrl}?events=${Date.now()}`) as {
+      registerGoogleWorkspaceTool(
+        pi: { registerTool(tool: ToolDefinition): void },
+        options: {
+          resolveRuntime(): Promise<{ account?: string }>;
+          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+        },
+      ): void;
+    };
+    module.registerGoogleWorkspaceTool(
+      { registerTool: (tool) => tools.set(tool.name, tool) },
+      { resolveRuntime: async () => ({ account: "personal" }), run },
+    );
+    const tool = tools.get("google_workspace")!;
+
+    const result = await tool.execute("call-events", {
+      operation: "calendar_events",
+      account: "personal",
+      calendar_ids: ["primary", "team@example.com"],
+      from: "2026-08-01T00:00:00-06:00",
+      to: "2026-08-08T00:00:00-06:00",
+      time_zone: "America/New_York",
+      max_results: 20,
+    });
+
+    expect(run).toHaveBeenCalledWith(
+      [
+        "--no-input", "--readonly", "--gmail-no-send", "--wrap-untrusted", "--json",
+        "--account", "personal", "calendar", "events",
+        "primary", "team@example.com",
+        "--from=2026-08-01T00:00:00-06:00", "--to=2026-08-08T00:00:00-06:00",
+        "--max=20", "--timezone=America/New_York", "--sort=start",
+      ],
+      undefined,
+    );
+    expect(result.details).toMatchObject({
+      ok: true,
+      result: {
+        operation: "calendar_events",
+        account: "personal",
+        truncated: true,
+        events: [
+          {
+            id: "all-day-id",
+            summary: "All day",
+            location: "Park",
+            start: "2026-08-02",
+            end: "2026-08-03",
+            allDay: true,
+            timeZone: "America/Denver",
+            untrusted: true,
+          },
+          {
+            id: "recurring-id",
+            calendarId: "team@example.com",
+            start: "2026-08-03T11:00:00-04:00",
+            end: "2026-08-03T11:30:00-04:00",
+            allDay: false,
+            timeZone: "America/New_York",
+            recurringEventId: "series-id",
+            untrusted: true,
+          },
+        ],
+      },
+    });
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("Cancelled event");
+    expect(serialized).not.toContain("d".repeat(2_001));
+
+    const empty = await tool.execute("call-empty", {
+      operation: "calendar_events",
+      from: "2026-08-08",
+      to: "2026-08-09",
+    });
+    expect(empty.details).toMatchObject({ ok: true, result: { events: [], truncated: false } });
+  });
+
+  it("searches only within a bounded event window", async () => {
+    const tools = new Map<string, ToolDefinition>();
+    const run = vi.fn().mockResolvedValue({
+      events: [
+        {
+          id: "first",
+          status: "confirmed",
+          start: { dateTime: "2026-01-02T10:00:00Z" },
+          end: { dateTime: "2026-01-02T11:00:00Z" },
+        },
+        {
+          id: "second",
+          status: "confirmed",
+          start: { dateTime: "2026-01-03T10:00:00Z" },
+          end: { dateTime: "2026-01-03T11:00:00Z" },
+        },
+      ],
+    });
+    const module = await import(`${extensionUrl}?search=${Date.now()}`) as {
+      registerGoogleWorkspaceTool(
+        pi: { registerTool(tool: ToolDefinition): void },
+        options: {
+          resolveRuntime(): Promise<{ account?: string }>;
+          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+        },
+      ): void;
+    };
+    module.registerGoogleWorkspaceTool(
+      { registerTool: (tool) => tools.set(tool.name, tool) },
+      { resolveRuntime: async () => ({ account: "personal" }), run },
+    );
+
+    const result = await tools.get("google_workspace")!.execute("call-search", {
+      operation: "calendar_search",
+      query: "dentist",
+      calendar_ids: ["primary"],
+      from: "2026-01-01",
+      to: "2026-02-01",
+      max_results: 1,
+    });
+
+    expect(run.mock.calls[0]?.[0]).toContain("--query=dentist");
+    expect(result.details).toMatchObject({
+      ok: true,
+      result: {
+        operation: "calendar_search",
+        account: "personal",
+        query: "dentist",
+        events: [{ id: "first" }],
+        truncated: true,
+      },
+    });
+
+    const unbounded = await tools.get("google_workspace")!.execute("call-unbounded", {
+      operation: "calendar_search",
+      query: "dentist",
+      from: "2020-01-01",
+      to: "2026-01-01",
+    });
+    expect(unbounded.details).toMatchObject({
+      ok: false,
+      error: { code: "GOOGLE_CALENDAR_WINDOW_INVALID" },
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+
+    const optionLikeCalendar = await tools.get("google_workspace")!.execute("call-option-like", {
+      operation: "calendar_events",
+      calendar_ids: ["--all"],
+      from: "2026-01-01",
+      to: "2026-02-01",
+    });
+    expect(optionLikeCalendar.details).toMatchObject({
+      ok: false,
+      error: { code: "GOOGLE_CALENDAR_INPUT_INVALID" },
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports availability conflicts across independently selected accounts", async () => {
+    const tools = new Map<string, ToolDefinition>();
+    const run = vi.fn()
+      .mockResolvedValueOnce({
+        calendars: { primary: { busy: [{ start: "2026-08-01T10:00:00Z", end: "2026-08-01T11:00:00Z" }] } },
+      })
+      .mockResolvedValueOnce({
+        calendars: { primary: { busy: [{ start: "2026-08-01T10:30:00Z", end: "2026-08-01T12:00:00Z" }] } },
+      })
+      .mockResolvedValueOnce({
+        calendars: { primary: { errors: [{ reason: "notFound" }], busy: [] } },
+      });
+    const module = await import(`${extensionUrl}?availability=${Date.now()}`) as {
+      registerGoogleWorkspaceTool(
+        pi: { registerTool(tool: ToolDefinition): void },
+        options: {
+          resolveRuntime(): Promise<{ account?: string }>;
+          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+        },
+      ): void;
+    };
+    module.registerGoogleWorkspaceTool(
+      { registerTool: (tool) => tools.set(tool.name, tool) },
+      { resolveRuntime: async () => ({ account: "personal" }), run },
+    );
+
+    const result = await tools.get("google_workspace")!.execute("call-availability", {
+      operation: "calendar_availability",
+      accounts: ["personal", "work"],
+      calendar_ids: ["primary"],
+      from: "2026-08-01T09:00:00Z",
+      to: "2026-08-01T13:00:00Z",
+    });
+
+    expect(run).toHaveBeenNthCalledWith(1, expect.arrayContaining(["--account", "personal"]), undefined);
+    expect(run).toHaveBeenNthCalledWith(2, expect.arrayContaining(["--account", "work"]), undefined);
+    expect(result.details).toEqual({
+      ok: true,
+      result: {
+        operation: "calendar_availability",
+        from: "2026-08-01T09:00:00Z",
+        to: "2026-08-01T13:00:00Z",
+        accounts: [
+          {
+            account: "personal",
+            calendars: [{ id: "primary", busy: [{ start: "2026-08-01T10:00:00Z", end: "2026-08-01T11:00:00Z" }] }],
+            truncated: false,
+          },
+          {
+            account: "work",
+            calendars: [{ id: "primary", busy: [{ start: "2026-08-01T10:30:00Z", end: "2026-08-01T12:00:00Z" }] }],
+            truncated: false,
+          },
+        ],
+        conflicts: [
+          { start: "2026-08-01T10:30:00.000Z", end: "2026-08-01T11:00:00.000Z", accounts: ["personal", "work"] },
+        ],
+        truncated: false,
+      },
+      error: null,
+    });
+
+    const partial = await tools.get("google_workspace")!.execute("call-partial-availability", {
+      operation: "calendar_availability",
+      accounts: ["personal"],
+      calendar_ids: ["primary"],
+      from: "2026-08-01T09:00:00Z",
+      to: "2026-08-01T13:00:00Z",
+    });
+    expect(partial.details).toMatchObject({
+      ok: false,
+      error: { code: "GOOGLE_CALENDAR_UNAVAILABLE" },
+    });
+  });
+
+  it("identifies the selected account in redacted calendar errors", async () => {
+    const tools = new Map<string, ToolDefinition>();
+    const run = vi.fn().mockRejectedValue(new Error("credential path and private stderr"));
+    const module = await import(`${extensionUrl}?calendar-error=${Date.now()}`) as {
+      registerGoogleWorkspaceTool(
+        pi: { registerTool(tool: ToolDefinition): void },
+        options: {
+          resolveRuntime(): Promise<{ account?: string }>;
+          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+        },
+      ): void;
+    };
+    module.registerGoogleWorkspaceTool(
+      { registerTool: (tool) => tools.set(tool.name, tool) },
+      { resolveRuntime: async () => ({ account: "personal" }), run },
+    );
+
+    const result = await tools.get("google_workspace")!.execute("call-failure", {
+      operation: "calendar_events",
+      account: "work",
+      from: "2026-08-01",
+      to: "2026-08-02",
+    });
+    expect(result.details).toMatchObject({
+      ok: false,
+      error: {
+        code: "GOOGLE_CALENDAR_UNAVAILABLE",
+        message: "Google Calendar is temporarily unavailable for account work",
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("credential path");
+    expect(JSON.stringify(result)).not.toContain("private stderr");
+  });
+
   it("requires an explicit or configured account and returns redacted failures", async () => {
     const tools = new Map<string, ToolDefinition>();
     const run = vi.fn().mockRejectedValue(new Error("secret stderr and token"));
@@ -169,6 +581,13 @@ describe("google workspace extension", () => {
     ).resolves.toEqual({ password: "keyring-secret", home: root });
 
     await writeFile(executable, "#!/usr/bin/env node\nprocess.stdout.write('not json')\n", {
+      mode: 0o700,
+    });
+    await expect(
+      module.runGogJson({ binary: executable, passwordFile: passwordPath, gogHome: root, args: [] }),
+    ).rejects.toThrow("Google Workspace command failed");
+
+    await writeFile(executable, "#!/usr/bin/env node\nprocess.stderr.write('partial calendar failure')\nprocess.stdout.write('{}')\n", {
       mode: 0o700,
     });
     await expect(

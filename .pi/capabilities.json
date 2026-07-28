@@ -60,6 +60,11 @@
         "enabled": true
       },
       {
+        "id": "google-calendar",
+        "path": ".pi/skills/google-calendar/SKILL.md",
+        "enabled": true
+      },
+      {
         "id": "extend-this-agent",
         "path": ".pi/skills/extend-this-agent/SKILL.md",
         "enabled": true
@@ -110,6 +115,7 @@
       "skills": [
         "agent-browser",
         "check-weather",
+        "google-calendar",
         "schedule-reminders-and-jobs",
         "manage-ynab",
         "personal-memory",
