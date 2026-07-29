@@ -166,6 +166,7 @@ if [[ -f "$FLEET_MANIFEST" ]]; then
     .pi/skills \
     .pi/settings.json \
     .agents/skills
+  bash "$RELEASE_PATH/scripts/activate-messages-link.sh" "$RELEASE_PATH"
   "$NODE_BINARY" "$RELEASE_PATH/dist/src/deployment-notify.js" \
     "$FLEET_MANIFEST" "$AGENT_DIR" "$EXPECTED_SHA"
   echo "==> Fleet deployment complete at $(git rev-parse --short HEAD)"
@@ -206,9 +207,11 @@ if ! MAIN_PID="$(wait_for_service_ready "$ACTIVATION_TIME")"; then
   false
 fi
 
-echo "==> Deployment complete at $(git rev-parse --short HEAD), PID $MAIN_PID"
 ACTIVATION_STARTED=false
 [[ -z "$UNIT_BACKUP" ]] || rm -f "$UNIT_BACKUP"
+bash "$RELEASE_PATH/scripts/activate-messages-link.sh" "$RELEASE_PATH"
+
+echo "==> Deployment complete at $(git rev-parse --short HEAD), PID $MAIN_PID"
 find "$RELEASE_ROOT" -mindepth 1 -maxdepth 1 -type d \
   ! -name "$EXPECTED_SHA" -printf '%T@ %p\n' \
   | sort -nr | tail -n +4 | cut -d' ' -f2- | xargs -r rm -rf

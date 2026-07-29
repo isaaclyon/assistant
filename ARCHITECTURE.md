@@ -7,6 +7,7 @@
 - **pi-telegram:** owns Telegram polling, pairing, routing, rendering, controls, and update-offset persistence.
 - **systemd:** owns one unit per instance, boot activation, restart policy, and logs.
 - **GitHub Actions:** owns post-merge validation and serialized production deployment through the server's repository-scoped runner.
+- **Tailscale Serve:** owns tailnet-only HTTPS and static delivery for editable Messages links.
 
 The host loads a full-commit-pinned `isaaclyon/pi-telegram` fork through Pi's `DefaultResourceLoader` and binds extensions in RPC mode. A version- and source-checked postinstall patch replaces raw tool-call status labels with deterministic, privacy-safe activity descriptions; see [ADR-0007](docs/adr/0007-patch-telegram-tool-activity-labels.md). The RPC binding includes Pi's official command-context session actions (`waitForIdle`, `newSession`, `fork`, tree navigation, session switching, and reload). The fork's narrow process-local host capability delegates Telegram `/new` to `AgentSessionRuntime.newSession()` without exposing the runtime or retaining stale extension contexts. In fleet mode, the host separates mutable `workspaceCwd` from immutable `resourceRoot`, disables hierarchical discovery, and supplies only the selected profile from `.pi/capabilities.json`; see [ADR-0009](docs/adr/0009-isolate-telegram-agent-instructions.md) and [ADR-0020](docs/adr/0020-run-a-household-bot-fleet-from-one-release.md). Canonicalized resources must remain inside the release, and symlink escapes are rejected. Global Pi/Agents directories and workspace-local capabilities never execute in the bridge. Filesystem tool access itself is not restricted to the cwd.
 
@@ -86,6 +87,14 @@ repository inspection and public-web retrieval; the host persists bounded batch
 state, owns timeout/cancellation/retention, and injects one target-scoped parent
 synthesis turn after all jobs become terminal. See
 [ADR-0021](docs/adr/0021-bounded-read-only-background-subagents.md).
+
+Editable Messages links use a release-owned static page exposed on a dedicated
+tailnet-only Tailscale Serve HTTPS port. Recipient, label, and proposed body live
+only in the URL fragment; browser code validates the phone number, keeps the
+body editable, and creates the tested `sms:` URL only after a user tap. Merged
+deployment verifies the exact release target, absence of Funnel permission, and
+tailnet HTTPS health; see
+[ADR-0028](docs/adr/0028-serve-private-editable-messages-links.md).
 
 When `PI_TELEGRAM_SESSION_IDLE_HOURS` is enabled, the host records only accepted
 human prompt time and replacement correlation under each instance state tree.
@@ -184,6 +193,11 @@ deployment runner sends one fixed completion message through the engineering
 instance's Telegram profile. Notification failure fails the deployment job
 without rolling back an already healthy fleet, so missing operational feedback
 is visible rather than silently ignored.
+
+After bridge readiness, deployment also repoints the private Messages-link
+Tailscale Serve endpoint to the selected immutable release and checks its
+content-free health URL over tailnet HTTPS. Failure restores the previous Serve
+target and fails deployment without restarting the already-healthy bridge.
 
 Before activating a release with jobs schema version 2, deployment validates the
 external jobs file and referenced compiled checkers from the immutable release.
