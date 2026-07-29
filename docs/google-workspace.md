@@ -59,6 +59,22 @@ gog auth doctor --check
 Add `gmail` or `contacts` only when the corresponding reviewed feature is
 enabled for that instance. Keep the authorized service set least-privileged.
 
+For the read-only Gmail skill, authorize each intended account independently:
+
+```bash
+export GOG_HOME="$HOME/.local/share/pi-telegram-bridge/google/isaac/gog"
+export GOG_KEYRING_PASSWORD="$(cat ~/.local/share/pi-telegram-bridge/google/isaac/keyring-password)"
+gog --readonly --gmail-no-send auth add personal-account@example.com \
+  --services gmail
+gog --readonly --gmail-no-send auth add work-account@example.com \
+  --services gmail
+```
+
+The bridge never exposes Gmail send, draft creation, archive, label, trash, or
+other mutation commands. It also supplies `--readonly`, `--gmail-no-send`, and
+`--no-input` on every Gmail invocation. Reply proposals remain assistant text;
+they are not written to Gmail.
+
 Remote/headless authorization can use `gog auth add --remote`; keep the returned
 authorization redirect out of chat and shell history because it temporarily
 contains an authorization code.
@@ -113,6 +129,11 @@ search a bounded range, or check availability across configured aliases. The
 tool always supplies `--readonly`, `--no-input`, and Gmail-send blocking. It
 normalizes and bounds returned fields, omits cancelled events, preserves
 all-day/date and time-zone distinctions, and marks remote text as untrusted.
+
+For Gmail, ask it to search a focused Gmail query, triage unread or actionable
+threads, summarize one returned thread, or propose a reply. Thread search and
+sanitized thread retrieval are bounded and mark all remote records as untrusted.
+The runtime never downloads attachments and never exposes Gmail mutations.
 
 ## Rotate or remove access
 
