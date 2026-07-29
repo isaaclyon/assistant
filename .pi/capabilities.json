@@ -85,6 +85,11 @@
         "enabled": true
       },
       {
+        "id": "message-link",
+        "path": ".pi/skills/message-link/SKILL.md",
+        "enabled": true
+      },
+      {
         "id": "personal-memory",
         "path": ".pi/skills/personal-memory/SKILL.md",
         "enabled": true
@@ -122,6 +127,7 @@
         "check-weather",
         "google-calendar",
         "gmail-read",
+        "message-link",
         "schedule-reminders-and-jobs",
         "manage-ynab",
         "personal-memory",
@@ -136,6 +142,7 @@
       "skills": [
         "agent-browser",
         "check-weather",
+        "message-link",
         "schedule-reminders-and-jobs",
         "manage-ynab",
         "personal-memory",
@@ -149,6 +156,7 @@
       "skills": [
         "agent-browser",
         "check-weather",
+        "message-link",
         "schedule-reminders-and-jobs",
         "manage-ynab",
         "personal-memory",
