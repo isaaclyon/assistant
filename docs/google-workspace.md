@@ -75,6 +75,18 @@ other mutation commands. It also supplies `--readonly`, `--gmail-no-send`, and
 `--no-input` on every Gmail invocation. Reply proposals remain assistant text;
 they are not written to Gmail.
 
+For read-only personal contact lookup, add the Contacts service to each intended
+account while retaining the runtime safety flags:
+
+```bash
+gog --readonly --gmail-no-send auth add personal-account@example.com \
+  --services contacts
+```
+
+The bridge exposes only bounded search and returns display names, labeled email
+addresses, labeled phone numbers, and resource identifiers. It does not expose
+contact listing, export, creation, editing, merging, or deletion.
+
 Remote/headless authorization can use `gog auth add --remote`; keep the returned
 authorization redirect out of chat and shell history because it temporarily
 contains an authorization code.
@@ -134,6 +146,11 @@ For Gmail, ask it to search a focused Gmail query, triage unread or actionable
 threads, summarize one returned thread, or propose a reply. Thread search and
 sanitized thread retrieval are bounded and mark all remote records as untrusted.
 The runtime never downloads attachments and never exposes Gmail mutations.
+
+For Contacts, ask it to find someone by partial name, email address, or phone
+number. Multiple plausible matches require explicit selection. A selected,
+normalized phone number can be passed to the separate editable Messages-link
+workflow; neither contact lookup nor link creation sends a message.
 
 ## Rotate or remove access
 

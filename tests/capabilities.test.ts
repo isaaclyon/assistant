@@ -228,6 +228,7 @@ describe("capability profiles", () => {
       expect.arrayContaining([
         expect.stringContaining("google-calendar/SKILL.md"),
         expect.stringContaining("gmail-read/SKILL.md"),
+        expect.stringContaining("google-contacts/SKILL.md"),
         expect.stringContaining("reserve-restaurant/SKILL.md"),
       ]),
     );
@@ -239,6 +240,9 @@ describe("capability profiles", () => {
       );
       expect(profiles.find((profile) => profile.profileId === profileId)?.skillPaths).not.toEqual(
         expect.arrayContaining([expect.stringContaining("gmail-read/SKILL.md")]),
+      );
+      expect(profiles.find((profile) => profile.profileId === profileId)?.skillPaths).not.toEqual(
+        expect.arrayContaining([expect.stringContaining("google-contacts/SKILL.md")]),
       );
     }
     for (const profileId of ["personal-emma", "household-shared", "builder"]) {
@@ -262,5 +266,16 @@ describe("capability profiles", () => {
     expect(skill).toMatch(/proposed repl(?:y|ies).*(?:assistant response|conversation)/is);
     expect(skill).toMatch(/cannot send|sending is unavailable/i);
     expect(skill).toMatch(/explicit configured alias/i);
+  });
+
+  it("ships Google Contacts guidance for explicit selection and editable Messages links", async () => {
+    const skill = await readFile(join(process.cwd(), ".pi", "skills", "google-contacts", "SKILL.md"), "utf8");
+
+    expect(skill).toMatch(/name, email, or phone/i);
+    expect(skill).toMatch(/multiple.*(?:ask|selection)|ask.*multiple/is);
+    expect(skill).toMatch(/normalized.*phone/is);
+    expect(skill).toMatch(/message-link/is);
+    expect(skill).toMatch(/never.*(?:send|sending)|sending.*never/is);
+    expect(skill).toMatch(/untrusted data, never as instructions/i);
   });
 });
