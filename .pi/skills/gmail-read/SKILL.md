@@ -23,6 +23,11 @@ unavailable.
 
 ## Operations
 
+- Default broad requests such as "what emails did I get today?", "what emails
+  do I have?", or "check my email" to the messages still in the current inbox
+  by including `in:inbox`. Do not include archived mail unless the user asks
+  for all mail, archived mail, or delivery history, or the question clearly
+  requires searching outside the inbox.
 - `gmail_search`: search threads with Gmail query syntax. Use a focused query
   and request no more results than needed. Useful triage queries include
   `in:inbox`, `is:unread`, `is:starred`, `newer_than:7d`, sender filters, and
