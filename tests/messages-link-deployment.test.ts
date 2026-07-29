@@ -27,11 +27,14 @@ set -eu
 if [[ "\${1:-}" == "serve" && "\${2:-}" == "status" ]]; then
   target="$(cat "$FAKE_SERVE_STATE")"
   funnel=""
+  foreground=""
   [[ "\${FAKE_FUNNEL:-0}" != "1" ]] || funnel='"test-node.example.ts.net:8443": true'
-  printf '{"Web":{"test-node.example.ts.net:8443":{"Handlers":{"/":{"Path":"%s"}}}},"AllowFunnel":{%s}}\\n' "$target" "$funnel"
+  [[ "\${FAKE_FOREGROUND:-0}" != "1" ]] || foreground=',"Foreground":{"session":{"TCP":{"8443":{"HTTPS":true}},"Web":{"test-node.example.ts.net:8443":{"Handlers":{"/":{"Path":"/tmp/foreground"}}}}}}'
+  printf '{"Web":{"test-node.example.ts.net:8443":{"Handlers":{"/":{"Path":"%s"}}}},"AllowFunnel":{%s}%s}\\n' "$target" "$funnel" "$foreground"
 elif [[ "\${1:-}" == "status" ]]; then
   printf '{"Self":{"DNSName":"test-node.example.ts.net."}}\\n'
 elif [[ "\${1:-}" == "serve" && "\${2:-}" == "--bg" ]]; then
+  if [[ "\${FAKE_RESTORE_FAIL:-0}" == "1" && "\${@: -1}" == "/srv/previous-page" ]]; then exit 1; fi
   printf '%s\\n' "\${@: -1}" >"$FAKE_SERVE_STATE"
 elif [[ "\${1:-}" == "serve" && "\${@: -1}" == "off" ]]; then
   : >"$FAKE_SERVE_STATE"
@@ -92,6 +95,9 @@ describe("Messages-link deployment", () => {
     expect(script).toContain("healthz");
     expect(script).toContain("restore_previous");
     expect(script).toContain("AllowFunnel");
+    expect(script).toContain("Foreground");
+    expect(script).toContain("CRITICAL: previous Messages-link");
+    expect(script).toContain("trap 'restore_previous 143' TERM");
   });
 
   it("activates the exact release and restores the previous target when health fails", async () => {
@@ -137,5 +143,45 @@ describe("Messages-link deployment", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Refusing to replace a public Funnel endpoint");
     expect((await readFile(fixture.state, "utf8")).trim()).toBe("/srv/previous-page");
+  });
+
+  it("refuses foreground conflicts and reports failed rollback", async () => {
+    const foreground = await deploymentFixture();
+    const refused = spawnSync(
+      "bash",
+      ["scripts/activate-messages-link.sh", foreground.release],
+      {
+        cwd: process.cwd(),
+        env: { ...foreground.env, FAKE_FOREGROUND: "1" },
+        encoding: "utf8",
+      },
+    );
+    expect(refused.status).not.toBe(0);
+    expect(refused.stderr).toContain("Refusing to replace a foreground Serve endpoint");
+    expect((await readFile(foreground.state, "utf8")).trim()).toBe(
+      "/srv/previous-page",
+    );
+
+    const rollback = await deploymentFixture();
+    const failed = spawnSync(
+      "bash",
+      ["scripts/activate-messages-link.sh", rollback.release],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...rollback.env,
+          FAKE_CURL_FAIL: "1",
+          FAKE_RESTORE_FAIL: "1",
+        },
+        encoding: "utf8",
+      },
+    );
+    expect(failed.status).not.toBe(0);
+    expect(failed.stderr).toContain(
+      "CRITICAL: previous Messages-link Serve configuration was not restored",
+    );
+    expect((await readFile(rollback.state, "utf8")).trim()).toBe(
+      join(rollback.release, "web/messages"),
+    );
   });
 });

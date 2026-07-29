@@ -27,9 +27,19 @@ const status = JSON.parse(fs.readFileSync(path, "utf8"));
 const web = status.Web ?? {};
 const entry = Object.entries(web).find(([key]) => key.endsWith(`:${port}`));
 const handler = entry?.[1]?.Handlers?.["/"];
-const funnel = Object.keys(status.AllowFunnel ?? {}).some((key) => key.endsWith(`:${port}`));
+const foreground = Object.values(status.Foreground ?? {});
+const usesPort = (config) =>
+  Object.hasOwn(config.TCP ?? {}, port) ||
+  Object.keys(config.Web ?? {}).some((key) => key.endsWith(`:${port}`));
+const foregroundCollision = foreground.some(usesPort);
+const funnel = [status, ...foreground].some((config) =>
+  Object.entries(config.AllowFunnel ?? {}).some(
+    ([key, allowed]) => allowed && key.endsWith(`:${port}`),
+  ),
+);
 console.log(funnel ? "funnel" : "private");
 console.log(handler?.Path ?? handler?.Proxy ?? "");
+console.log(foregroundCollision ? "foreground" : "background");
 NODE
 )
 
@@ -37,23 +47,60 @@ if [[ "${PREVIOUS[0]:-}" == "funnel" ]]; then
   echo "Refusing to replace a public Funnel endpoint on HTTPS port $PORT." >&2
   exit 1
 fi
+if [[ "${PREVIOUS[2]:-}" == "foreground" ]]; then
+  echo "Refusing to replace a foreground Serve endpoint on HTTPS port $PORT." >&2
+  exit 1
+fi
 PREVIOUS_TARGET="${PREVIOUS[1]:-}"
 
 restore_previous() {
-  local original_status=$?
-  trap - ERR
+  local original_status="${1:-$?}"
+  local restore_ok=true
+  trap - ERR INT TERM
   if [[ "$ACTIVATION_STARTED" == true ]]; then
     echo "==> Restoring previous Messages-link Serve configuration" >&2
     if [[ -n "$PREVIOUS_TARGET" ]]; then
-      sudo -n tailscale serve --bg --yes --https="$PORT" "$PREVIOUS_TARGET" || true
+      if ! sudo -n tailscale serve --bg --yes --https="$PORT" "$PREVIOUS_TARGET"; then
+        restore_ok=false
+      fi
     else
-      sudo -n tailscale serve --https="$PORT" off || true
+      if ! sudo -n tailscale serve --https="$PORT" off; then
+        restore_ok=false
+      fi
+    fi
+    if [[ "$restore_ok" == true ]]; then
+      RESTORED_STATUS="$(tailscale serve status --json)" || restore_ok=false
+    fi
+    if [[ "$restore_ok" == true ]] && ! node - "$RESTORED_STATUS" "$PORT" "$PREVIOUS_TARGET" <<'NODE'
+const [raw, port, expectedTarget] = process.argv.slice(2);
+const status = JSON.parse(raw);
+const foreground = Object.values(status.Foreground ?? {});
+const usesPort = (config) =>
+  Object.hasOwn(config.TCP ?? {}, port) ||
+  Object.keys(config.Web ?? {}).some((key) => key.endsWith(`:${port}`));
+const funnel = [status, ...foreground].some((config) =>
+  Object.entries(config.AllowFunnel ?? {}).some(
+    ([key, allowed]) => allowed && key.endsWith(`:${port}`),
+  ),
+);
+const entry = Object.entries(status.Web ?? {}).find(([key]) => key.endsWith(`:${port}`));
+const handler = entry?.[1]?.Handlers?.["/"];
+const actualTarget = handler?.Path ?? handler?.Proxy ?? "";
+if (foreground.some(usesPort) || funnel || actualTarget !== expectedTarget) process.exit(1);
+if (!expectedTarget && Object.hasOwn(status.TCP ?? {}, port)) process.exit(1);
+NODE
+    then
+      restore_ok=false
+    fi
+    if [[ "$restore_ok" != true ]]; then
+      echo "CRITICAL: previous Messages-link Serve configuration was not restored." >&2
     fi
   fi
-  rm -f "$STATUS_BEFORE"
   exit "$original_status"
 }
-trap restore_previous ERR
+trap 'restore_previous $?' ERR
+trap 'restore_previous 130' INT
+trap 'restore_previous 143' TERM
 
 ACTIVATION_STARTED=true
 sudo -n tailscale serve --bg --yes --https="$PORT" "$PAGE_PATH"
@@ -63,10 +110,21 @@ node - "$STATUS_AFTER" "$PORT" "$PAGE_PATH" <<'NODE'
 const [raw, port, expectedPath] = process.argv.slice(2);
 const status = JSON.parse(raw);
 const entry = Object.entries(status.Web ?? {}).find(([key]) => key.endsWith(`:${port}`));
+const foreground = Object.values(status.Foreground ?? {});
+const usesPort = (config) =>
+  Object.hasOwn(config.TCP ?? {}, port) ||
+  Object.keys(config.Web ?? {}).some((key) => key.endsWith(`:${port}`));
 if (entry?.[1]?.Handlers?.["/"]?.Path !== expectedPath) {
   throw new Error("Tailscale Serve does not reference the selected release");
 }
-if (Object.keys(status.AllowFunnel ?? {}).some((key) => key.endsWith(`:${port}`))) {
+if (foreground.some(usesPort)) {
+  throw new Error("A foreground Tailscale Serve configuration shadows the selected release");
+}
+if ([status, ...foreground].some((config) =>
+  Object.entries(config.AllowFunnel ?? {}).some(
+    ([key, allowed]) => allowed && key.endsWith(`:${port}`),
+  )
+)) {
   throw new Error("Messages-link endpoint unexpectedly permits Funnel access");
 }
 NODE
@@ -82,6 +140,6 @@ curl --fail --silent --show-error --max-time 10 \
   "https://$DNS_NAME:$PORT/healthz" | grep -Fx "ok" >/dev/null
 
 ACTIVATION_STARTED=false
-trap - ERR
+trap - ERR INT TERM
 rm -f "$STATUS_BEFORE"
 echo "==> Private Messages-link page ready at https://$DNS_NAME:$PORT/"

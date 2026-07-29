@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { normalizePhoneNumber } from "../../../../web/messages/messages-link.js";
 
 const execFileAsync = promisify(execFile);
-const MAX_INPUT_BYTES = 16 * 1024;
+const MAX_INPUT_BYTES = 64 * 1024;
 
 function normalizeBaseUrl(value) {
   const url = new URL(value);
@@ -59,7 +59,8 @@ async function discoverBaseUrl(env) {
   return `https://${dnsName.slice(0, -1)}:8443/`;
 }
 
-async function readInput(stream) {
+export async function readInput(stream) {
+  stream.setEncoding("utf8");
   let input = "";
   for await (const chunk of stream) {
     input += chunk;

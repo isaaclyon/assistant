@@ -93,7 +93,8 @@ tailnet-only Tailscale Serve HTTPS port. Recipient, label, and proposed body liv
 only in the URL fragment; browser code validates the phone number, keeps the
 body editable, and creates the tested `sms:` URL only after a user tap. Merged
 deployment verifies the exact release target, absence of Funnel permission, and
-tailnet HTTPS health; see
+absence of a shadowing foreground Serve configuration, plus tailnet HTTPS
+health; see
 [ADR-0028](docs/adr/0028-serve-private-editable-messages-links.md).
 
 When `PI_TELEGRAM_SESSION_IDLE_HOURS` is enabled, the host records only accepted
@@ -197,7 +198,8 @@ is visible rather than silently ignored.
 After bridge readiness, deployment also repoints the private Messages-link
 Tailscale Serve endpoint to the selected immutable release and checks its
 content-free health URL over tailnet HTTPS. Failure restores the previous Serve
-target and fails deployment without restarting the already-healthy bridge.
+target and verifies rollback; rollback failure emits a critical diagnostic.
+The deployment fails without restarting the already-healthy bridge.
 
 Before activating a release with jobs schema version 2, deployment validates the
 external jobs file and referenced compiled checkers from the immutable release.

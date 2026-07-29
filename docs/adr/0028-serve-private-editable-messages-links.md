@@ -30,10 +30,13 @@ Publish the selected immutable release directory through Tailscale Serve on
 HTTPS port 8443. Do not use Funnel. The merged deployment activates this page
 only after the bridge is ready, verifies that Serve points at the exact release,
 rejects any Funnel permission on that port, and fetches a content-free health
-file through the tailnet HTTPS hostname. A failed page activation restores the
-previous Serve target and fails deployment without rolling back an already
-healthy bridge, matching the post-activation notification failure boundary in
-ADR-0005. `tailscaled` owns HTTPS certificates and serving lifetime.
+file through the tailnet HTTPS hostname. It also rejects foreground Serve
+configurations that could shadow the selected background target. A failed or
+interrupted page activation attempts and verifies restoration of the previous
+Serve target, emitting a critical diagnostic if rollback itself fails, and
+fails deployment without rolling back an already healthy bridge. This matches
+the post-activation notification failure boundary in ADR-0005. `tailscaled`
+owns HTTPS certificates and serving lifetime.
 
 A tracked `message-link` skill and stdin-JSON helper generate Telegram-safe
 HTTPS links. The helper discovers the local tailnet DNS name or accepts an

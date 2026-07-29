@@ -23,9 +23,9 @@ scripts/activate-messages-link.sh <immutable-release-path>
 ```
 
 It points Tailscale Serve at `<release>/web/messages`, checks that port 8443 has
-no `AllowFunnel` entry, and fetches `/healthz` through the tailnet HTTPS name.
-It refuses to overwrite an existing public Funnel endpoint. Do not run
-`tailscale funnel` for this page.
+no background or foreground `AllowFunnel` entry, and fetches `/healthz` through
+the tailnet HTTPS name. It refuses to overwrite an existing public Funnel or
+foreground Serve endpoint. Do not run `tailscale funnel` for this page.
 
 Inspect it with:
 
@@ -43,9 +43,11 @@ recipient or draft because URL fragments are not part of HTTP requests.
 Each successful repository deployment repoints Serve to the exact immutable
 release after bridge readiness and before old release cleanup. If configuration,
 privacy validation, or HTTPS health fails, the activation script restores the
-prior Serve target and the deployment reports failure. It does not restart a
-healthy Telegram bridge merely because this post-readiness auxiliary activation
-failed.
+prior Serve target, verifies the restoration, and reports deployment failure.
+Interruptions after mutation use the same rollback path. A failed restoration
+emits a `CRITICAL` diagnostic for operator intervention. The activation does not
+restart a healthy Telegram bridge merely because this post-readiness auxiliary
+activation failed.
 
 To disable the page intentionally:
 

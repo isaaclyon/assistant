@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
+import { Readable } from "node:stream";
 
 import {
   buildSmsUrl,
@@ -6,7 +8,10 @@ import {
   normalizePhoneNumber,
   parseMessageFragment,
 } from "../web/messages/messages-link.js";
-import { buildMessageLink } from "../.pi/skills/message-link/scripts/messages-link.mjs";
+import {
+  buildMessageLink,
+  readInput,
+} from "../.pi/skills/message-link/scripts/messages-link.mjs";
 
 describe("editable Messages links", () => {
   it("parses percent-encoded recipient, label, and body from the fragment", () => {
@@ -29,7 +34,7 @@ describe("editable Messages links", () => {
     expect(normalizePhoneNumber(input)).toBe(expected);
   });
 
-  it.each(["", "123456", "+01234567", "+1+8018851827", "801-ABC-1827", "1234567890123456"])(
+  it.each(["", "123456", "+01234567", "+1+8018851827", "801-ABC-1827", "1234567890123456", "---+18018851827", "+1 (801 885-1827", "+1 ((801)) 885-1827", "801--885-1827"])(
     "rejects invalid recipient %j",
     (input) => {
       expect(normalizePhoneNumber(input)).toBeNull();
@@ -123,5 +128,31 @@ describe("editable Messages links", () => {
     expect(() =>
       buildMessageLink(baseUrl, { to: "+18018851827", label: "Emma", body: "Hi" }),
     ).toThrow();
+  });
+
+  it("decodes Unicode correctly when stdin splits a UTF-8 character", async () => {
+    const source = Buffer.from('{"to":"+18018851827","label":"Emma ☕","body":"Hi 👋"}');
+    const coffee = source.indexOf(Buffer.from("☕"));
+    const stream = Readable.from([
+      source.subarray(0, coffee + 1),
+      source.subarray(coffee + 1, coffee + 2),
+      source.subarray(coffee + 2),
+    ]);
+
+    await expect(readInput(stream)).resolves.toEqual({
+      to: "+18018851827",
+      label: "Emma ☕",
+      body: "Hi 👋",
+    });
+  });
+
+  it("keeps the rendered page locked to fragment-only, explicit-tap behavior", async () => {
+    const html = await readFile("web/messages/index.html", "utf8");
+
+    expect(html).toContain('name="referrer" content="no-referrer"');
+    expect(html).toContain('http-equiv="Content-Security-Policy"');
+    expect(html).toContain('id="open" type="button" hidden disabled');
+    expect(html).toContain('type="module" src="./messages-link.js"');
+    expect(html).not.toMatch(/http-equiv=["']refresh/i);
   });
 });
