@@ -70,6 +70,11 @@
         "enabled": true
       },
       {
+        "id": "google-contacts",
+        "path": ".pi/skills/google-contacts/SKILL.md",
+        "enabled": true
+      },
+      {
         "id": "extend-this-agent",
         "path": ".pi/skills/extend-this-agent/SKILL.md",
         "enabled": true
@@ -127,6 +132,7 @@
         "check-weather",
         "google-calendar",
         "gmail-read",
+        "google-contacts",
         "message-link",
         "schedule-reminders-and-jobs",
         "manage-ynab",
