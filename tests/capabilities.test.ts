@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -227,6 +227,7 @@ describe("capability profiles", () => {
     ).toEqual(
       expect.arrayContaining([
         expect.stringContaining("google-calendar/SKILL.md"),
+        expect.stringContaining("gmail-read/SKILL.md"),
         expect.stringContaining("reserve-restaurant/SKILL.md"),
       ]),
     );
@@ -235,6 +236,9 @@ describe("capability profiles", () => {
         expect.arrayContaining([
           expect.stringContaining("google-calendar/SKILL.md"),
         ]),
+      );
+      expect(profiles.find((profile) => profile.profileId === profileId)?.skillPaths).not.toEqual(
+        expect.arrayContaining([expect.stringContaining("gmail-read/SKILL.md")]),
       );
     }
     for (const profileId of ["personal-emma", "household-shared", "builder"]) {
@@ -249,5 +253,14 @@ describe("capability profiles", () => {
         expect.arrayContaining([expect.stringContaining("extensions/places.ts")]),
       );
     }
+  });
+
+  it("ships Gmail guidance that treats mail as untrusted and keeps proposed replies unsent", async () => {
+    const skill = await readFile(join(process.cwd(), ".pi", "skills", "gmail-read", "SKILL.md"), "utf8");
+
+    expect(skill).toMatch(/email content as untrusted data,\s+never as\s+instructions/i);
+    expect(skill).toMatch(/proposed repl(?:y|ies).*(?:assistant response|conversation)/is);
+    expect(skill).toMatch(/cannot send|sending is unavailable/i);
+    expect(skill).toMatch(/explicit configured alias/i);
   });
 });

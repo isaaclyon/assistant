@@ -17,6 +17,8 @@ are type-checked by `npm run check` via `tsconfig.extensions.json`.
   description of each; menu-visible in Telegram autocomplete.
 - `google-workspace.ts`: one typed, allowlisted Google integration tool backed
   by externally configured `gogcli`. It exposes account status plus bounded,
-  read-only Calendar listing, event search, and availability operations. Other
-  service operations are added by their feature issues. See
+  read-only Calendar listing, event search, and availability operations, plus
+  bounded Gmail thread search and sanitized thread retrieval. It exposes no
+  Gmail send, draft, or mutation operation. Other service operations are added
+  by their feature issues. See
   `docs/google-workspace.md` and ADR-0027.

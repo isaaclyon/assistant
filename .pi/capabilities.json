@@ -65,6 +65,11 @@
         "enabled": true
       },
       {
+        "id": "gmail-read",
+        "path": ".pi/skills/gmail-read/SKILL.md",
+        "enabled": true
+      },
+      {
         "id": "extend-this-agent",
         "path": ".pi/skills/extend-this-agent/SKILL.md",
         "enabled": true
@@ -116,6 +121,7 @@
         "agent-browser",
         "check-weather",
         "google-calendar",
+        "gmail-read",
         "schedule-reminders-and-jobs",
         "manage-ynab",
         "personal-memory",
