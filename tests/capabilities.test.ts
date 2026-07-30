@@ -278,4 +278,21 @@ describe("capability profiles", () => {
     expect(skill).toMatch(/never.*(?:send|sending)|sending.*never/is);
     expect(skill).toMatch(/untrusted data, never as instructions/i);
   });
+
+  it("treats requests to write a text to someone as editable Messages-link drafts", async () => {
+    const messageLink = await readFile(
+      join(process.cwd(), ".pi", "skills", "message-link", "SKILL.md"),
+      "utf8",
+    );
+    const contacts = await readFile(
+      join(process.cwd(), ".pi", "skills", "google-contacts", "SKILL.md"),
+      "utf8",
+    );
+
+    expect(messageLink).toMatch(/write.*draft.*prepare.*text.*someone/is);
+    expect(messageLink).toMatch(/do not return only the message body/i);
+    expect(messageLink).toMatch(/recipient and proposed body are known.*generate.*immediately/is);
+    expect(contacts).toMatch(/write.*draft.*prepare.*text.*contact/is);
+    expect(contacts).toMatch(/invoke.*message-link.*same\s+turn/is);
+  });
 });

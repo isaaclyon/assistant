@@ -1,12 +1,25 @@
 ---
 name: message-link
-description: "Creates private Telegram-clickable HTTPS links that let the user edit a proposed SMS/iMessage before explicitly opening Messages. Use when the user wants to draft or message someone without sending automatically."
+description: "Creates private Telegram-clickable HTTPS links for editable SMS/iMessage drafts. Use whenever the user asks to write, draft, prepare, or send a text/message to someone; do not respond with only the proposed wording when a recipient number is available."
 ---
 
 # Create an editable Messages link
 
 Use this workflow only to draft a message. It never sends, reads contacts, or
 opens Messages automatically.
+
+## Trigger behavior
+
+- Treat requests to **write, draft, or prepare a text to someone** as requests
+  for an editable Messages link, not merely help composing wording.
+- Do not return only the message body when one recipient phone number and a
+  proposed body can be established from the current request and conversation.
+- When the recipient and proposed body are known, generate the link immediately
+  in the same turn; do not ask whether the user wants a link.
+- If the user explicitly asks only for wording, copy, or phrasing and does not
+  ask to text a recipient, a plain-text draft is sufficient.
+- If the recipient is named but no selected phone number is available, use the
+  `google-contacts` skill first when available.
 
 1. Establish one selected phone number, recipient label, and proposed body. If
    recipient selection is ambiguous, ask first.

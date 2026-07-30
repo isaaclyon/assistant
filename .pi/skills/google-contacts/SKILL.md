@@ -1,6 +1,6 @@
 ---
 name: google-contacts
-description: "Finds people in configured Google Contacts by name, email, or phone and can pass a selected number to an editable Messages-link draft. Use when the user asks for someone's contact details or wants to draft a message to a contact."
+description: "Finds people in configured Google Contacts by name, email, or phone and passes selected numbers to editable Messages-link drafts. Use for contact details and whenever the user asks to write, draft, prepare, or send a text/message to a named contact whose phone number is not already selected."
 ---
 
 # Look up Google Contacts
@@ -33,11 +33,14 @@ or deleting contacts are unavailable.
 
 ## Editable Messages links
 
-When the user wants to draft a text or iMessage, first establish one selected
-contact and one selected phone number. Use that phone entry's `normalized` value
-with the separate `message-link` skill; use the display name and phone label as
-helpful context. If `normalized` is absent, explain that the stored number cannot
-populate a Messages link safely and ask for a valid number.
+Treat requests to **write, draft, or prepare a text to a contact** as an editable
+Messages-link workflow, not as a request for only the message wording. First
+establish one selected contact and one selected phone number. Once the recipient
+and proposed body are known, invoke the separate `message-link` skill in the same
+turn rather than asking whether the user wants a link. Use that phone entry's
+`normalized` value and the display name and phone label as helpful context. If
+`normalized` is absent, explain that the stored number cannot populate a
+Messages link safely and ask for a valid number.
 
 The Messages link keeps the proposed body editable and requires the user to tap
 to open Messages and tap again to send. Contact lookup and link creation never
