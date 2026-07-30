@@ -72,11 +72,14 @@ process.stdout.write(JSON.stringify({
   );
   await chmod(op, 0o755);
 
+  const env = { ...process.env };
+  delete env.PI_TELEGRAM_CREDENTIAL_SCOPE;
+
   return {
     root,
     opLog,
     env: {
-      ...process.env,
+      ...env,
       PI_TELEGRAM_BRIDGE_CONFIG_ROOT: configRoot,
       PI_TELEGRAM_PRINCIPAL: "isaac",
       ONEPASSWORD_CLI: op,
