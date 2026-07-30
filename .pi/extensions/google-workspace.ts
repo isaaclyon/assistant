@@ -541,6 +541,19 @@ function normalizePhoneNumber(value: string): string | undefined {
   return /^\+?[1-9][0-9]{6,14}$/.test(normalized) ? normalized : undefined;
 }
 
+function contactValue(value: unknown, maxLength: number): { output: string; raw: string } | undefined {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  const wrapped = value.match(
+    /^<<<EXTERNAL_UNTRUSTED_CONTENT id="([0-9a-f]{16})">>>\nSource: google_api\n---\n([\s\S]*)\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="\1">>>$/,
+  );
+  if (wrapped) {
+    const raw = boundedString(wrapped[2], maxLength);
+    return raw && raw.length === wrapped[2]!.length ? { output: value, raw } : undefined;
+  }
+  const raw = boundedString(value, maxLength);
+  return raw ? { output: raw, raw } : undefined;
+}
+
 function parseContactSearchResources(payload: unknown, limit: number): {
   resources: string[];
   truncated: boolean;
@@ -593,16 +606,16 @@ function contactValues(value: unknown, kind: "email" | "phone"): {
       return [];
     }
     const item = candidate as Record<string, unknown>;
-    const selected = boundedString(item.value, kind === "email" ? 320 : 64);
+    const selected = contactValue(item.value, kind === "email" ? 320 : 64);
     if (!selected) {
       malformed = true;
       return [];
     }
-    const normalized: Record<string, string> = { value: selected };
+    const normalized: Record<string, string> = { value: selected.output };
     const label = boundedString(item.formattedType, 80) ?? boundedString(item.type, 80);
     if (label) normalized.label = label;
     if (kind === "phone") {
-      const phone = normalizePhoneNumber(selected);
+      const phone = normalizePhoneNumber(selected.raw);
       if (phone) normalized.normalized = phone;
     }
     return [normalized];
