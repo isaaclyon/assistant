@@ -795,6 +795,57 @@ describe("google workspace extension", () => {
     expect(JSON.stringify(tools.get("google_workspace")!.parameters)).not.toMatch(/contacts_(?:create|update|delete|list|export)/);
   });
 
+  it("preserves and normalizes phone numbers wrapped by the production gog untrusted-content path", async () => {
+    const tools = new Map<string, ToolDefinition>();
+    const wrappedPhone = [
+      '<<<EXTERNAL_UNTRUSTED_CONTENT id="0123456789abcdef">>>',
+      "Source: google_api",
+      "---",
+      "+1 (801) 555-0123",
+      '<<<END_EXTERNAL_UNTRUSTED_CONTENT id="0123456789abcdef">>>',
+    ].join("\n");
+    const run = vi.fn()
+      .mockResolvedValueOnce({ contacts: [{ resource: "people/one" }] })
+      .mockResolvedValueOnce({
+        contact: {
+          resourceName: "people/one",
+          names: [{ displayName: "Ada Lovelace", metadata: { primary: true } }],
+          emailAddresses: [],
+          phoneNumbers: [{ value: wrappedPhone, formattedType: "Mobile" }],
+          externalContent: { untrusted: true, source: "google_api", wrapped: true },
+        },
+      });
+    const module = await import(`${extensionUrl}?contacts-wrapped-phone=${Date.now()}`) as {
+      registerGoogleWorkspaceTool(
+        pi: { registerTool(tool: ToolDefinition): void },
+        options: {
+          resolveRuntime(): Promise<{ account?: string }>;
+          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+        },
+      ): void;
+    };
+    module.registerGoogleWorkspaceTool(
+      { registerTool: (tool) => tools.set(tool.name, tool) },
+      { resolveRuntime: async () => ({ account: "personal" }), run },
+    );
+
+    const result = await tools.get("google_workspace")!.execute("call-contacts-wrapped-phone", {
+      operation: "contacts_search",
+      query: "Ada",
+      max_results: 1,
+    });
+
+    expect(result.details).toMatchObject({
+      ok: true,
+      result: {
+        contacts: [{
+          phones: [{ value: wrappedPhone, label: "Mobile", normalized: "+18015550123" }],
+          untrusted: true,
+        }],
+      },
+    });
+  });
+
   it("handles zero contact matches and redacts contact lookup failures", async () => {
     const tools = new Map<string, ToolDefinition>();
     const run = vi.fn()
