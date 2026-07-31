@@ -1,7 +1,7 @@
 ---
 name: manage-ynab
 description: "Reads and manages YNAB budgets with ynab-cli, including budget summaries, account/category lookups, transaction search and creation, and extracting simple or split transactions from uploaded receipts. Use for questions or actions involving YNAB, budgets, spending, accounts, categories, transactions, or receipts."
-compatibility: "Requires an authenticated `ynab` CLI available on PATH. Receipt extraction requires the uploaded image or PDF to be available to the agent."
+compatibility: "Requires an authenticated `ynab` CLI, commonly installed at ~/.bun/bin/ynab. Receipt extraction requires the uploaded image or PDF to be available to the agent."
 ---
 
 # Manage YNAB
@@ -22,7 +22,15 @@ Store non-secret defaults in `~/.config/pi-telegram-bridge/ynab.json`:
 
 This file is private runtime configuration: never add it to the repository. The API token remains owned by `ynab auth`; never read, print, copy, or store it in this file.
 
-Before the first operation, verify `command -v ynab` and `ynab auth status`. If defaults are absent, use `ynab budgets list`, `ynab accounts list --budget <budget-id>`, and `ynab categories list --budget <budget-id>` to present choices, then ask the user before writing the selected IDs to the private config. Do not guess defaults. If a configured ID no longer exists, ask the user to replace it.
+Before the first operation, check `command -v ynab`. If it is not found, check
+`~/.bun/bin/ynab`; when that executable exists, run all YNAB commands and
+skill-local YNAB helper scripts with `PATH="$HOME/.bun/bin:$PATH"`. Non-login
+service shells commonly omit Bun's bin directory. Do not report YNAB as
+unavailable until this fallback has also failed. Then verify `ynab auth status`.
+If defaults are absent, use `ynab budgets list`, `ynab accounts list --budget
+<budget-id>`, and `ynab categories list --budget <budget-id>` to present choices,
+then ask the user before writing the selected IDs to the private config. Do not
+guess defaults. If a configured ID no longer exists, ask the user to replace it.
 
 Read the config with a short Node command or the available file tool. Do not echo unrelated home-directory files.
 

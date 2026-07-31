@@ -295,4 +295,15 @@ describe("capability profiles", () => {
     expect(contacts).toMatch(/write.*draft.*prepare.*text.*contact/is);
     expect(contacts).toMatch(/invoke.*message-link.*same\s+turn/is);
   });
+
+  it("documents the Bun-installed YNAB CLI fallback for non-login shells", async () => {
+    const skill = await readFile(
+      join(process.cwd(), ".pi", "skills", "manage-ynab", "SKILL.md"),
+      "utf8",
+    );
+
+    expect(skill).toMatch(/command -v ynab.*\.bun\/bin\/ynab/is);
+    expect(skill).toMatch(/PATH="\$HOME\/\.bun\/bin:\$PATH"/);
+    expect(skill).toMatch(/do not report.*unavailable.*fallback/is);
+  });
 });
