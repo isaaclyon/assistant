@@ -81,10 +81,10 @@ describe("places extension", () => {
     )) as { default: (api: unknown) => void };
     module.default(pi);
 
-    expect(tool?.name).toBe("places");
+    expect(tool?.name).toBe("rank_places");
     expect(tool?.promptGuidelines?.join(" ")).toContain("telegram_button");
     handlers.get("session_start")?.();
-    const section = sectionRegistry.getSections().find((entry) => entry.id === "assistant/places")?.registration;
+    const section = sectionRegistry.getSections().find((entry) => entry.id === "assistant/place-rankings")?.registration;
     if (!section) throw new Error("missing places section");
     let presentedView: SectionView | undefined;
     const callbackData = (action: string, payload?: string) => `section:0:${action}${payload ? `:${payload}` : ""}`;

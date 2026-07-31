@@ -9,11 +9,11 @@ Do not use it to authorize deployment or restart the bridge.
 - The selected private instance has the `places` extension enabled.
 - `<stateDir>/places.db` has been backed up with the supported online backup:
   `PI_TELEGRAM_BRIDGE_STATE_DIR=<stateDir> npm run places -- backup <private-backup-path>`.
-- `/places` appears in Telegram's command menu.
+- `/place_rankings` appears in Telegram's command menu.
 
 ## Add and comparison flow
 
-1. Send `/places`; verify concise **Add place** and **View rankings** buttons.
+1. Send `/place_rankings`; verify concise **Add place** and **View rankings** buttons.
 2. Add `Smoke Test A` to `Coffee` as **Liked**. With an empty band, verify it
    completes without a comparison and reports `#1 of 1`.
 3. Add `Smoke Test B` to `Coffee` as **Liked**. Verify the bot presents exactly
@@ -27,7 +27,7 @@ Do not use it to authorize deployment or restart the bridge.
 
 1. Start adding `Smoke Test C` until a comparison is visible, then leave it
    unanswered.
-2. Send `/places` again and verify **Resume ranking** returns the same target.
+2. Send `/place_rankings` again and verify **Resume ranking** returns the same target.
 3. Only during an explicitly approved rollout test, restart the instance and
    verify Resume still returns that comparison.
 4. Use Cancel, decline once, then confirm. Verify A and B remain unchanged and C

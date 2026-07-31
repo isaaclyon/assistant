@@ -47,7 +47,7 @@ const ConfirmationOperationSchema = StringEnum([
   "undo_addition",
 ] as const);
 type ConfirmationOperation = "cancel" | "delete_place" | "delete_category" | "undo_addition";
-const PLACES_SECTION_ID = "assistant/places";
+const PLACE_RANKINGS_SECTION_ID = "assistant/place-rankings";
 
 type DirectAction =
   | { kind: "answer"; insertionId: string; revision: number; existingPlaceId: string; winner: "candidate" | "existing" }
@@ -118,27 +118,27 @@ export default function placesExtension(pi: ExtensionAPI): void {
   });
 
   registerReloadSafeTelegramCommand({
-    name: "places",
+    name: "place_rankings",
     description: "Add, compare, and view your private place rankings.",
     showInMenu: true,
     emoji: "📍",
     handler: async (ctx) => {
-      await ctx.openSection(PLACES_SECTION_ID);
+      await ctx.openSection(PLACE_RANKINGS_SECTION_ID);
     },
   });
 
   pi.registerTool({
-    name: "places",
-    label: "Places",
+    name: "rank_places",
+    label: "Place Rankings",
     description:
       "Maintain the user's private restaurant, coffee-shop, bar, and other place rankings. Supports categories, adding a place, durable pairwise comparisons, resume/cancel, and paginated rankings.",
     promptSnippet: "Add, compare, resume, cancel, or list private place rankings",
     promptGuidelines: [
-      "Use places whenever the user asks to add, rank, compare, resume, cancel, or list restaurants, coffee shops, bars, or other saved places.",
-      "When adding a place from Telegram, collect its name, then call places with action categories and that name; the direct Telegram section owns category, sentiment, and comparison buttons.",
-      "After a places result with kind=compare, ask exactly that comparison and preserve insertionId, revision, and existingPlace.id in the button prompts; never invent ranking state.",
-      "Render places choices as telegram_button prompt actions when responding on Telegram, while keeping the visible response concise.",
-      "Before a destructive places action, call places request_confirmation and render its exact Confirm button; only that operation-bound token can authorize delete_place, delete_category, undo_addition, or cancel.",
+      "Use rank_places whenever the user asks to add, rank, compare, resume, cancel, or list restaurants, coffee shops, bars, or other saved places.",
+      "When adding a place from Telegram, collect its name, then call rank_places with action categories and that name; the direct Telegram section owns category, sentiment, and comparison buttons.",
+      "After a rank_places result with kind=compare, ask exactly that comparison and preserve insertionId, revision, and existingPlace.id in the button prompts; never invent ranking state.",
+      "Render rank_places choices as telegram_button prompt actions when responding on Telegram, while keeping the visible response concise.",
+      "Before a destructive rank_places action, call rank_places request_confirmation and render its exact Confirm button; only that operation-bound token can authorize delete_place, delete_category, undo_addition, or cancel.",
     ],
     parameters: Type.Object({
       action: ActionSchema,
@@ -372,7 +372,7 @@ export default function placesExtension(pi: ExtensionAPI): void {
             ...(existing ? {
               existing: { id: existing.id, name: existing.name },
               buttonActions: [
-                { label: "View existing", prompt: `Show details by calling places with action "place" and place_id ${JSON.stringify(existing.id)}.` },
+                { label: "View existing", prompt: `Show details by calling rank_places with action "place" and place_id ${JSON.stringify(existing.id)}.` },
                 { label: "Enter another name", prompt: "Ask me for a more specific place name, then retry the add flow." },
                 { label: "Cancel", prompt: "Cancel this duplicate add attempt without changing places." },
               ],
@@ -390,7 +390,7 @@ export default function placesExtension(pi: ExtensionAPI): void {
 
 async function tryPresentPlacesSection(): Promise<boolean> {
   try {
-    await presentTelegramSection(PLACES_SECTION_ID);
+    await presentTelegramSection(PLACE_RANKINGS_SECTION_ID);
     return true;
   } catch {
     return false;
@@ -408,7 +408,7 @@ function addButtonActions(result: unknown): unknown {
       if (typeof category.id !== "string" || typeof category.name !== "string") return [];
       return [{
         label: category.name,
-        prompt: `Open ${JSON.stringify(category.name)} by calling places with action "ranking" and category_id ${JSON.stringify(category.id)}.`,
+        prompt: `Open ${JSON.stringify(category.name)} by calling rank_places with action "ranking" and category_id ${JSON.stringify(category.id)}.`,
       }];
     });
     if ("active" in value) {
@@ -416,16 +416,16 @@ function addButtonActions(result: unknown): unknown {
         ...value,
         ...(active ? { active } : {}),
         buttonActions: [
-          { label: "Resume ranking", prompt: 'Resume my unfinished ranking by calling places with action "resume" and use the returned exact buttons.' },
-          { label: "Cancel ranking", prompt: 'Call places with action "resume", then request an operation-bound cancel confirmation for its insertion ID and revision.' },
-          { label: "View rankings", prompt: 'Call places with action "category_summaries" and render every returned category button.' },
+          { label: "Resume ranking", prompt: 'Resume my unfinished ranking by calling rank_places with action "resume" and use the returned exact buttons.' },
+          { label: "Cancel ranking", prompt: 'Call rank_places with action "resume", then request an operation-bound cancel confirmation for its insertion ID and revision.' },
+          { label: "View rankings", prompt: 'Call rank_places with action "category_summaries" and render every returned category button.' },
         ],
       };
     }
     const summaries = value.categories.some((entry) => entry && typeof entry === "object" && "placeCount" in entry);
     if (summaries) {
       categoryButtons.push(
-        { label: "New category", prompt: 'Ask me for the category name, then call places with action "create_category".' },
+        { label: "New category", prompt: 'Ask me for the category name, then call rank_places with action "create_category".' },
         { label: "Manage categories", prompt: 'Ask which category to rename or delete. Use rename_category directly; for deletion request an operation-bound delete_category confirmation and note that only empty categories can be deleted.' },
       );
     }
@@ -434,10 +434,10 @@ function addButtonActions(result: unknown): unknown {
       buttonActions: summaries
         ? categoryButtons
         : [
-            { label: "Add place", prompt: 'Ask me for the place name, then call places with action "categories" and continue through category, sentiment, and optional notes before action "start".' },
-            { label: "View rankings", prompt: 'Call places with action "category_summaries" and render every returned category button.' },
-            { label: "Manage places", prompt: 'Call places with action "category_summaries", ask which category to manage, then show its ranking with place-detail buttons.' },
-            { label: "New category", prompt: 'Ask me for the new category name, then call places with action "create_category".' },
+            { label: "Add place", prompt: 'Ask me for the place name, then call rank_places with action "categories" and continue through category, sentiment, and optional notes before action "start".' },
+            { label: "View rankings", prompt: 'Call rank_places with action "category_summaries" and render every returned category button.' },
+            { label: "Manage places", prompt: 'Call rank_places with action "category_summaries", ask which category to manage, then show its ranking with place-detail buttons.' },
+            { label: "New category", prompt: 'Ask me for the new category name, then call rank_places with action "create_category".' },
           ],
     };
   }
@@ -448,10 +448,10 @@ function addButtonActions(result: unknown): unknown {
       if (!entry || typeof entry !== "object") return [];
       const place = entry as { id?: unknown; name?: unknown };
       if (typeof place.id !== "string" || typeof place.name !== "string") return [];
-      return [{ label: place.name, prompt: `Show details by calling places with action "place" and place_id ${JSON.stringify(place.id)}.` }];
+      return [{ label: place.name, prompt: `Show details by calling rank_places with action "place" and place_id ${JSON.stringify(place.id)}.` }];
     });
-    if (value.hasPrevious === true) actions.push({ label: "Previous", prompt: `Call places with action "ranking", category_id ${JSON.stringify(value.categoryId)}, offset ${Math.max(0, offset - limit)}, and limit ${limit}.` });
-    if (value.hasNext === true) actions.push({ label: "Next", prompt: `Call places with action "ranking", category_id ${JSON.stringify(value.categoryId)}, offset ${offset + limit}, and limit ${limit}.` });
+    if (value.hasPrevious === true) actions.push({ label: "Previous", prompt: `Call rank_places with action "ranking", category_id ${JSON.stringify(value.categoryId)}, offset ${Math.max(0, offset - limit)}, and limit ${limit}.` });
+    if (value.hasNext === true) actions.push({ label: "Next", prompt: `Call rank_places with action "ranking", category_id ${JSON.stringify(value.categoryId)}, offset ${offset + limit}, and limit ${limit}.` });
     return { ...value, buttonActions: actions };
   }
   if (value.kind !== "complete" && value.place && typeof value.place === "object") {
@@ -460,9 +460,9 @@ function addButtonActions(result: unknown): unknown {
       return {
         ...value,
         buttonActions: [
-          { label: "Edit name or notes", prompt: `Ask what to change, then call places with action "edit_place" and place_id ${JSON.stringify(place.id)}.` },
-          { label: "Move", prompt: `Call places with action "categories", ask for the target category, then call places with action "reposition" and place_id ${JSON.stringify(place.id)}.` },
-          { label: "Re-rank", prompt: `Ask for the sentiment, then call places with action "reposition" and place_id ${JSON.stringify(place.id)} using the current category.` },
+          { label: "Edit name or notes", prompt: `Ask what to change, then call rank_places with action "edit_place" and place_id ${JSON.stringify(place.id)}.` },
+          { label: "Move", prompt: `Call rank_places with action "categories", ask for the target category, then call rank_places with action "reposition" and place_id ${JSON.stringify(place.id)}.` },
+          { label: "Re-rank", prompt: `Ask for the sentiment, then call rank_places with action "reposition" and place_id ${JSON.stringify(place.id)} using the current category.` },
           { label: "Delete", prompt: `Request an operation-bound delete_place confirmation for place_id ${JSON.stringify(place.id)}.` },
         ],
       };
@@ -479,7 +479,7 @@ function addButtonActions(result: unknown): unknown {
     if (typeof categoryId === "string") {
       buttonActions.push({
         label: "View ranking",
-        prompt: `Show this place ranking by calling places with action "ranking" and category_id ${JSON.stringify(categoryId)}.`,
+        prompt: `Show this place ranking by calling rank_places with action "ranking" and category_id ${JSON.stringify(categoryId)}.`,
       });
     }
     const place = value.place;
@@ -487,7 +487,7 @@ function addButtonActions(result: unknown): unknown {
     if (typeof placeId === "string") {
       buttonActions.unshift({
         label: "Add notes",
-        prompt: `Ask me for notes, then call places with action "edit_place" and place_id ${JSON.stringify(placeId)} using those notes.`,
+        prompt: `Ask me for notes, then call rank_places with action "edit_place" and place_id ${JSON.stringify(placeId)} using those notes.`,
       });
     }
     if (typeof undoInsertionId === "string") {
@@ -524,7 +524,7 @@ function addButtonActions(result: unknown): unknown {
     return result;
   }
   const answerPrompt = (winner: "candidate" | "existing") =>
-    `Continue my place ranking by calling places with action "answer", insertion_id ${JSON.stringify(insertionId)}, revision ${revision}, existing_place_id ${JSON.stringify(existingId)}, and winner "${winner}". Use the returned exact next step.`;
+    `Continue my place ranking by calling rank_places with action "answer", insertion_id ${JSON.stringify(insertionId)}, revision ${revision}, existing_place_id ${JSON.stringify(existingId)}, and winner "${winner}". Use the returned exact next step.`;
   const buttonActions = [
     { label: candidateName, prompt: answerPrompt("candidate") },
     { label: existingName, prompt: answerPrompt("existing") },
@@ -532,7 +532,7 @@ function addButtonActions(result: unknown): unknown {
   if (revision > 0) {
     buttonActions.push({
       label: "Back",
-      prompt: `Go back one place comparison by calling places with action "back", insertion_id ${JSON.stringify(insertionId)}, and revision ${revision}. Use the returned exact step.`,
+      prompt: `Go back one place comparison by calling rank_places with action "back", insertion_id ${JSON.stringify(insertionId)}, and revision ${revision}. Use the returned exact step.`,
     });
   }
   buttonActions.push({
@@ -577,7 +577,7 @@ function destructivePrompt(operation: ConfirmationOperation, params: Confirmatio
       : operation === "delete_category"
         ? `category_id ${JSON.stringify(params.category_id)}`
         : `insertion_id ${JSON.stringify(params.insertion_id)}`;
-  return `Confirm now by calling places with action ${JSON.stringify(operation)}, ${fields}, and confirmation_token ${JSON.stringify(token)}. Use it once and report the exact result.`;
+  return `Confirm now by calling rank_places with action ${JSON.stringify(operation)}, ${fields}, and confirmation_token ${JSON.stringify(token)}. Use it once and report the exact result.`;
 }
 
 function consumeConfirmation(
@@ -627,8 +627,8 @@ function createPlacesSection(deps: {
   };
 
   return {
-    id: PLACES_SECTION_ID,
-    label: "📍 Places",
+    id: PLACE_RANKINGS_SECTION_ID,
+    label: "📍 Place Rankings",
     order: 20,
     render,
     handleCallback: async (ctx: TelegramSectionCallbackContext) => {
@@ -641,13 +641,13 @@ function createPlacesSection(deps: {
         case "add":
           await ctx.answerCallback("Waiting for a place name.");
           await ctx.enqueuePrompt(
-            'Ask me for the place name. After I answer, call places with action "categories" and pass that exact name.',
+            'Ask me for the place name. After I answer, call rank_places with action "categories" and pass that exact name.',
           );
           return "handled" as const;
         case "new-category":
           await ctx.answerCallback("Waiting for a category name.");
           await ctx.enqueuePrompt(
-            'Ask me for the new place category name, then call places with action "create_category".',
+            'Ask me for the new place category name, then call rank_places with action "create_category".',
           );
           return "handled" as const;
         case "summaries":
@@ -703,7 +703,7 @@ function createPlacesSection(deps: {
         case "direct": {
           const action = deps.getAction(ctx.payload);
           if (!action) {
-            await ctx.answerCallback("This button expired. Open /places again.");
+            await ctx.answerCallback("This button expired. Open /place_rankings again.");
             return "handled" as const;
           }
           let result: unknown;
@@ -762,13 +762,13 @@ function createPlacesSection(deps: {
         case "notes":
           await ctx.answerCallback("Waiting for notes.");
           await ctx.enqueuePrompt(
-            `Ask me for notes, then call places with action "edit_place" and place_id ${JSON.stringify(ctx.payload)}.`,
+            `Ask me for notes, then call rank_places with action "edit_place" and place_id ${JSON.stringify(ctx.payload)}.`,
           );
           return "handled" as const;
         case "manage":
           await ctx.answerCallback("Opening management.");
           await ctx.enqueuePrompt(
-            `Show management options by calling places with action "place" and place_id ${JSON.stringify(ctx.payload)}.`,
+            `Show management options by calling rank_places with action "place" and place_id ${JSON.stringify(ctx.payload)}.`,
           );
           return "handled" as const;
         default:
@@ -780,7 +780,7 @@ function createPlacesSection(deps: {
 
 function placesMenuView(ctx: TelegramSectionContext): TelegramSectionView {
   return {
-    text: "<b>📍 Places</b>\n\nAdd a place or browse your rankings.",
+    text: "<b>📍 Place Rankings</b>\n\nAdd a place or browse your rankings.",
     replyMarkup: {
       inline_keyboard: [
         [{ text: "➕ Add place", callback_data: ctx.callbackData("add") }],

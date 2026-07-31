@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -34,30 +35,35 @@ afterEach(async () => {
   delete (globalThis as Record<PropertyKey, unknown>)[
     Symbol.for("pi-telegram-bridge.command-unbind.places")
   ];
+  delete (globalThis as Record<PropertyKey, unknown>)[
+    Symbol.for("pi-telegram-bridge.command-unbind.place_rankings")
+  ];
 });
 
-describe("/places command", () => {
-  it("is menu-visible and opens the direct places section", async () => {
+describe("/place_rankings command", () => {
+  it("replaces /places and opens the renamed direct rankings section", async () => {
+    const extensionPath = join(root, ".pi", "extensions", "places.ts");
     const module = (await import(
-      `${pathToFileURL(join(root, ".pi", "extensions", "places.ts")).href}?command=${Date.now()}`
+      `${pathToFileURL(extensionPath).href}?command=${Date.now()}`
     )) as { default: (api: unknown) => void };
     module.default({ on: vi.fn(), registerTool: vi.fn() });
-    const command = (await forkCommands())
-      .getTelegramExtensionCommands()
-      .find((entry) => entry.name === "places");
+    const registered = (await forkCommands()).getTelegramExtensionCommands();
+    const command = registered.find((entry) => entry.name === "place_rankings");
 
     expect(command).toMatchObject({ showInMenu: true, emoji: "📍" });
+    expect(registered.some((entry) => entry.name === "places")).toBe(false);
     const enqueuePrompt = vi.fn(async (_prompt: string) => {});
     const openSection = vi.fn(async (_sectionId: string) => {});
     await command?.handler({
-      name: "places",
+      name: "place_rankings",
       args: "",
       reply: vi.fn(async (_text: string) => {}),
       openSection,
       enqueuePrompt,
     });
 
-    expect(openSection).toHaveBeenCalledWith("assistant/places");
+    expect(openSection).toHaveBeenCalledWith("assistant/place-rankings");
     expect(enqueuePrompt).not.toHaveBeenCalled();
+    expect(await readFile(extensionPath, "utf8")).not.toMatch(/\bcall(?:ing)? places\b/i);
   });
 });
