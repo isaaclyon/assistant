@@ -33,6 +33,7 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 | Private place rankings and active comparisons | `<stateDir>/places.db` | Places extension/store |
 | Personal memory vault | `~/.local/share/pi-telegram-bridge/memory` (override: `PI_TELEGRAM_MEMORY_DIR`) | `personal-memory` skill CLI |
 | Derived memory/session search index | `<stateDir>/search-index.db` | Search extension/coordinator |
+| Google Places cache and monthly attempt accounting | `<stateDir>/google-places.db` | Google extension/gateway |
 | Google OAuth client/tokens and keyring | External `gogcli` configuration selected per instance | gogcli / operator |
 | Google keyring password | External mode-`0600` file selected by instance environment | User / Google extension |
 | Process logs | user journal | systemd |
@@ -80,6 +81,9 @@ command or raw API method. Each child is non-interactive, bounded, receives a
 minimal environment plus a just-in-time keyring password, and returns only a
 normalized operation-specific result. Per-instance private configuration owns
 the binary path, default account, and credential-file path; see ADR-0027.
+Google Places requests additionally pass through a per-instance SQLite cache
+and conservative monthly attempt reservation before gog receives a just-in-time
+API key; see ADR-0029.
 
 Background read-only delegation runs isolated Pi child processes with discovery
 and built-in tools disabled. A child-only extension exposes canonicalized
