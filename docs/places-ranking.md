@@ -88,7 +88,7 @@ user may cancel and resume later if they cannot choose.
 
 ### Telegram command
 
-`/places` opens a menu with:
+`/place_rankings` opens a menu with:
 
 - **Add place**
 - **View rankings**
@@ -100,7 +100,7 @@ The command and deterministic buttons use pi-telegram's registered-section
 callbacks directly. Menu navigation, category/sentiment choices, comparisons,
 Back, browsing, and pagination do not start model turns. Free-text collection
 for names, notes, and new categories still enters the agent so natural-language
-requests and the button flow share the same typed places operations.
+requests and the button flow share the same typed `rank_places` operations.
 
 Only one unfinished place insertion may exist for an interaction owner. Asking
 to add another place first offers Resume or Cancel existing ranking; it never
@@ -145,7 +145,7 @@ state are durable so a process restart cannot expose a partially ranked place.
 ### Happy-path transcript
 
 ```text
-User: /places
+User: /place_rankings
 Bot:  [Add place] [View rankings] [Manage places]
 User: [Add place]
 Bot:  What place do you want to rank?
@@ -178,7 +178,7 @@ No unnecessary comparison is requested.
 - Every accepted step persists before the next prompt is shown.
 - Leaving the chat, starting a new Pi session, reloading extensions, or
   restarting the process does not discard an unfinished insertion.
-- `/places` shows **Resume ranking** when one exists. A clear natural-language
+- `/place_rankings` shows **Resume ranking** when one exists. A clear natural-language
   request to continue may do the same.
 - Resume shows the current step again. If a comparison answer was already
   accepted, it is not asked again.
