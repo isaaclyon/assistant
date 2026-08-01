@@ -101,6 +101,9 @@ PI_TELEGRAM_GOG_BINARY=/absolute/path/to/gog
 PI_TELEGRAM_GOG_HOME=/absolute/per-instance/path/to/gog-home
 PI_TELEGRAM_GOG_KEYRING_PASSWORD_FILE=/absolute/path/to/keyring-password
 PI_TELEGRAM_GOOGLE_ACCOUNT=account@example.com
+PI_TELEGRAM_GOOGLE_PLACES_API_KEY_FILE=/absolute/path/to/places-api-key
+PI_TELEGRAM_GOOGLE_PLACES_SEARCH_MONTHLY_LIMIT=100
+PI_TELEGRAM_GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT=100
 ```
 
 The environment file is validated during fleet preflight. The password file
@@ -110,6 +113,18 @@ workflow after changing environment configuration.
 
 `PI_TELEGRAM_GOOGLE_ACCOUNT` is optional. Without it, every tool call must name
 an account explicitly.
+
+The Google Places entries are optional as a group. Store the API key in a
+separate regular file owned by the service user with mode `0600`; never put the
+key itself in the instance environment. Both monthly limits are required to
+enable Places, accept integers from 0 through 1,000,000, and are conservative
+per-UTC-month outbound-attempt ceilings. Zero blocks all cache misses. Configure
+limits below the provider budget because failed attempts remain counted.
+
+`places_search` uses gogcli's fixed identity/address field mask and caches the
+best query match for 24 hours. `places_details` uses the fixed identity/address
+field mask and caches by place ID and locale for 30 days. The current profile
+does not request ratings, opening hours, reviews, or other volatile fields.
 
 ### Configure account aliases
 

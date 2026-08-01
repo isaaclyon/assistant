@@ -17,6 +17,9 @@ const OPERATIONAL_KEYS = new Set([
   "PI_TELEGRAM_GOG_HOME",
   "PI_TELEGRAM_GOG_KEYRING_PASSWORD_FILE",
   "PI_TELEGRAM_GOOGLE_ACCOUNT",
+  "PI_TELEGRAM_GOOGLE_PLACES_API_KEY_FILE",
+  "PI_TELEGRAM_GOOGLE_PLACES_SEARCH_MONTHLY_LIMIT",
+  "PI_TELEGRAM_GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT",
 ]);
 
 const CREDENTIAL_PREFIXES: Record<CredentialScope, readonly string[]> = {
@@ -100,6 +103,18 @@ export async function validateCredentialEnvironmentFile(
         );
       }
       sessionIdleHours = parsed;
+    }
+    if (
+      key === "PI_TELEGRAM_GOOGLE_PLACES_SEARCH_MONTHLY_LIMIT" ||
+      key === "PI_TELEGRAM_GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT"
+    ) {
+      const raw = match[2]!.trim();
+      const parsed = Number(raw);
+      if (!/^\d+$/.test(raw) || !Number.isSafeInteger(parsed) || parsed > 1_000_000) {
+        throw new Error(
+          `Credential environment line ${index + 1} has an invalid Google Places monthly limit; expected 0 through 1000000`,
+        );
+      }
     }
     if (OPERATIONAL_KEYS.has(key)) continue;
     if (

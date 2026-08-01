@@ -75,6 +75,9 @@ describe("credential environment scopes", () => {
         "PI_TELEGRAM_GOG_HOME=/private/gog-home",
         "PI_TELEGRAM_GOG_KEYRING_PASSWORD_FILE=/private/google-keyring-password",
         "PI_TELEGRAM_GOOGLE_ACCOUNT=owner@example.com",
+        "PI_TELEGRAM_GOOGLE_PLACES_API_KEY_FILE=/private/google-places-api-key",
+        "PI_TELEGRAM_GOOGLE_PLACES_SEARCH_MONTHLY_LIMIT=100",
+        "PI_TELEGRAM_GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT=200",
         "",
       ].join("\n"),
       { mode: 0o600 },
@@ -88,9 +91,27 @@ describe("credential environment scopes", () => {
       "PI_TELEGRAM_GOG_HOME",
       "PI_TELEGRAM_GOG_KEYRING_PASSWORD_FILE",
       "PI_TELEGRAM_GOOGLE_ACCOUNT",
+      "PI_TELEGRAM_GOOGLE_PLACES_API_KEY_FILE",
+      "PI_TELEGRAM_GOOGLE_PLACES_SEARCH_MONTHLY_LIMIT",
+      "PI_TELEGRAM_GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT",
     ]);
     expect(JSON.stringify(result)).not.toContain("owner@example.com");
     expect(JSON.stringify(result)).not.toContain("google-keyring-password");
+    expect(JSON.stringify(result)).not.toContain("google-places-api-key");
+  });
+
+  it("rejects invalid Google Places monthly limits", async () => {
+    const root = await mkdtemp(join(tmpdir(), "bridge-google-places-limits-"));
+    const path = join(root, "instance.env");
+    for (const value of ["-1", "1.5", "Infinity", "1000001"]) {
+      await writeFile(
+        path,
+        `PI_TELEGRAM_CREDENTIAL_SCOPE=isaac-personal\nPI_TELEGRAM_GOOGLE_PLACES_SEARCH_MONTHLY_LIMIT=${value}\n`,
+        { mode: 0o600 },
+      );
+      await expect(validateCredentialEnvironmentFile(path, "isaac-personal"))
+        .rejects.toThrow(/Google Places monthly limit.*0 through 1000000/i);
+    }
   });
 
   it("rejects a personal credential in Shared without exposing its value", async () => {

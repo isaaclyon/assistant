@@ -931,6 +931,114 @@ describe("google workspace extension", () => {
     },
   );
 
+  it("runs only allowlisted cached and metered Google Places identity lookups", async () => {
+    const tools = new Map<string, ToolDefinition>();
+    const root = await mkdtemp(join(tmpdir(), "google-places-extension-"));
+    roots.push(root);
+    const run = vi.fn().mockResolvedValue({
+      place: {
+        id: "ChIJ123",
+        name: "Cafe",
+        formatted_address: "1 Main St",
+        google_maps_uri: "https://maps.google.com/?cid=123",
+      },
+    });
+    const module = await import(`${extensionUrl}?places=${Date.now()}`) as {
+      registerGoogleWorkspaceTool(
+        pi: { registerTool(tool: ToolDefinition): void },
+        options: {
+          resolveRuntime(): Promise<Record<string, unknown>>;
+          run(
+            args: string[],
+            signal?: AbortSignal,
+            secrets?: { placesApiKeyFile: string },
+          ): Promise<unknown>;
+          now(): number;
+        },
+      ): void;
+    };
+    module.registerGoogleWorkspaceTool(
+      { registerTool: (tool) => tools.set(tool.name, tool) },
+      {
+        resolveRuntime: async () => ({
+          account: "personal",
+          stateDir: root,
+          placesApiKeyFile: "/private/places-api-key",
+          placesSearchMonthlyLimit: 1,
+          placesDetailsMonthlyLimit: 1,
+        }),
+        run,
+        now: () => Date.UTC(2026, 0, 1),
+      },
+    );
+    const tool = tools.get("google_workspace")!;
+    const request = {
+      operation: "places_search",
+      field_profile: "identity",
+      query: "  cafe   near me ",
+      language: "EN",
+      region: "us",
+    };
+
+    const first = await tool.execute("places-1", request);
+    const cached = await tool.execute("places-2", request);
+    const details = await tool.execute("places-3", {
+      operation: "places_details",
+      field_profile: "identity",
+      place_id: "places/ChIJ123",
+    });
+    const blocked = await tool.execute("places-4", {
+      operation: "places_details",
+      field_profile: "identity",
+      place_id: "ChIJ456",
+    });
+    const invalid = await tool.execute("places-5", {
+      operation: "places_search",
+      field_profile: "reviews",
+      query: "cafe",
+    });
+
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenNthCalledWith(1, [
+      "--no-input", "--readonly", "--gmail-no-send", "--wrap-untrusted", "--json",
+      "maps", "places", "search", "cafe near me", "--language=en", "--region=US",
+    ], undefined, { placesApiKeyFile: "/private/places-api-key" });
+    expect(run).toHaveBeenNthCalledWith(2, [
+      "--no-input", "--readonly", "--gmail-no-send", "--wrap-untrusted", "--json",
+      "maps", "places", "details", "ChIJ123",
+    ], undefined, { placesApiKeyFile: "/private/places-api-key" });
+    expect(first.details).toMatchObject({
+      ok: true,
+      result: {
+        operation: "places_search",
+        fieldProfile: "identity",
+        cached: false,
+        place: {
+          id: "ChIJ123",
+          displayName: "Cafe",
+          formattedAddress: "1 Main St",
+          googleMapsUri: "https://maps.google.com/?cid=123",
+          untrusted: true,
+        },
+      },
+    });
+    expect(cached.details).toMatchObject({ ok: true, result: { cached: true } });
+    expect(details.details).toMatchObject({ ok: true, result: { operation: "places_details", cached: false } });
+    expect(blocked.details).toEqual({
+      ok: true,
+      result: {
+        operation: "places_details",
+        blocked: true,
+        reason: "monthly_limit",
+      },
+      error: null,
+    });
+    expect(invalid.details).toMatchObject({ ok: false, error: { code: "GOOGLE_PLACES_INPUT_INVALID" } });
+    const schema = JSON.stringify(tool.parameters);
+    expect(schema).not.toMatch(/places_(?:status|override|reset|configure)/);
+    expect(JSON.stringify([first, cached, details, blocked, invalid])).not.toContain("/private/places-api-key");
+  });
+
   it("requires an explicit or configured account and returns redacted failures", async () => {
     const tools = new Map<string, ToolDefinition>();
     const run = vi.fn().mockRejectedValue(new Error("secret stderr and token"));
@@ -976,14 +1084,16 @@ describe("google workspace extension", () => {
     const root = await mkdtemp(join(tmpdir(), "gog-runner-"));
     roots.push(root);
     const passwordPath = join(root, "keyring-password");
+    const placesApiKeyPath = join(root, "places-api-key");
     const executable = join(root, "fake-gog.mjs");
     await writeFile(passwordPath, "keyring-secret\n", { mode: 0o600 });
+    await writeFile(placesApiKeyPath, "places-secret\n", { mode: 0o600 });
     await writeFile(
       executable,
       [
         "#!/usr/bin/env node",
         "const inherited = process.env.PI_CREDENTIAL_ENGINEERING_SHOULD_NOT_LEAK;",
-        "process.stdout.write(JSON.stringify({ password: process.env.GOG_KEYRING_PASSWORD, home: process.env.GOG_HOME, inherited }));",
+        "process.stdout.write(JSON.stringify({ password: process.env.GOG_KEYRING_PASSWORD, places: process.env.GOG_PLACES_API_KEY, home: process.env.GOG_HOME, inherited }));",
       ].join("\n"),
       { mode: 0o700 },
     );
@@ -997,6 +1107,7 @@ describe("google workspace extension", () => {
         args: string[];
         timeoutMs?: number;
         maxOutputBytes?: number;
+        placesApiKeyFile?: string;
       }): Promise<unknown>;
     };
 
@@ -1006,8 +1117,21 @@ describe("google workspace extension", () => {
         passwordFile: passwordPath,
         gogHome: root,
         args: ["test"],
+        placesApiKeyFile: placesApiKeyPath,
       }),
-    ).resolves.toEqual({ password: "keyring-secret", home: root });
+    ).resolves.toEqual({ password: "keyring-secret", places: "places-secret", home: root });
+
+    await chmod(placesApiKeyPath, 0o640);
+    await expect(
+      module.runGogJson({
+        binary: executable,
+        passwordFile: passwordPath,
+        gogHome: root,
+        args: ["test"],
+        placesApiKeyFile: placesApiKeyPath,
+      }),
+    ).rejects.toThrow("Google Workspace command failed");
+    await chmod(placesApiKeyPath, 0o600);
 
     await writeFile(executable, "#!/usr/bin/env node\nprocess.stdout.write('not json')\n", {
       mode: 0o700,
