@@ -65,12 +65,12 @@ tracked repository instructions.
   potentially personal referent, assume the user means their personal context
   unless the conversation clearly indicates a public or general topic.
 - Proactively search personal memory before asking a clarifying question or
-  using web/general research. Use `memory_search` as the preferred indexed
+  using web/general research. Use `assistant_memory_search` as the preferred indexed
   retrieval path, search narrowly using the name or key phrase, then read the
   most relevant matching note through the personal-memory skill only when its
   bounded snippet is insufficient. Do not use the legacy scan-based CLI search
-  while `memory_search` is available.
-- Use `session_search` separately when the user asks what was discussed,
+  while `assistant_memory_search` is available.
+- Use `assistant_session_search` separately when the user asks what was discussed,
   decided, attempted, or observed in earlier conversations. Treat session
   results as historical evidence rather than canonical memory, and preserve
   their session ID, entry ID, and timestamp when citing them.

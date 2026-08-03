@@ -130,11 +130,14 @@ export function createRepositoryInspector(roots: string[]) {
     const canonicalRoots = await rootsReal(roots);
     for (const root of canonicalRoots) {
       const candidate = resolve(root, input);
-      if (!inside(root, candidate)) continue;
+      const candidateInsideRoot = inside(root, candidate);
       try {
         const target = await realpath(candidate);
         const stat = await lstat(candidate);
-        if (!inside(root, target)) throw new Error("Path resolves outside configured roots");
+        if (!inside(root, target)) {
+          if (candidateInsideRoot) throw new Error("Path resolves outside configured roots");
+          continue;
+        }
         if (stat.isSymbolicLink()) throw new Error("Symlink reads are not allowed");
         if (!stat.isFile()) throw new Error("Only regular files may be read");
         if (stat.size > MAX_FILE_BYTES) throw new Error("File exceeds the read limit");
@@ -149,11 +152,14 @@ export function createRepositoryInspector(roots: string[]) {
     const canonicalRoots = await rootsReal(roots);
     for (const root of canonicalRoots) {
       const candidate = resolve(root, input);
-      if (!inside(root, candidate)) continue;
+      const candidateInsideRoot = inside(root, candidate);
       try {
         const target = await realpath(candidate);
         const stat = await lstat(candidate);
-        if (!inside(root, target)) throw new Error("Path resolves outside configured roots");
+        if (!inside(root, target)) {
+          if (candidateInsideRoot) throw new Error("Path resolves outside configured roots");
+          continue;
+        }
         if (stat.isSymbolicLink()) throw new Error("Symlink listings are not allowed");
         if (!stat.isDirectory()) throw new Error("Only directories may be listed");
         return target;

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { randomBytes } from "node:crypto";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import {
   access,
   chmod,
@@ -183,8 +183,28 @@ async function childPids(pid) {
       .map(Number)
       .filter((value) => Number.isSafeInteger(value) && value > 0);
   } catch {
-    return [];
+    try {
+      const source = await execute("ps", ["-axo", "pid=,ppid="]);
+      return source
+        .trim()
+        .split(/\r?\n/)
+        .map((line) => line.trim().split(/\s+/).map(Number))
+        .filter(([, parentPid]) => parentPid === pid)
+        .map(([childPid]) => childPid)
+        .filter((value) => Number.isSafeInteger(value) && value > 0);
+    } catch {
+      return [];
+    }
   }
+}
+
+function execute(file, args) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { encoding: "utf8", maxBuffer: 1024 * 1024 }, (error, stdout) => {
+      if (error) reject(error);
+      else resolve(stdout);
+    });
+  });
 }
 
 async function processTree(rootPid) {
@@ -205,7 +225,14 @@ async function commandLine(pid) {
       .split("\0")
       .filter(Boolean);
   } catch {
-    return [];
+    try {
+      return (await execute("ps", ["-ww", "-p", String(pid), "-o", "command="]))
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -287,14 +314,8 @@ function validHandoffState(state) {
 
 async function supervisorAlive(pid, session) {
   if (!pidAlive(pid)) return false;
-  try {
-    const args = (await readFile(`/proc/${pid}/cmdline`, "utf8"))
-      .split("\0")
-      .filter(Boolean);
-    return args.includes(scriptPath) && args.includes("serve") && args.includes(session);
-  } catch {
-    return false;
-  }
+  const args = await commandLine(pid);
+  return args.includes(scriptPath) && args.includes("serve") && args.includes(session);
 }
 
 async function trustedHandoffChild(state, kind) {
