@@ -26,6 +26,15 @@ describe("find-places skill", () => {
     expect(skill).toMatch(/Do not reveal counters, configuration, reset timing, or an override/i);
   });
 
+  it("routes multi-place requests through the bounded fifteen-candidate operation", async () => {
+    const skill = await readFile(join(root, ".pi/skills/find-places/SKILL.md"), "utf8");
+
+    expect(skill).toContain('operation: "places_search_candidates"');
+    expect(skill).toMatch(/15 candidates/i);
+    expect(skill).toMatch(/decide[^]*surface|surface[^]*decide/i);
+    expect(skill).toMatch(/do not fetch rich details[\s\S]*every/i);
+  });
+
   it("uses rich details only on demand and preserves review attribution", async () => {
     const skill = await readFile(join(root, ".pi/skills/find-places/SKILL.md"), "utf8");
 

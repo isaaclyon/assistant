@@ -17,17 +17,26 @@ accounting state, or raw Google API access.
 2. Include the city, neighborhood, address, or other location clue in the search
    query when the user supplied one. Ask for location only when the query would
    otherwise be materially ambiguous.
-3. Call `google_workspace` with `operation: "places_search"` and
-   `field_profile: "identity"`. Do not invoke `gog`, Google APIs, or shell
+3. For a named venue or one-place lookup, call `google_workspace` with
+   `operation: "places_search"` and `field_profile: "identity"`. For a request
+   for several places, a list, alternatives, comparisons, or “best/top-rated”
+   places, call `google_workspace` with `operation: "places_search_candidates"`
+   and request up to 15 candidates. Do not invoke `gog`, Google APIs, or shell
    commands directly.
-4. Use the returned place ID with `places_details` only when the user asks about
+4. For candidate results, inspect all returned candidates and decide which ones
+   to surface based on the user's location, wording, preferences, ratings,
+   review counts, and other stated constraints. Do not blindly repeat all 15
+   unless the user asks for the full collection. State that ratings and review
+   counts are from Google Maps when presenting them.
+5. Use a returned place ID with `places_details` only when the user asks about
    one identified result or when details are needed to confirm identity. Use
    `field_profile: "identity"` for identity confirmation. Use
    `field_profile: "rich_details"` only when the user requests ratings, review
    count, hours, phone, website, price, or reviews. Do not fetch rich details
-   automatically after every search.
-5. Return a concise answer containing only useful requested fields: name,
-   formatted address, and Google Maps link. Clearly say when no place matched.
+   automatically after every search or for every candidate.
+6. Return a concise answer containing only useful requested fields: name,
+   formatted address, Google Maps link, and requested comparison fields. Clearly
+   say when no place matched.
 
 ## Reviews and richer information
 
@@ -51,5 +60,5 @@ negative facts; say only that Google did not return them.
   reached. Do not reveal counters, configuration, reset timing, or an override.
 - If the tool reports unavailable, say the lookup is temporarily unavailable;
   do not expose internal errors or credential paths.
-- Keep the search bounded. The gateway currently returns the best match, so do
-  not imply that it returned an exhaustive list.
+- Keep every search bounded. Candidate search returns at most 15 Google Maps
+  candidates and is not an exhaustive list of every place in the area.
