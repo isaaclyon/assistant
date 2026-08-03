@@ -22,6 +22,7 @@ interface ToolDefinition {
 
 afterEach(async () => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -1037,6 +1038,187 @@ describe("google workspace extension", () => {
     const schema = JSON.stringify(tool.parameters);
     expect(schema).not.toMatch(/places_(?:status|override|reset|configure)/);
     expect(JSON.stringify([first, cached, details, blocked, invalid])).not.toContain("/private/places-api-key");
+  });
+
+  it("fetches bounded rich Place details live with review attribution", async () => {
+    const tools = new Map<string, ToolDefinition>();
+    const root = await mkdtemp(join(tmpdir(), "google-places-rich-"));
+    roots.push(root);
+    const fetchPlaceDetails = vi.fn().mockResolvedValue({
+      id: "ChIJ123",
+      displayName: { text: "Cafe", languageCode: "en" },
+      formattedAddress: "1 Main St",
+      googleMapsUri: "https://maps.google.com/?cid=123",
+      rating: 4.7,
+      userRatingCount: 321,
+      nationalPhoneNumber: "(555) 123-4567",
+      websiteUri: "https://cafe.example/",
+      priceLevel: "PRICE_LEVEL_MODERATE",
+      regularOpeningHours: { weekdayDescriptions: ["Monday: 8:00 AM – 5:00 PM"] },
+      reviews: Array.from({ length: 5 }, (_, index) => ({
+        rating: 5,
+        text: { text: `Review ${index}`, languageCode: "en" },
+        publishTime: "2026-01-01T00:00:00Z",
+        authorAttribution: {
+          displayName: `Reviewer ${index}`,
+          uri: `https://www.google.com/maps/contrib/${index}`,
+        },
+        googleMapsUri: `https://www.google.com/maps/reviews/${index}`,
+      })),
+    });
+    const module = await import(`${extensionUrl}?places-rich=${Date.now()}`) as {
+      registerGoogleWorkspaceTool(
+        pi: { registerTool(tool: ToolDefinition): void },
+        options: Record<string, unknown>,
+      ): void;
+    };
+    module.registerGoogleWorkspaceTool(
+      { registerTool: (tool) => tools.set(tool.name, tool) },
+      {
+        resolveRuntime: async () => ({
+          stateDir: root,
+          placesApiKeyFile: "/private/places-api-key",
+          placesSearchMonthlyLimit: 1,
+          placesDetailsMonthlyLimit: 2,
+        }),
+        run: vi.fn(),
+        fetchPlaceDetails,
+        now: () => Date.UTC(2026, 0, 1),
+      },
+    );
+
+    const tool = tools.get("google_workspace")!;
+    const first = await tool.execute("rich-1", {
+      operation: "places_details",
+      field_profile: "rich_details",
+      place_id: "ChIJ123",
+      language: "en",
+      region: "us",
+    });
+    const second = await tool.execute("rich-2", {
+      operation: "places_details",
+      field_profile: "rich_details",
+      place_id: "ChIJ123",
+    });
+    const blocked = await tool.execute("rich-3", {
+      operation: "places_details",
+      field_profile: "rich_details",
+      place_id: "ChIJ123",
+    });
+
+    expect(fetchPlaceDetails).toHaveBeenCalledTimes(2);
+    expect(fetchPlaceDetails).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      apiKeyFile: "/private/places-api-key",
+      placeId: "ChIJ123",
+      language: "en",
+      region: "US",
+    }));
+    expect(first.details).toMatchObject({
+      ok: true,
+      result: {
+        fieldProfile: "rich_details",
+        cached: false,
+        place: {
+          source: "Google Maps",
+          rating: 4.7,
+          userRatingCount: 321,
+          weekdayDescriptions: ["Monday: 8:00 AM – 5:00 PM"],
+          reviews: [
+            { text: { text: "Review 0" }, authorAttribution: { displayName: "Reviewer 0" } },
+            { text: { text: "Review 1" } },
+            { text: { text: "Review 2" } },
+          ],
+        },
+      },
+    });
+    expect(second.details).toMatchObject({ ok: true, result: { cached: false } });
+    expect(blocked.details).toMatchObject({ ok: true, result: { blocked: true, reason: "monthly_limit" } });
+    expect(JSON.stringify([first, second, blocked])).not.toContain("/private/places-api-key");
+  });
+
+  it("drops rich reviews that lack complete author and source attribution", async () => {
+    const tools = new Map<string, ToolDefinition>();
+    const root = await mkdtemp(join(tmpdir(), "google-places-attribution-"));
+    roots.push(root);
+    const module = await import(`${extensionUrl}?places-attribution=${Date.now()}`) as {
+      registerGoogleWorkspaceTool(pi: { registerTool(tool: ToolDefinition): void }, options: Record<string, unknown>): void;
+    };
+    module.registerGoogleWorkspaceTool(
+      { registerTool: (tool) => tools.set(tool.name, tool) },
+      {
+        resolveRuntime: async () => ({
+          stateDir: root,
+          placesApiKeyFile: "/private/key",
+          placesSearchMonthlyLimit: 1,
+          placesDetailsMonthlyLimit: 1,
+        }),
+        run: vi.fn(),
+        fetchPlaceDetails: vi.fn().mockResolvedValue({
+          id: "ChIJ123",
+          reviews: [
+            { text: { text: "No author" }, googleMapsUri: "https://maps.google.com/review/1" },
+            { text: { text: "No source" }, authorAttribution: { displayName: "A", uri: "https://google.com/a" } },
+            { text: { text: "Bad links" }, googleMapsUri: "javascript:bad", authorAttribution: { displayName: "B", uri: "http://example.com" } },
+          ],
+        }),
+      },
+    );
+
+    const result = await tools.get("google_workspace")!.execute("rich-attribution", {
+      operation: "places_details",
+      field_profile: "rich_details",
+      place_id: "ChIJ123",
+    });
+
+    expect(result.details).toMatchObject({ ok: true, result: { place: { reviews: [] } } });
+  });
+
+  it("uses the fixed rich-details HTTPS contract without exposing the API key", async () => {
+    const root = await mkdtemp(join(tmpdir(), "google-places-http-"));
+    roots.push(root);
+    const keyFile = join(root, "places-key");
+    await writeFile(keyFile, "secret-api-key\n", { mode: 0o600 });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "ChIJ123" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const module = await import(`${extensionUrl}?places-http=${Date.now()}`) as {
+      fetchRichPlaceDetails(options: Record<string, unknown>): Promise<unknown>;
+    };
+
+    await expect(module.fetchRichPlaceDetails({
+      apiKeyFile: keyFile,
+      placeId: "ChIJ123",
+      language: "en",
+      region: "US",
+    })).resolves.toEqual({ id: "ChIJ123" });
+
+    const [requestUrl, requestInit] = fetchMock.mock.calls[0]!;
+    expect(String(requestUrl)).toBe("https://places.googleapis.com/v1/places/ChIJ123?languageCode=en&regionCode=US");
+    expect(requestInit.headers["X-Goog-Api-Key"]).toBe("secret-api-key");
+    expect(requestInit.headers["X-Goog-FieldMask"]).toContain("reviews.authorAttribution");
+    expect(requestInit.headers["X-Goog-FieldMask"]).toContain("regularOpeningHours");
+  });
+
+  it("rejects oversized and failed rich-details HTTP responses with a redacted error", async () => {
+    const root = await mkdtemp(join(tmpdir(), "google-places-http-errors-"));
+    roots.push(root);
+    const keyFile = join(root, "places-key");
+    await writeFile(keyFile, "secret-api-key\n", { mode: 0o600 });
+    const module = await import(`${extensionUrl}?places-http-errors=${Date.now()}`) as {
+      fetchRichPlaceDetails(options: Record<string, unknown>): Promise<unknown>;
+    };
+    const options = { apiKeyFile: keyFile, placeId: "ChIJ123" };
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("upstream leaked secret", { status: 500 })));
+    await expect(module.fetchRichPlaceDetails(options)).rejects.toThrow("Google Workspace command failed");
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("x", {
+      status: 200,
+      headers: { "content-length": "999999" },
+    })));
+    await expect(module.fetchRichPlaceDetails(options)).rejects.toThrow("Google Workspace command failed");
   });
 
   it("requires an explicit or configured account and returns redacted failures", async () => {

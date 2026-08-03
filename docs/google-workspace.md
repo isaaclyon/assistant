@@ -122,9 +122,15 @@ per-UTC-month outbound-attempt ceilings. Zero blocks all cache misses. Configure
 limits below the provider budget because failed attempts remain counted.
 
 `places_search` uses gogcli's fixed identity/address field mask and caches the
-best query match for 24 hours. `places_details` uses the fixed identity/address
-field mask and caches by place ID and locale for 30 days. The current profile
-does not request ratings, opening hours, reviews, or other volatile fields.
+best query match for 24 hours. The `places_details` identity profile uses the
+same fixed identity/address fields and caches by place ID and locale for 30
+days. The opt-in `rich_details` profile requests ratings/count, regular hours,
+national phone, website, price level, and at most three attributed reviews
+through a repo-owned fixed-field HTTPS call because the pinned gogcli does not
+support custom Places fields. Rich details use a separate accounting SKU and
+receive their own copy of the configured details ceiling; identity and rich
+details can therefore make up to twice that numeric setting in total. Rich
+details are never written to the local cache.
 
 ### Configure account aliases
 

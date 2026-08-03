@@ -81,9 +81,10 @@ command or raw API method. Each child is non-interactive, bounded, receives a
 minimal environment plus a just-in-time keyring password, and returns only a
 normalized operation-specific result. Per-instance private configuration owns
 the binary path, default account, and credential-file path; see ADR-0027.
-Google Places requests additionally pass through a per-instance SQLite cache
-and conservative monthly attempt reservation before gog receives a just-in-time
-API key; see ADR-0029.
+Google Places requests additionally pass through conservative per-instance
+monthly attempt reservation. Identity requests use the SQLite cache before gog
+receives a just-in-time API key; opt-in rich details use a repo-owned fixed-field
+HTTPS request and are never cached; see ADR-0029.
 
 Background read-only delegation runs isolated Pi child processes with discovery
 and built-in tools disabled. A child-only extension exposes canonicalized

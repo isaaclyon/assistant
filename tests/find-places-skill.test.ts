@@ -26,10 +26,12 @@ describe("find-places skill", () => {
     expect(skill).toMatch(/Do not reveal counters, configuration, reset timing, or an override/i);
   });
 
-  it("does not claim unsupported review or rich-detail access", async () => {
+  it("uses rich details only on demand and preserves review attribution", async () => {
     const skill = await readFile(join(root, ".pi/skills/find-places/SKILL.md"), "utf8");
 
-    expect(skill).toMatch(/does not expose ratings, hours, phone numbers/i);
-    expect(skill).toMatch(/Never invent or imply access/i);
+    expect(skill).toContain('field_profile: "rich_details"');
+    expect(skill).toMatch(/only when the user requests ratings/i);
+    expect(skill).toMatch(/Attribute[^]*Google Maps/i);
+    expect(skill).toMatch(/author attribution and Google Maps source link/i);
   });
 });

@@ -21,18 +21,24 @@ accounting state, or raw Google API access.
    `field_profile: "identity"`. Do not invoke `gog`, Google APIs, or shell
    commands directly.
 4. Use the returned place ID with `places_details` only when the user asks about
-   one identified result or when details are needed to confirm identity. Do not
-   fetch details automatically after every search.
+   one identified result or when details are needed to confirm identity. Use
+   `field_profile: "identity"` for identity confirmation. Use
+   `field_profile: "rich_details"` only when the user requests ratings, review
+   count, hours, phone, website, price, or reviews. Do not fetch rich details
+   automatically after every search.
 5. Return a concise answer containing only useful requested fields: name,
    formatted address, and Google Maps link. Clearly say when no place matched.
 
 ## Reviews and richer information
 
-The current reviewed gateway intentionally exposes place identity, address, and
-the Google Maps link only. It does not expose ratings, hours, phone numbers,
-websites, editorial summaries, or review text. Never invent or imply access to
-those fields. If the user asks for them, provide the Maps link and state briefly
-that those details are not available through the configured lookup yet.
+Rich details are returned live and are not cached. Attribute ratings, hours,
+contact information, price, and reviews to **Google Maps**. Reviews are a small
+sample ordered by Google's default relevance, not a complete or chronological
+set. Preserve each review's author attribution and Google Maps source link. If a
+review includes a `visitDate`, show its month and year. If translated text and
+different original text are present, say that the displayed review was
+translated and offer the original succinctly. Never summarize missing fields as
+negative facts; say only that Google did not return them.
 
 ## Rules
 
