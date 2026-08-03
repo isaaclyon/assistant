@@ -165,8 +165,8 @@ push. Other unstaged Obsidian edits are left alone. A post-write Git failure is
 reported separately because the canonical note has already changed. Deleting a
 note does not erase it from Git history.
 
-The always-on assistant uses separate indexed `memory_search` and
-`session_search` tools for retrieval. Their private per-instance SQLite/FTS5
+The always-on assistant uses separate indexed `assistant_memory_search` and
+`assistant_session_search` tools for retrieval. Their private per-instance SQLite/FTS5
 database is disposable and rebuildable from canonical Markdown and session
 JSONL. The tracked skill-local CLI continues to own full-note reads, mutations,
 list/happenings, lint, and core operations; it takes one JSON request line on

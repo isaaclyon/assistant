@@ -7,15 +7,15 @@ truth.
 
 ## Assistant tools
 
-- `memory_search` searches curated durable notes. It refreshes the memory
+- `assistant_memory_search` searches curated durable notes. It refreshes the memory
   corpus from canonical Markdown, applies the host-bound memory view in SQL,
   and returns stable note IDs, revisions, metadata, ranking, and bounded
   snippets.
-- `session_search` searches original conversation evidence. It incrementally
+- `assistant_session_search` searches original conversation evidence. It incrementally
   refreshes only `PI_TELEGRAM_BRIDGE_SESSION_DIR` for the active
   instance/principal and returns stable session ID, entry ID, timestamp, role,
   project, source path/offset, ranking, and a bounded snippet.
-- `session_context` expands one `session_search` result into a bounded window
+- `session_context` expands one `assistant_session_search` result into a bounded window
   of nearby turns. It requires the returned session and entry IDs, accepts
   `before`, `after`, and `maxChars` bounds, and never returns an unbounded
   conversation.

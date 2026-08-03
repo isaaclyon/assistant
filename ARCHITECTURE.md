@@ -135,8 +135,8 @@ in this repository do not receive it. Compilation errors are logged by Pi and
 the turn continues without core memory. There is no generated core file or
 memory daemon. A per-instance private SQLite/FTS5 database is a disposable
 search projection over canonical Markdown and configured Pi session JSONL.
-The repo-local search extension exposes separate `memory_search` and
-`session_search` tools plus explicit index maintenance; assistant guidance
+The repo-local search extension exposes separate `assistant_memory_search` and
+`assistant_session_search` tools plus explicit index maintenance; assistant guidance
 prefers indexed memory retrieval while the scan backend remains a compatibility
 fallback. Every note has a `personal` scope with a
 trusted owner or a `household` scope without an owner. Host-bound principal/view

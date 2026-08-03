@@ -168,27 +168,27 @@ describe("search extension", () => {
     handlers.get("session_start")?.();
 
     expect([...tools.keys()].sort()).toEqual([
-      "memory_search",
+      "assistant_memory_search",
+      "assistant_session_search",
       "search_index",
       "session_context",
-      "session_search",
     ]);
-    expect(tools.get("memory_search")?.promptGuidelines?.join(" ")).toContain(
+    expect(tools.get("assistant_memory_search")?.promptGuidelines?.join(" ")).toContain(
       "preferred memory retrieval",
     );
-    const memory = await tools.get("memory_search")!.execute("memory-1", {
+    const memory = await tools.get("assistant_memory_search")!.execute("memory-1", {
       query: "coffee",
       limit: 5,
     });
-    const session = await tools.get("session_search")!.execute("session-1", {
+    const session = await tools.get("assistant_session_search")!.execute("session-1", {
       query: "discussed",
       limit: 5,
     });
-    const defaultRoles = await tools.get("session_search")!.execute("session-default-roles", {
+    const defaultRoles = await tools.get("assistant_session_search")!.execute("session-default-roles", {
       query: "tool-only-memory-result",
       limit: 5,
     });
-    const explicitToolResult = await tools.get("session_search")!.execute("session-tool-result", {
+    const explicitToolResult = await tools.get("assistant_session_search")!.execute("session-tool-result", {
       query: "tool-only-memory-result",
       roles: ["toolResult"],
       limit: 5,
@@ -200,14 +200,14 @@ describe("search extension", () => {
       after: 2,
       maxChars: 2_000,
     });
-    const foreign = await tools.get("session_search")!.execute("session-foreign", {
+    const foreign = await tools.get("assistant_session_search")!.execute("session-foreign", {
       query: "foreign-private-needle",
       limit: 5,
     });
     const status = await tools.get("search_index")!.execute("status-1", {
       operation: "status",
     });
-    const invalid = await tools.get("session_search")!.execute("session-invalid", {
+    const invalid = await tools.get("assistant_session_search")!.execute("session-invalid", {
       query: "discussed",
       from: "not-a-timestamp",
     });

@@ -7,7 +7,7 @@ description: "Stores, recalls, corrects, and forgets explicitly requested person
 
 Durable personal memory lives in a private Markdown directory outside this
 repository (default `~/.local/share/pi-telegram-bridge/memory`). Retrieve it
-through the indexed `memory_search` tool. Use the CLI below for full-note reads,
+through the indexed `assistant_memory_search` tool. Use the CLI below for full-note reads,
 mutations, list/happenings queries, lint, and core inspection — never edit files
 directly or interpolate user text into shell commands.
 
@@ -67,11 +67,11 @@ changed.
   person, pet, place, event, preference, or other saved fact, search memory
   first unless the conversation clearly establishes a public or general topic.
   Do not jump to web search or ask for clarification before this lookup.
-- Use the `memory_search` tool for retrieval. It is the preferred indexed path;
+- Use the `assistant_memory_search` tool for retrieval. It is the preferred indexed path;
   do not invoke the legacy `memory.mjs search` filesystem scan when the tool is
   available. Use the CLI's `read` operation only for the relevant top result(s)
   when the bounded search metadata and snippet are insufficient.
-- Use `session_search` instead when the user asks what was discussed, decided,
+- Use `assistant_session_search` instead when the user asks what was discussed, decided,
   attempted, or observed in an earlier conversation. Session evidence is
   original history, not canonical durable memory; retain its session ID, entry
   ID, and timestamp when citing or promoting it into a memory note.

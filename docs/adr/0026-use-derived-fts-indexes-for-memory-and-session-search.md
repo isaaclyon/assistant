@@ -35,14 +35,14 @@ derived rows. Rewritten, truncated, and deleted files reconcile stale rows.
 
 A repo-local `search` extension exposes three bounded tools:
 
-- `memory_search` for curated durable knowledge;
-- `session_search` for original conversational evidence; and
+- `assistant_memory_search` for curated durable knowledge;
+- `assistant_session_search` for original conversational evidence; and
 - `session_context` for a bounded before/after window around a session result;
 - `search_index` for explicit status, refresh, and rebuild operations.
 
 These are separate assistant choices. The personal-memory CLI continues to own
 CRUD, lint, core compilation, full-note reads, and a compatibility scan search,
-but tracked assistant guidance prefers `memory_search` whenever the indexed
+but tracked assistant guidance prefers `assistant_memory_search` whenever the indexed
 tool is available. Search tools refresh on demand and never write canonical
 sources.
 
