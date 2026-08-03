@@ -20,6 +20,7 @@ const OPERATIONAL_KEYS = new Set([
   "PI_TELEGRAM_GOOGLE_PLACES_API_KEY_FILE",
   "PI_TELEGRAM_GOOGLE_PLACES_SEARCH_MONTHLY_LIMIT",
   "PI_TELEGRAM_GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT",
+  "PI_TELEGRAM_GOOGLE_PLACES_CANDIDATES_MONTHLY_LIMIT",
 ]);
 
 const CREDENTIAL_PREFIXES: Record<CredentialScope, readonly string[]> = {
@@ -106,7 +107,8 @@ export async function validateCredentialEnvironmentFile(
     }
     if (
       key === "PI_TELEGRAM_GOOGLE_PLACES_SEARCH_MONTHLY_LIMIT" ||
-      key === "PI_TELEGRAM_GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT"
+      key === "PI_TELEGRAM_GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT" ||
+      key === "PI_TELEGRAM_GOOGLE_PLACES_CANDIDATES_MONTHLY_LIMIT"
     ) {
       const raw = match[2]!.trim();
       const parsed = Number(raw);

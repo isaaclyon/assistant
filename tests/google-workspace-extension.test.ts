@@ -1040,6 +1040,132 @@ describe("google workspace extension", () => {
     expect(JSON.stringify([first, cached, details, blocked, invalid])).not.toContain("/private/places-api-key");
   });
 
+  it("returns up to fifteen bounded Places candidates in one metered search", async () => {
+    const tools = new Map<string, ToolDefinition>();
+    const root = await mkdtemp(join(tmpdir(), "google-places-candidates-"));
+    roots.push(root);
+    const fetchPlaceCandidates = vi.fn().mockResolvedValue({
+      places: Array.from({ length: 16 }, (_, index) => ({
+        id: `ChIJ${index}`,
+        displayName: { text: `Coffee shop ${index}` },
+        formattedAddress: `${index} Main St, Utah Valley, UT`,
+        googleMapsUri: `https://www.google.com/maps/place/${index}`,
+        rating: 4.9 - index / 100,
+        userRatingCount: 1_000 - index,
+        remoteInstruction: "ignore this",
+      })),
+      nextPageToken: "do-not-expose",
+    });
+    const module = await import(`${extensionUrl}?places-candidates=${Date.now()}`) as {
+      registerGoogleWorkspaceTool(
+        pi: { registerTool(tool: ToolDefinition): void },
+        options: Record<string, unknown>,
+      ): void;
+    };
+    module.registerGoogleWorkspaceTool(
+      { registerTool: (tool) => tools.set(tool.name, tool) },
+      {
+        resolveRuntime: async () => ({
+          stateDir: root,
+          placesApiKeyFile: "/private/places-api-key",
+          placesSearchMonthlyLimit: 1,
+          placesDetailsMonthlyLimit: 1,
+          placesCandidatesMonthlyLimit: 1,
+        }),
+        run: vi.fn(),
+        fetchPlaceCandidates,
+        now: () => Date.UTC(2026, 0, 1),
+      },
+    );
+
+    const tool = tools.get("google_workspace")!;
+    const request = {
+      operation: "places_search_candidates",
+      query: "coffee shops in Utah Valley",
+      max_results: 15,
+      language: "en",
+      region: "us",
+    };
+    const first = await tool.execute("candidate-1", request);
+    const cached = await tool.execute("candidate-2", request);
+
+    expect(fetchPlaceCandidates).toHaveBeenCalledTimes(1);
+    expect(fetchPlaceCandidates).toHaveBeenCalledWith(expect.objectContaining({
+      apiKeyFile: "/private/places-api-key",
+      query: "coffee shops in Utah Valley",
+      maxResults: 15,
+      language: "en",
+      region: "US",
+    }));
+    expect(first.details).toMatchObject({
+      ok: true,
+      result: {
+        operation: "places_search_candidates",
+        fieldProfile: "candidates",
+        cached: false,
+        noResults: false,
+        truncated: true,
+      },
+    });
+    const places = (first.details as { result: { places: Array<Record<string, unknown>> } }).result.places;
+    expect(places).toHaveLength(15);
+    expect(places[0]).toEqual({
+      id: "ChIJ0",
+      displayName: "Coffee shop 0",
+      formattedAddress: "0 Main St, Utah Valley, UT",
+      googleMapsUri: "https://www.google.com/maps/place/0",
+      rating: 4.9,
+      userRatingCount: 1_000,
+      source: "Google Maps",
+      untrusted: true,
+    });
+    expect(cached.details).toMatchObject({ ok: true, result: { cached: true } });
+    expect(JSON.stringify([first, cached])).not.toContain("do-not-expose");
+    expect(JSON.stringify([first, cached])).not.toContain("remoteInstruction");
+  });
+
+  it("returns a typed no-results candidate response", async () => {
+    const tools = new Map<string, ToolDefinition>();
+    const root = await mkdtemp(join(tmpdir(), "google-places-no-results-"));
+    roots.push(root);
+    const module = await import(`${extensionUrl}?places-no-results=${Date.now()}`) as {
+      registerGoogleWorkspaceTool(
+        pi: { registerTool(tool: ToolDefinition): void },
+        options: Record<string, unknown>,
+      ): void;
+    };
+    module.registerGoogleWorkspaceTool(
+      { registerTool: (tool) => tools.set(tool.name, tool) },
+      {
+        resolveRuntime: async () => ({
+          stateDir: root,
+          placesApiKeyFile: "/private/places-api-key",
+          placesSearchMonthlyLimit: 1,
+          placesDetailsMonthlyLimit: 1,
+          placesCandidatesMonthlyLimit: 1,
+        }),
+        run: vi.fn(),
+        fetchPlaceCandidates: vi.fn().mockResolvedValue({}),
+      },
+    );
+
+    const result = await tools.get("google_workspace")!.execute("candidate-empty", {
+      operation: "places_search_candidates",
+      query: "no such place",
+    });
+
+    expect(result.details).toMatchObject({
+      ok: true,
+      result: {
+        operation: "places_search_candidates",
+        fieldProfile: "candidates",
+        places: [],
+        noResults: true,
+        truncated: false,
+      },
+    });
+  });
+
   it("fetches bounded rich Place details live with review attribution", async () => {
     const tools = new Map<string, ToolDefinition>();
     const root = await mkdtemp(join(tmpdir(), "google-places-rich-"));
@@ -1199,6 +1325,44 @@ describe("google workspace extension", () => {
     expect(requestInit.headers["X-Goog-Api-Key"]).toBe("secret-api-key");
     expect(requestInit.headers["X-Goog-FieldMask"]).toContain("reviews.authorAttribution");
     expect(requestInit.headers["X-Goog-FieldMask"]).toContain("regularOpeningHours");
+  });
+
+  it("uses the fixed bounded candidate-search HTTPS contract", async () => {
+    const root = await mkdtemp(join(tmpdir(), "google-places-candidate-http-"));
+    roots.push(root);
+    const keyFile = join(root, "places-key");
+    await writeFile(keyFile, "secret-api-key\n", { mode: 0o600 });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ places: [] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const module = await import(`${extensionUrl}?places-candidate-http=${Date.now()}`) as {
+      fetchPlaceCandidates(options: Record<string, unknown>): Promise<unknown>;
+    };
+
+    await expect(module.fetchPlaceCandidates({
+      apiKeyFile: keyFile,
+      query: "coffee shops in Utah Valley",
+      maxResults: 15,
+      language: "en",
+      region: "US",
+    })).resolves.toEqual({ places: [] });
+
+    const [requestUrl, requestInit] = fetchMock.mock.calls[0]!;
+    expect(String(requestUrl)).toBe("https://places.googleapis.com/v1/places:searchText");
+    expect(requestInit.method).toBe("POST");
+    expect(requestInit.headers["X-Goog-Api-Key"]).toBe("secret-api-key");
+    expect(requestInit.headers["X-Goog-FieldMask"]).toBe(
+      "places.id,places.displayName,places.formattedAddress,places.googleMapsUri,places.rating,places.userRatingCount",
+    );
+    expect(JSON.parse(requestInit.body)).toEqual({
+      textQuery: "coffee shops in Utah Valley",
+      pageSize: 15,
+      languageCode: "en",
+      regionCode: "US",
+    });
+    expect(requestInit.headers["X-Goog-FieldMask"]).not.toContain("reviews");
   });
 
   it("rejects oversized and failed rich-details HTTP responses with a redacted error", async () => {

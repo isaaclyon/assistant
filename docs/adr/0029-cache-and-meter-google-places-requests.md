@@ -25,6 +25,15 @@ source links, translation metadata, and France visit date needed for compliant
 display. No raw command, URL, field mask, status, reset, or override input is
 exposed.
 
+Add `places_search_candidates` as a separate typed operation for bounded list
+queries. It uses a repository-owned fixed HTTPS Text Search (New) request with a
+15-result maximum and a fixed mask containing identity, Maps URI, rating, and
+user rating count. The operation returns a normalized candidate array and a
+bounded `truncated` marker, never a provider pagination token. The model decides
+which candidates to surface; the gateway does not claim that the returned list
+is exhaustive. Empty candidate responses are successful typed no-result values,
+not provider failures.
+
 Store cache entries and monthly outbound-attempt counts in
 `<stateDir>/google-places.db`. A `BEGIN IMMEDIATE` transaction rechecks an
 eligible cache entry and, on a miss, reserves one attempt for the operation's
@@ -42,12 +51,16 @@ subject to Google Maps Platform caching restrictions.
 
 Read the API key just in time from a separate mode-`0600` file configured by
 `PI_TELEGRAM_GOOGLE_PLACES_API_KEY_FILE`, then pass it only in the gog child
-environment. Configure independent conservative monthly limits for text search
-and details. Missing or invalid configuration fails closed.
+environment or the fixed HTTPS request. Configure independent conservative
+monthly limits for identity text search, candidate text search, and details.
+Missing or invalid configuration fails closed for the operation that needs it.
 
 ## Consequences
 
 - Eligible identical requests avoid outbound cost and do not increment usage.
+- One candidate request can return up to 15 places; the result count does not
+  multiply the outbound attempt reservation. Additional pagination requests are
+  intentionally not exposed by the first implementation.
 - Rich details are opt-in, independently counted, and never served from cache.
 - Concurrent cache misses cannot exceed a configured SKU limit through this
   gateway, including across processes sharing the instance database.
