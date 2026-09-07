@@ -13,6 +13,7 @@ import {
   type PlaceCategory,
   type PlacesStore,
   type StoredPlace,
+  type PlaceDeletionSnapshot,
 } from "./places-store.js";
 
 export type PlacesServiceErrorCode =
@@ -163,10 +164,15 @@ export class PlacesService {
     }
   }
 
-  deleteCategory(id: string): void {
+  deletionSnapshot(kind: "place" | "category", id: string): PlaceDeletionSnapshot {
+    try { return this.#store.deletionSnapshot(kind, id); }
+    catch (error) { throw asServiceError(error); }
+  }
+
+  deleteCategory(id: string, expected?: PlaceDeletionSnapshot): void {
     this.#requireCategory(id);
     try {
-      this.#store.deleteCategory(id);
+      this.#store.deleteCategory(id, expected);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/empty category/i.test(message)) {
@@ -199,10 +205,10 @@ export class PlacesService {
     }
   }
 
-  deletePlace(id: string): void {
+  deletePlace(id: string, expected?: PlaceDeletionSnapshot): void {
     this.getPlace(id);
     try {
-      this.#store.deletePlace(id);
+      this.#store.deletePlace(id, expected);
     } catch (error) {
       throw asServiceError(error);
     }

@@ -71,7 +71,11 @@ node .pi/skills/manage-ynab/scripts/ynab-transaction-context.mjs <transaction-id
 Call `list-ynab-categories.mjs` once per review batch. It returns active
 categories with IDs and group names. Call `ynab-transaction-context.mjs` for
 each transaction; it returns current details, exact-payee category frequencies,
-and at most five recent exact-payee examples. Use that evidence to suggest a
+and at most five recent exact-payee examples. Malformed scalar fields or
+oversized text fail closed rather than passing raw nested payloads through:
+IDs are limited to 128 characters, names to 500, dates to 64, and memos to 4,000.
+Amounts must be finite numbers and approval values must be booleans; optional
+missing values remain null. Use that evidence to suggest a
 small number of categories, but do not update the transaction until the user
 clearly instructs you. When an ambiguous transaction is deferred, offer to add
 a concise actionable memo; do not create an interaction log or overwrite an

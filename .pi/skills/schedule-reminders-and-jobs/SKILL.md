@@ -20,8 +20,9 @@ instructions to your future self (they arrive with a short job-fired preamble).
 For normal listing and mutations, use `scripts/jobs-cli.mjs` from this skill
 instead of locating or editing `jobs.json` manually. Send exactly one JSON
 request on stdin. The helper resolves the fleet coordinator, upgrades writes to
-schema 3, prunes fired one-time jobs, writes atomically, waits for host reload,
-and rolls back a rejected edit.
+schema 3, prunes fired one-time jobs, validates the full candidate, serializes
+mutations, and writes atomically. It waits for acknowledgement of the exact
+published bytes; it never rolls back a rejected or unacknowledged edit.
 
 ```bash
 printf '%s' '{"operation":"list"}' | node scripts/jobs-cli.mjs
@@ -38,8 +39,10 @@ printf '%s' '{"operation":"remove","id":"vet-call"}' | node scripts/jobs-cli.mjs
 `add_at` accepts exactly one of `at` (an ISO timestamp) or `in` (a positive
 duration using `s`, `m`, `h`, or `d`). `upsert` accepts a complete cron, at,
 heartbeat, or webhook definition and therefore remains the generic path for all
-job types. Always inspect the returned JSON and report failure rather than
-claiming the schedule changed. Do not pass secrets in command-line arguments;
+job types. Always inspect the returned JSON: distinguish saved definitions from
+host acceptance. A timeout means saved but not acknowledged; a rejection leaves
+the saved edit in place and the host running its last accepted definitions.
+Neither outcome proves a reminder will fire. Do not pass secrets in command-line arguments;
 stdin keeps structured requests out of process listings.
 
 ## Listing jobs and status
@@ -78,10 +81,11 @@ state file is missing or malformed rather than guessing.
 Use this only if the helper is unavailable or cannot represent the required
 recovery:
 
-1. Read the current file first (it may not exist yet; start from the template below).
-2. Write the full new content to a temp file, then `mv` it over `jobs.json` (atomic — the host must never see a half-written file).
-3. Validate: the host hot-reloads within ~1 second and records the outcome in `jobs-state.json` next to `jobs.json`. Wait ~2 seconds, then read its `lastLoadError`: `null` means the file was accepted; a message means the host rejected the edit and kept the previous jobs — fix and re-edit. (On a dev machine with a build, `npm run jobs:check` validates the same rules directly.)
-4. Confirm to the user what was scheduled, including the schedule in plain words.
+1. Quiesce other definition writers, then read the current file (start from the template below if absent).
+2. Validate the complete candidate with the scheduler parser before replacing the file. On a dev machine with a build, use `npm run jobs:check`.
+3. Write the full content to a temp file, then `mv` it over `jobs.json`. Hash the exact published UTF-8 bytes with SHA-256.
+4. Read host-owned `jobs-state.json`: only an `acceptedHash` matching that hash proves acceptance. A matching `observedHash` with `lastLoadError` proves rejection. An unrelated state write or null error alone is not acknowledgement.
+5. Report saved versus accepted, including the schedule in plain words. Never restore an older snapshot automatically.
 
 ## Schema
 
@@ -239,6 +243,38 @@ Public exposure goes through Tailscale Funnel (one-time, needs sudo): `sudo tail
 
 `jobs-state.json` next to `jobs.json` (host-owned — read it, never write it)
 records `lastRun` per job, `fired` for at-jobs, and `lastLoadError`.
+These are scheduler/publication markers, not proof that Pi ran successfully or
+a Telegram message arrived. The coordinator's `job-occurrences.db` retains
+materialized work; never edit it or delete terminal identities.
+
+## Recovering unresolved recipient work
+
+Use the existing helper with `{"operation":"inspect_handoffs"}`. This inspects
+only the active instance, not a chat-selected recipient, and returns bounded
+processing/failed identities and exact `revision` hashes without prompt bodies.
+Processing can mean an active invocation or an orphaned uncertain claim.
+
+Inspect original session evidence and ask the user how to resolve uncertainty.
+Recommend acknowledgement when the work is confirmed already handled. Retry
+only with explicit approval after explaining that previously accepted work
+could run twice. Never infer rejection from an exception's wording.
+
+Pass the selected `dispatchId`, `state`, and `revision` unchanged:
+
+```json
+{
+  "operation": "recover_handoff",
+  "dispatchId": "<selected dispatch ID>",
+  "state": "processing",
+  "revision": "<selected revision>",
+  "action": "acknowledge"
+}
+```
+
+`action: "retry"` returns work to pending with a fresh five-attempt budget.
+`acknowledge` records operator resolution separately from observed Pi acceptance.
+Recovery refuses stale evidence, conflicting terminal state, another recipient,
+or an active drain. Report the returned boundary, never external completion.
 
 Stateful heartbeat files live under `checkers/<job-id>.json` in the same state
 directory. They record the latest observation, condition markers, health

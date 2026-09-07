@@ -11,7 +11,6 @@ RELEASE_ROOT="$HOME/.local/share/pi-telegram-bridge/releases"
 RELEASE_PATH="$RELEASE_ROOT/$EXPECTED_SHA"
 STAGING_PATH="$RELEASE_ROOT/.staging-$EXPECTED_SHA"
 LOCK_PATH="$HOME/.local/state/pi-telegram-bridge/deploy.lock"
-UNIT_BACKUP=""
 ACTIVATION_STARTED=false
 CURRENT_SHA=""
 
@@ -57,24 +56,8 @@ show_failure_context() {
   local original_status=$?
   trap - ERR
   rm -rf "$STAGING_PATH"
-  if [[ "$ACTIVATION_STARTED" == true && -n "$UNIT_BACKUP" && -f "$UNIT_BACKUP" ]]; then
-    echo "==> Restoring the previous service unit" >&2
-    if [[ -n "$CURRENT_SHA" ]]; then
-      git -C "$DEPLOY_PATH" reset --hard "$CURRENT_SHA" || true
-    fi
-    cp "$UNIT_BACKUP" "$UNIT_PATH"
-    rollback_time="$(date --iso-8601=seconds)"
-    rollback_ok=false
-    if systemctl --user daemon-reload && systemctl --user restart "$SERVICE"; then
-      if rollback_pid="$(wait_for_service_ready "$rollback_time")"; then
-        rollback_ok=true
-        echo "==> Previous release restored, PID $rollback_pid" >&2
-      fi
-    fi
-    if [[ "$rollback_ok" != true ]]; then
-      echo "CRITICAL: previous release did not recover after rollback." >&2
-    fi
-    rm -f "$UNIT_BACKUP"
+  if [[ "$ACTIVATION_STARTED" == true ]]; then
+    recovery_hold
   fi
   echo "==> Deployment failed; service status follows" >&2
   systemctl --user status "$SERVICE" --no-pager >&2 || true
@@ -183,15 +166,15 @@ systemd-run --user --wait --pipe --quiet --collect \
   --setenv="PI_TELEGRAM_BRIDGE_CWD=$DEPLOY_PATH" \
   "$NODE_BINARY" "$RELEASE_PATH/dist/src/jobs-check.js"
 
-if [[ -f "$UNIT_PATH" ]]; then
-  UNIT_BACKUP="$(mktemp)"
-  cp "$UNIT_PATH" "$UNIT_BACKUP"
-fi
+STATE_ROOT="${PI_TELEGRAM_BRIDGE_STATE_DIR:-$HOME/.local/state/pi-telegram-bridge}"
+UNIT_DIR="$(dirname "$UNIT_PATH")"
+source "$RELEASE_PATH/scripts/recovery-maintenance.sh"
 
 echo "==> Activating $SERVICE"
 ACTIVATION_STARTED=true
 ACTIVATION_TIME="$(date --iso-8601=seconds)"
-systemctl --user stop "$SERVICE"
+recovery_prepare local
+RECOVERY_UNITS+=("$SERVICE")
 git reset --hard "$EXPECTED_SHA"
 git clean -ffdx -- \
   .pi/extensions \
@@ -199,7 +182,9 @@ git clean -ffdx -- \
   .pi/settings.json \
   .agents/skills
 PI_TELEGRAM_BRIDGE_CWD="$DEPLOY_PATH" \
+  PI_TELEGRAM_BRIDGE_INSTALL_NO_START=1 \
   node "$RELEASE_PATH/dist/src/install-service.js"
+recovery_started
 systemctl --user restart "$SERVICE"
 
 if ! MAIN_PID="$(wait_for_service_ready "$ACTIVATION_TIME")"; then
@@ -207,8 +192,10 @@ if ! MAIN_PID="$(wait_for_service_ready "$ACTIVATION_TIME")"; then
   false
 fi
 
+recovery_revoke_startup
+systemctl --user enable "$SERVICE"
+recovery_complete
 ACTIVATION_STARTED=false
-[[ -z "$UNIT_BACKUP" ]] || rm -f "$UNIT_BACKUP"
 bash "$RELEASE_PATH/scripts/activate-messages-link.sh" "$RELEASE_PATH"
 
 echo "==> Deployment complete at $(git rev-parse --short HEAD), PID $MAIN_PID"

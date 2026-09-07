@@ -27,6 +27,27 @@ afterEach(async () => {
 });
 
 describe("google workspace extension", () => {
+  it("passes the one resolved runtime snapshot to transport", async () => {
+    const module = await import(extensionUrl);
+    let tool: ToolDefinition | undefined;
+    const runtime = { account: "personal", binary: "synthetic", passwordFile: "/synthetic/key", gogHome: "/synthetic/home" };
+    const resolveRuntime = vi.fn(async () => runtime);
+    const run = vi.fn(async (_runtime: unknown) => ({ accounts: [] }));
+    module.registerGoogleWorkspaceTool({ registerTool: (value: ToolDefinition) => { tool = value; } }, { resolveRuntime, run });
+    await tool!.execute("test", { operation: "account_status" });
+    expect(resolveRuntime).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0]?.[0]).toBe(runtime);
+  });
+  it("preserves the closed public operation union", async () => {
+    const module = await import(extensionUrl);
+    let tool: ToolDefinition | undefined;
+    module.registerGoogleWorkspaceTool({ registerTool: (value: ToolDefinition) => { tool = value; } }, {
+      resolveRuntime: async () => ({}),
+      run: async () => { throw new Error("Schema inspection must not execute Google requests"); },
+    });
+    expect(JSON.parse(JSON.stringify(tool!.parameters))).toMatchSnapshot();
+  });
+
   it("registers one typed account-status operation and normalizes gog output", async () => {
     const tools = new Map<string, ToolDefinition>();
     const run = vi.fn().mockResolvedValue({
@@ -45,7 +66,7 @@ describe("google workspace extension", () => {
         pi: { registerTool(tool: ToolDefinition): void },
         options: {
           resolveRuntime(): Promise<{ account?: string }>;
-          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+          run(runtime: Record<string, unknown>, args: string[], signal?: AbortSignal): Promise<unknown>;
         },
       ): void;
     };
@@ -62,7 +83,7 @@ describe("google workspace extension", () => {
     const tool = tools.get("google_workspace")!;
     const result = await tool.execute("call-1", { operation: "account_status" });
 
-    expect(run).toHaveBeenCalledWith(
+    expect(run).toHaveBeenCalledWith(expect.any(Object),
       [
         "--no-input",
         "--readonly",
@@ -112,7 +133,7 @@ describe("google workspace extension", () => {
         pi: { registerTool(tool: ToolDefinition): void },
         options: {
           resolveRuntime(): Promise<{ account?: string }>;
-          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+          run(runtime: Record<string, unknown>, args: string[], signal?: AbortSignal): Promise<unknown>;
         },
       ): void;
     };
@@ -127,7 +148,7 @@ describe("google workspace extension", () => {
       max_results: 10,
     });
 
-    expect(run).toHaveBeenCalledWith(
+    expect(run).toHaveBeenCalledWith(expect.any(Object),
       [
         "--no-input",
         "--readonly",
@@ -178,7 +199,7 @@ describe("google workspace extension", () => {
         pi: { registerTool(tool: ToolDefinition): void },
         options: {
           resolveRuntime(): Promise<{ account?: string }>;
-          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+          run(runtime: Record<string, unknown>, args: string[], signal?: AbortSignal): Promise<unknown>;
         },
       ): void;
     };
@@ -192,7 +213,7 @@ describe("google workspace extension", () => {
     });
 
     expect(run).toHaveBeenCalledTimes(2);
-    expect(run.mock.calls[1]?.[0]).toEqual(expect.arrayContaining(["auth", "alias", "list"]));
+    expect(run.mock.calls[1]?.[1]).toEqual(expect.arrayContaining(["auth", "alias", "list"]));
     expect(result.details).toEqual({
       ok: true,
       result: { operation: "account_status", account: "work", authenticated: true, services: ["calendar"] },
@@ -244,7 +265,7 @@ describe("google workspace extension", () => {
         pi: { registerTool(tool: ToolDefinition): void },
         options: {
           resolveRuntime(): Promise<{ account?: string }>;
-          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+          run(runtime: Record<string, unknown>, args: string[], signal?: AbortSignal): Promise<unknown>;
         },
       ): void;
     };
@@ -264,7 +285,7 @@ describe("google workspace extension", () => {
       max_results: 20,
     });
 
-    expect(run).toHaveBeenCalledWith(
+    expect(run).toHaveBeenCalledWith(expect.any(Object),
       [
         "--no-input", "--readonly", "--gmail-no-send", "--wrap-untrusted", "--json",
         "--account", "personal", "calendar", "events",
@@ -339,7 +360,7 @@ describe("google workspace extension", () => {
         pi: { registerTool(tool: ToolDefinition): void },
         options: {
           resolveRuntime(): Promise<{ account?: string }>;
-          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+          run(runtime: Record<string, unknown>, args: string[], signal?: AbortSignal): Promise<unknown>;
         },
       ): void;
     };
@@ -357,7 +378,7 @@ describe("google workspace extension", () => {
       max_results: 1,
     });
 
-    expect(run.mock.calls[0]?.[0]).toContain("--query=dentist");
+    expect(run.mock.calls[0]?.[1]).toContain("--query=dentist");
     expect(result.details).toMatchObject({
       ok: true,
       result: {
@@ -411,7 +432,7 @@ describe("google workspace extension", () => {
         pi: { registerTool(tool: ToolDefinition): void },
         options: {
           resolveRuntime(): Promise<{ account?: string }>;
-          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+          run(runtime: Record<string, unknown>, args: string[], signal?: AbortSignal): Promise<unknown>;
         },
       ): void;
     };
@@ -428,8 +449,8 @@ describe("google workspace extension", () => {
       to: "2026-08-01T13:00:00Z",
     });
 
-    expect(run).toHaveBeenNthCalledWith(1, expect.arrayContaining(["--account", "personal"]), undefined);
-    expect(run).toHaveBeenNthCalledWith(2, expect.arrayContaining(["--account", "work"]), undefined);
+    expect(run).toHaveBeenNthCalledWith(1, expect.any(Object), expect.arrayContaining(["--account", "personal"]), undefined);
+    expect(run).toHaveBeenNthCalledWith(2, expect.any(Object), expect.arrayContaining(["--account", "work"]), undefined);
     expect(result.details).toEqual({
       ok: true,
       result: {
@@ -477,7 +498,7 @@ describe("google workspace extension", () => {
         pi: { registerTool(tool: ToolDefinition): void },
         options: {
           resolveRuntime(): Promise<{ account?: string }>;
-          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+          run(runtime: Record<string, unknown>, args: string[], signal?: AbortSignal): Promise<unknown>;
         },
       ): void;
     };
@@ -524,7 +545,7 @@ describe("google workspace extension", () => {
         pi: { registerTool(tool: ToolDefinition): void },
         options: {
           resolveRuntime(): Promise<{ account?: string }>;
-          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+          run(runtime: Record<string, unknown>, args: string[], signal?: AbortSignal): Promise<unknown>;
         },
       ): void;
     };
@@ -540,7 +561,7 @@ describe("google workspace extension", () => {
       max_results: 10,
     });
 
-    expect(run).toHaveBeenCalledWith(
+    expect(run).toHaveBeenCalledWith(expect.any(Object),
       [
         "--no-input", "--readonly", "--gmail-no-send", "--wrap-untrusted", "--json",
         "--account", "work", "gmail", "search", "in:inbox is:unread newer_than:14d", "--max=10",
@@ -601,7 +622,7 @@ describe("google workspace extension", () => {
         pi: { registerTool(tool: ToolDefinition): void },
         options: {
           resolveRuntime(): Promise<{ account?: string }>;
-          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+          run(runtime: Record<string, unknown>, args: string[], signal?: AbortSignal): Promise<unknown>;
         },
       ): void;
     };
@@ -615,7 +636,7 @@ describe("google workspace extension", () => {
       thread_id: "thread-1",
     });
 
-    expect(run).toHaveBeenCalledWith(
+    expect(run).toHaveBeenCalledWith(expect.any(Object),
       [
         "--no-input", "--readonly", "--gmail-no-send", "--wrap-untrusted", "--json",
         "--account", "personal", "gmail", "thread", "get", "thread-1", "--sanitize-content",
@@ -664,7 +685,7 @@ describe("google workspace extension", () => {
         pi: { registerTool(tool: ToolDefinition): void },
         options: {
           resolveRuntime(): Promise<{ account?: string }>;
-          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+          run(runtime: Record<string, unknown>, args: string[], signal?: AbortSignal): Promise<unknown>;
         },
       ): void;
     };
@@ -732,7 +753,7 @@ describe("google workspace extension", () => {
         pi: { registerTool(tool: ToolDefinition): void },
         options: {
           resolveRuntime(): Promise<{ account?: string }>;
-          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+          run(runtime: Record<string, unknown>, args: string[], signal?: AbortSignal): Promise<unknown>;
         },
       ): void;
     };
@@ -748,14 +769,14 @@ describe("google workspace extension", () => {
       max_results: 2,
     });
 
-    expect(run).toHaveBeenNthCalledWith(1, [
+    expect(run).toHaveBeenNthCalledWith(1, expect.any(Object), [
       "--no-input", "--readonly", "--gmail-no-send", "--wrap-untrusted", "--json",
       "--account", "work", "contacts", "search", "Ada", "--max=2",
     ], undefined);
-    expect(run).toHaveBeenNthCalledWith(2, expect.arrayContaining([
+    expect(run).toHaveBeenNthCalledWith(2, expect.any(Object), expect.arrayContaining([
       "--account", "work", "contacts", "get", "people/one",
     ]), undefined);
-    expect(run).toHaveBeenNthCalledWith(3, expect.arrayContaining([
+    expect(run).toHaveBeenNthCalledWith(3, expect.any(Object), expect.arrayContaining([
       "--account", "work", "contacts", "get", "people/two",
     ]), undefined);
     expect(result.details).toEqual({
@@ -821,7 +842,7 @@ describe("google workspace extension", () => {
         pi: { registerTool(tool: ToolDefinition): void },
         options: {
           resolveRuntime(): Promise<{ account?: string }>;
-          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+          run(runtime: Record<string, unknown>, args: string[], signal?: AbortSignal): Promise<unknown>;
         },
       ): void;
     };
@@ -857,7 +878,7 @@ describe("google workspace extension", () => {
         pi: { registerTool(tool: ToolDefinition): void },
         options: {
           resolveRuntime(): Promise<{ account?: string }>;
-          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+          run(runtime: Record<string, unknown>, args: string[], signal?: AbortSignal): Promise<unknown>;
         },
       ): void;
     };
@@ -910,7 +931,7 @@ describe("google workspace extension", () => {
           pi: { registerTool(tool: ToolDefinition): void },
           options: {
             resolveRuntime(): Promise<{ account?: string }>;
-            run(args: string[], signal?: AbortSignal): Promise<unknown>;
+            run(runtime: Record<string, unknown>, args: string[], signal?: AbortSignal): Promise<unknown>;
           },
         ): void;
       };
@@ -925,7 +946,7 @@ describe("google workspace extension", () => {
         max_results: 5,
       });
 
-      expect(run).toHaveBeenCalledWith(expect.arrayContaining([
+      expect(run).toHaveBeenCalledWith(expect.any(Object), expect.arrayContaining([
         "contacts", "search", query, "--max=5",
       ]), undefined);
       expect(result.details).toMatchObject({ ok: true, result: { query, contacts: [] } });
@@ -950,6 +971,7 @@ describe("google workspace extension", () => {
         options: {
           resolveRuntime(): Promise<Record<string, unknown>>;
           run(
+            runtime: Record<string, unknown>,
             args: string[],
             signal?: AbortSignal,
             secrets?: { placesApiKeyFile: string },
@@ -1000,11 +1022,11 @@ describe("google workspace extension", () => {
     });
 
     expect(run).toHaveBeenCalledTimes(2);
-    expect(run).toHaveBeenNthCalledWith(1, [
+    expect(run).toHaveBeenNthCalledWith(1, expect.any(Object), [
       "--no-input", "--readonly", "--gmail-no-send", "--wrap-untrusted", "--json",
       "maps", "places", "search", "cafe near me", "--language=en", "--region=US",
     ], undefined, { placesApiKeyFile: "/private/places-api-key" });
-    expect(run).toHaveBeenNthCalledWith(2, [
+    expect(run).toHaveBeenNthCalledWith(2, expect.any(Object), [
       "--no-input", "--readonly", "--gmail-no-send", "--wrap-untrusted", "--json",
       "maps", "places", "details", "ChIJ123",
     ], undefined, { placesApiKeyFile: "/private/places-api-key" });
@@ -1393,7 +1415,7 @@ describe("google workspace extension", () => {
         pi: { registerTool(tool: ToolDefinition): void },
         options: {
           resolveRuntime(): Promise<{ account?: string }>;
-          run(args: string[], signal?: AbortSignal): Promise<unknown>;
+          run(runtime: Record<string, unknown>, args: string[], signal?: AbortSignal): Promise<unknown>;
         },
       ): void;
     };

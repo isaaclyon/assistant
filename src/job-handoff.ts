@@ -1,13 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import {
   lstat,
   mkdir,
+  open,
   readFile,
   readdir,
   rename,
-  writeFile,
+  rm,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { withMutationLock } from "../.pi/lib/mutation-lock.mjs";
 
 const MAX_HANDOFF_PROMPT_BYTES = 32 * 1024;
 
@@ -19,6 +22,7 @@ interface JobHandoffFile {
   target: string;
   prompt: string;
   createdAt: string;
+  attempts?: number;
 }
 
 type RecipientStatus = "pending" | "enqueued";
@@ -37,6 +41,8 @@ export interface EnqueueJobHandoffOptions {
   stateRoot: string;
   coordinatorStateDir: string;
   eventId: string;
+  definitionFingerprint?: string;
+  local?: boolean;
   jobId: string;
   jobType?: JobHandoffFile["jobType"];
   target: string;
@@ -55,10 +61,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  await rename(temporaryPath, path);
+  try {
+    const handle = await open(temporaryPath, "wx", 0o600);
+    try {
+      await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporaryPath, path);
+    await syncDirectory(dirname(path));
+  } finally {
+    await rm(temporaryPath, { force: true });
+  }
+}
+
+async function syncDirectory(path: string): Promise<void> {
+  const handle = await open(path, constants.O_RDONLY);
+  try { await handle.sync(); } finally { await handle.close(); }
+}
+
+async function moveHandoff(from: string, to: string): Promise<void> {
+  await rename(from, to);
+  await syncDirectory(dirname(to));
+  await syncDirectory(dirname(from));
 }
 
 function parseDispatchStatus(raw: string, path: string): JobDispatchStatus {
@@ -90,6 +116,8 @@ export async function enqueueJobHandoff({
   stateRoot,
   coordinatorStateDir,
   eventId,
+  definitionFingerprint,
+  local = false,
   jobId,
   jobType,
   target,
@@ -98,6 +126,10 @@ export async function enqueueJobHandoff({
 }: EnqueueJobHandoffOptions): Promise<EnqueueJobHandoffResult> {
   if (!/^[a-z0-9-]{1,64}$/.test(jobId)) throw new Error("Invalid handoff job ID");
   if (!/^[a-z0-9-]{1,64}$/.test(target)) throw new Error("Invalid handoff target");
+  if (local && target !== "local") throw new Error("Invalid local handoff target");
+  if (definitionFingerprint !== undefined && !/^[a-f0-9]{64}$/.test(definitionFingerprint)) {
+    throw new Error("Invalid handoff definition fingerprint");
+  }
   if (
     prompt.trim().length === 0 ||
     Buffer.byteLength(prompt, "utf8") > MAX_HANDOFF_PROMPT_BYTES
@@ -106,7 +138,8 @@ export async function enqueueJobHandoff({
   }
   const recipients = target === "both-personal" ? ["isaac", "emma"] : [target];
   const eventHash = createHash("sha256").update(eventId).digest("hex");
-  const dispatchId = `${jobId}-${eventHash.slice(0, 16)}`;
+  const dispatchId = definitionFingerprint === undefined ? `${jobId}-${eventHash.slice(0, 16)}`
+    : `${jobId}-${createHash("sha256").update(JSON.stringify([jobId, definitionFingerprint, eventId])).digest("hex")}`;
   const dispatchDir = join(coordinatorStateDir, "job-dispatches");
   const dispatchPath = join(dispatchDir, `${dispatchId}.json`);
   await mkdir(dispatchDir, { recursive: true, mode: 0o700 });
@@ -140,13 +173,7 @@ export async function enqueueJobHandoff({
 
   for (const recipient of recipients) {
     if (status.recipients[recipient] === "enqueued") continue;
-    const pendingDir = join(
-      stateRoot,
-      "instances",
-      recipient,
-      "job-handoffs",
-      "pending",
-    );
+    const pendingDir = join(local ? coordinatorStateDir : join(stateRoot, "instances", recipient), "job-handoffs", "pending");
     try {
       await mkdir(pendingDir, { recursive: true, mode: 0o700 });
       const handoff: JobHandoffFile = {
@@ -158,15 +185,21 @@ export async function enqueueJobHandoff({
         prompt,
         createdAt: status.createdAt,
       };
-      try {
-        await writeFile(
-          join(pendingDir, `${dispatchId}.json`),
-          `${JSON.stringify(handoff, null, 2)}\n`,
-          { flag: "wx", mode: 0o600 },
-        );
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      }
+      const recipientRoot = dirname(pendingDir);
+      await withMutationLock(join(recipientRoot, ".transition-lock.sqlite"), async () => {
+        // Recipient evidence may be ahead of coordinator state. Never recreate
+        // pending work after a claim, acceptance, or terminal rejection.
+        for (const directory of ["completed", "acknowledged", "processing", "failed", "cancelled", "pending"]) {
+          const existingPath = join(recipientRoot, directory, `${dispatchId}.json`);
+          try {
+            await lstat(existingPath);
+            return;
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          }
+        }
+        await writeJsonAtomic(join(pendingDir, `${dispatchId}.json`), handoff);
+      });
       status.recipients[recipient] = "enqueued";
       await writeJsonAtomic(dispatchPath, status);
     } catch (error) {
@@ -178,6 +211,47 @@ export async function enqueueJobHandoff({
   }
 
   return { dispatchId, recipients: { ...status.recipients } };
+}
+
+export async function cancelJobHandoff(options: {
+  stateRoot: string;
+  coordinatorStateDir: string;
+  local?: boolean;
+  dispatchId: string;
+  jobId: string;
+  target: string;
+}): Promise<Record<string, "cancelled" | "completed" | "acknowledged" | "processing" | "failed">> {
+  if (!/^[a-z0-9-]{1,64}$/.test(options.jobId) || !/^[a-z0-9-]{1,64}$/.test(options.target) ||
+      !new RegExp(`^${options.jobId}-[a-f0-9]{16}(?:[a-f0-9]{48})?$`).test(options.dispatchId) ||
+      (options.local && options.target !== "local")) {
+    throw new Error("Invalid cancellation identity");
+  }
+  const result: Record<string, "cancelled" | "completed" | "acknowledged" | "processing" | "failed"> = {};
+  const recipients = options.target === "both-personal" ? ["isaac", "emma"] : [options.target];
+  for (const recipient of recipients) {
+    const root = join(options.local ? options.coordinatorStateDir : join(options.stateRoot, "instances", recipient), "job-handoffs");
+    await mkdir(root, { recursive: true, mode: 0o700 });
+    result[recipient] = await withMutationLock(join(root, ".transition-lock.sqlite"), async () => {
+      const name = `${options.dispatchId}.json`;
+      for (const state of ["completed", "acknowledged", "processing", "failed", "cancelled"] as const) {
+        try { await lstat(join(root, state, name)); return state; } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
+      const cancelledDir = join(root, "cancelled");
+      await mkdir(cancelledDir, { recursive: true, mode: 0o700 });
+      try {
+        await moveHandoff(join(root, "pending", name), join(cancelledDir, name));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        await writeJsonAtomic(join(cancelledDir, name), {
+          version: 1, dispatchId: options.dispatchId, jobId: options.jobId, target: recipient,
+        });
+      }
+      return "cancelled";
+    });
+  }
+  return result;
 }
 
 function parseHandoff(raw: string): JobHandoffFile | undefined {
@@ -199,6 +273,8 @@ function parseHandoff(raw: string): JobHandoffFile | undefined {
     value.prompt.trim().length === 0 ||
     Buffer.byteLength(value.prompt, "utf8") > MAX_HANDOFF_PROMPT_BYTES ||
     typeof value.createdAt !== "string"
+    || (value.attempts !== undefined &&
+      (!Number.isSafeInteger(value.attempts) || Number(value.attempts) < 0 || Number(value.attempts) > 5))
   ) {
     return undefined;
   }
@@ -208,7 +284,12 @@ function parseHandoff(raw: string): JobHandoffFile | undefined {
 export interface DrainJobHandoffsOptions {
   stateDir: string;
   instanceId: string;
-  inject: (prompt: string, jobType?: JobHandoffFile["jobType"]) => Promise<void>;
+  signal?: AbortSignal;
+  inject: (
+    prompt: string,
+    jobType: JobHandoffFile["jobType"],
+    preflightResult: (accepted: boolean) => void,
+  ) => Promise<void>;
 }
 
 export interface DrainJobHandoffsResult {
@@ -217,10 +298,18 @@ export interface DrainJobHandoffsResult {
   uncertain: number;
 }
 
-export async function drainJobHandoffs({
+export async function drainJobHandoffs(options: DrainJobHandoffsOptions): Promise<DrainJobHandoffsResult> {
+  const root = join(options.stateDir, "job-handoffs");
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  // Recovery must not mistake a currently invoking recipient for an orphan.
+  return withMutationLock(join(root, ".drain-lock.sqlite"), () => doDrainJobHandoffs(options));
+}
+
+async function doDrainJobHandoffs({
   stateDir,
   instanceId,
   inject,
+  signal,
 }: DrainJobHandoffsOptions): Promise<DrainJobHandoffsResult> {
   const root = join(stateDir, "job-handoffs");
   const pendingDir = join(root, "pending");
@@ -230,35 +319,149 @@ export async function drainJobHandoffs({
   for (const path of [pendingDir, processingDir, completedDir, failedDir]) {
     await mkdir(path, { recursive: true, mode: 0o700 });
   }
-  const uncertain = (await readdir(processingDir)).filter((name) =>
+  let uncertain = (await readdir(processingDir)).filter((name) =>
     name.endsWith(".json"),
   ).length;
   let processed = 0;
   let failed = 0;
   for (const name of (await readdir(pendingDir)).filter((entry) => entry.endsWith(".json")).sort()) {
+    if (signal?.aborted) break;
     const pendingPath = join(pendingDir, name);
-    const metadata = await lstat(pendingPath);
-    const raw = await readFile(pendingPath, "utf8");
-    const handoff = parseHandoff(raw);
-    if (
-      metadata.isSymbolicLink() ||
-      (metadata.mode & 0o777) !== 0o600 ||
-      handoff?.target !== instanceId
-    ) {
-      await rename(pendingPath, join(failedDir, name));
-      failed += 1;
-      continue;
-    }
     const processingPath = join(processingDir, name);
-    await rename(pendingPath, processingPath);
-    try {
-      await inject(handoff.prompt, handoff.jobType);
-      await rename(processingPath, join(completedDir, name));
-      processed += 1;
-    } catch {
-      await rename(processingPath, pendingPath);
-      failed += 1;
+    const handoff = await withMutationLock(join(root, ".transition-lock.sqlite"), async () => {
+      let metadata;
+      try { metadata = await lstat(pendingPath); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+        throw error;
+      }
+      let parsed: JobHandoffFile | undefined;
+      if (metadata.isFile() && (metadata.mode & 0o777) === 0o600 &&
+          metadata.uid === process.getuid?.() && metadata.size <= MAX_HANDOFF_PROMPT_BYTES + 4096) {
+        const handle = await open(pendingPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+        try {
+          const bytes = Buffer.alloc(MAX_HANDOFF_PROMPT_BYTES + 4097);
+          const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+          parsed = parseHandoff(bytes.subarray(0, bytesRead).toString("utf8"));
+        } finally { await handle.close(); }
+      }
+      if (parsed?.target !== instanceId || name !== `${parsed.dispatchId}.json` || (parsed.attempts ?? 0) >= 5) {
+        await moveHandoff(pendingPath, join(failedDir, name));
+        failed += 1;
+        return undefined;
+      }
+      const claimed = { ...parsed, attempts: (parsed.attempts ?? 0) + 1 };
+      await writeJsonAtomic(pendingPath, claimed);
+      await moveHandoff(pendingPath, processingPath);
+      return claimed;
+    });
+    if (!handoff) continue;
+    let preflight: boolean | undefined;
+    let acknowledgement: Promise<boolean> | undefined;
+    let observed!: () => void;
+    const preflightObserved = new Promise<void>((resolve) => { observed = resolve; });
+    const observePreflight = (accepted: boolean): void => {
+      if (preflight !== undefined) return;
+      preflight = accepted;
+      // Pi invokes this before the full run settles. Persist both acceptance
+      // and known rejection now, independently of the returned run promise.
+      const destination = accepted ? join(completedDir, name)
+        : handoff.attempts! >= 5 ? join(failedDir, name) : pendingPath;
+      acknowledgement = withMutationLock(join(root, ".transition-lock.sqlite"), () =>
+        moveHandoff(processingPath, destination)).then(() => true, () => false);
+      observed();
+    };
+    // Keep a handled run continuation, but release the recipient at durable
+    // preflight, not at full run completion. Arbitrary exceptions still cannot
+    // authorize replay, and shutdown need not wait for a hung accepted run.
+    const run = Promise.resolve().then(() => inject(handoff.prompt, handoff.jobType, observePreflight))
+      .then(() => {}, () => {});
+    await Promise.race([preflightObserved, run]);
+    if (await acknowledgement) {
+      if (preflight === true) processed += 1;
+      else failed += 1;
+    } else {
+      uncertain += 1;
     }
   }
   return { processed, failed, uncertain };
+}
+
+interface UnresolvedHandoff {
+  dispatchId: string;
+  jobId: string;
+  state: "processing" | "failed";
+  attempts: number;
+  revision: string;
+}
+
+async function readRecoveryEvidence(path: string, instanceId: string): Promise<{ handoff: JobHandoffFile; revision: string }> {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || metadata.nlink !== 1 || (metadata.mode & 0o777) !== 0o600 ||
+        (process.getuid && metadata.uid !== process.getuid()) || metadata.size > MAX_HANDOFF_PROMPT_BYTES + 4096) {
+      throw new Error("Unsafe handoff recovery evidence");
+    }
+    const buffer = Buffer.alloc(MAX_HANDOFF_PROMPT_BYTES + 4097);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead !== metadata.size) throw new Error("Handoff changed during inspection");
+    const raw = buffer.subarray(0, bytesRead);
+    const handoff = parseHandoff(raw.toString("utf8"));
+    if (handoff?.target !== instanceId) throw new Error("Handoff recipient mismatch or malformed evidence");
+    return { handoff, revision: createHash("sha256").update(raw).digest("hex") };
+  } finally { await handle.close(); }
+}
+
+export async function inspectUnresolvedJobHandoffs(options: {
+  stateDir: string; instanceId: string; limit?: number;
+}): Promise<{ entries: UnresolvedHandoff[]; truncated: boolean }> {
+  const limit = options.limit ?? 50;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Invalid inspection limit");
+  const entries: UnresolvedHandoff[] = [];
+  for (const state of ["processing", "failed"] as const) {
+    const directory = join(options.stateDir, "job-handoffs", state);
+    let names: string[];
+    try { names = await readdir(directory); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    for (const name of names.filter((name) => /^[a-z0-9-]+\.json$/.test(name)).sort()) {
+      if (entries.length >= limit) return { entries, truncated: true };
+      const { handoff, revision } = await readRecoveryEvidence(join(directory, name), options.instanceId);
+      if (name !== `${handoff.dispatchId}.json`) throw new Error("Handoff filename mismatch");
+      entries.push({ dispatchId: handoff.dispatchId, jobId: handoff.jobId, state, attempts: handoff.attempts ?? 0, revision });
+    }
+  }
+  return { entries, truncated: false };
+}
+
+export async function recoverJobHandoff(options: {
+  stateDir: string; instanceId: string; dispatchId: string;
+  state: "processing" | "failed"; revision: string; action: "acknowledge" | "retry";
+}): Promise<void> {
+  if (!/^[a-z0-9-]{1,129}$/.test(options.dispatchId) || !/^[a-f0-9]{64}$/.test(options.revision) ||
+      !["processing", "failed"].includes(options.state) || !["acknowledge", "retry"].includes(options.action)) {
+    throw new Error("Invalid recovery request");
+  }
+  const root = join(options.stateDir, "job-handoffs");
+  await withMutationLock(join(root, ".drain-lock.sqlite"), () =>
+    withMutationLock(join(root, ".transition-lock.sqlite"), async () => {
+      const name = `${options.dispatchId}.json`;
+      const source = join(root, options.state, name);
+      const { handoff, revision } = await readRecoveryEvidence(source, options.instanceId);
+      if (handoff.dispatchId !== options.dispatchId || revision !== options.revision) throw new Error("Handoff changed since inspection");
+      for (const state of ["pending", "completed", "acknowledged", "cancelled"]) {
+        try {
+          await lstat(join(root, state, name));
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+          throw error;
+        }
+        throw new Error("Conflicting recipient evidence; inspect before recovery");
+      }
+      const destination = join(root, options.action === "retry" ? "pending" : "acknowledged");
+      await mkdir(destination, { recursive: true, mode: 0o700 });
+      if (options.action === "retry") await writeJsonAtomic(source, { ...handoff, attempts: 0 });
+      await moveHandoff(source, join(destination, name));
+    }));
 }

@@ -1,205 +1,60 @@
 import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { withMutationLock } from "../.pi/lib/mutation-lock.mjs";
 
-const SCHEMA_VERSION = 1;
+import { initializeSearchSchema, SCHEMA_VERSION } from "./search-index-schema.js";
+import { createMemoryScanStore } from "./memory-scan-store.js";
+import type {
+  SearchCorpus,
+  CorpusOperationStatus,
+  SearchIndex,
+  MemoryDocumentSearchPage,
+  MemorySearchPage,
+  SessionIndexDocument,
+  SessionSourceState,
+  SessionSeenEntry,
+  SessionSourceProgress,
+  SessionSearchPage,
+  SessionDocumentSearchPage,
+  OpenSearchIndexOptions
+} from "./search-index-types.js";
+export type * from "./search-index-types.js";
+
 const DATABASE_NAME = "search-index.db";
 
-export interface SearchIndexStatus {
-  schemaVersion: number;
-  memoryDocuments: number;
-  sessionDocuments: number;
+function parseSourceProgress(raw: string | null): SessionSourceProgress | undefined {
+  if (raw === null) return undefined;
+  const value: unknown = JSON.parse(raw);
+  if (typeof value !== "object" || value === null) throw new Error("Invalid search source progress");
+  const record = value as Record<string, unknown>;
+  const completion = record.completion;
+  if (record.discardingLine !== undefined && typeof record.discardingLine !== "boolean") {
+    throw new Error("Invalid search source line state");
+  }
+  if (completion !== "clean-eof" && completion !== "budget-exhausted" &&
+      completion !== "incomplete-tail" && completion !== "file-truncated" && completion !== "file-replaced") {
+    throw new Error("Invalid search source completion");
+  }
+  if (!Array.isArray(record.warnings) || record.warnings.length > 20 || typeof record.warningsTruncated !== "boolean") {
+    throw new Error("Invalid search source warnings");
+  }
+  const warnings = record.warnings.map((warning: unknown) => {
+    if (typeof warning !== "object" || warning === null) throw new Error("Invalid search warning");
+    const entry = warning as Record<string, unknown>;
+    if (typeof entry.code !== "string" || (entry.byteOffset !== undefined &&
+        (typeof entry.byteOffset !== "number" || !Number.isSafeInteger(entry.byteOffset) || entry.byteOffset < 0))) {
+      throw new Error("Invalid search warning");
+    }
+    return { code: entry.code, ...(entry.byteOffset === undefined ? {} : { byteOffset: entry.byteOffset as number }) };
+  });
+  return { completion, warnings, warningsTruncated: record.warningsTruncated,
+    ...(record.discardingLine === undefined ? {} : { discardingLine: record.discardingLine }) };
 }
 
-export type SearchCorpus = "memory" | "session";
-
-export interface CorpusOperationStatus {
-  lastAttemptAt: string | null;
-  lastSuccessAt: string | null;
-}
-
-export interface SearchIndex {
-  status(): SearchIndexStatus;
-  replaceMemoryDocuments(documents: MemoryIndexDocument[]): void;
-  searchMemory(query: string, limit: number): MemorySearchPage;
-  searchMemoryDocuments(request: MemoryDocumentSearchRequest): MemoryDocumentSearchPage;
-  replaceSessionDocuments(documents: SessionIndexDocument[]): void;
-  replaceSessionCorpus(
-    instanceId: string,
-    principalId: string,
-    states: SessionSourceState[],
-    documents: SessionIndexDocument[],
-  ): void;
-  searchSessions(query: string, limit: number): SessionSearchPage;
-  searchSessionDocuments(request: SessionDocumentSearchRequest): SessionDocumentSearchPage;
-  getSessionSourceState(
-    instanceId: string,
-    principalId: string,
-    sourcePath: string,
-  ): SessionSourceState | undefined;
-  listSessionSourceStates(instanceId: string, principalId: string): SessionSourceState[];
-  getSessionEntryIds(instanceId: string, principalId: string, sourcePath: string): Set<string>;
-  getSessionDocument(
-    instanceId: string,
-    principalId: string,
-    sessionId: string,
-    entryId: string,
-  ): SessionIndexDocument | undefined;
-  replaceSessionSource(state: SessionSourceState, documents: SessionIndexDocument[]): void;
-  appendSessionSource(state: SessionSourceState, documents: SessionIndexDocument[]): void;
-  deleteSessionSource(instanceId: string, principalId: string, sourcePath: string): void;
-  recordCorpusAttempt(corpus: SearchCorpus, timestamp: string): void;
-  recordCorpusSuccess(corpus: SearchCorpus, timestamp: string): void;
-  corpusStatuses(): Record<SearchCorpus, CorpusOperationStatus>;
-  close(): void;
-}
-
-export interface MemoryIndexDocument {
-  noteId: string;
-  relativePath: string;
-  revision: string;
-  title: string;
-  tags: string[];
-  body: string;
-  type: string;
-  status: string;
-  scope: string;
-  owner: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface MemoryIndexMatch {
-  noteId: string;
-  score: number;
-  snippet: string;
-}
-
-export interface MemoryDocumentSearchRequest {
-  query: string;
-  limit: number;
-  principal: string;
-  memoryView: "owner-and-household" | "household" | "none";
-  types?: string[];
-  statuses?: string[];
-}
-
-export interface MemoryDocumentSearchMatch {
-  source: "memory";
-  schema: number;
-  id: string;
-  relativePath: string;
-  type: string;
-  status: string;
-  scope: string;
-  owner?: string;
-  title: string;
-  tags: string[];
-  created: string;
-  updated: string;
-  revision: string;
-  score: number;
-  snippet: string;
-}
-
-export interface MemoryDocumentSearchPage {
-  results: MemoryDocumentSearchMatch[];
-  truncated: boolean;
-  warning?: "invalid_fts_query_fallback";
-}
-
-export interface MemorySearchPage {
-  results: MemoryIndexMatch[];
-  truncated: boolean;
-  warning?: "invalid_fts_query_fallback";
-}
-
-export interface SessionIndexDocument {
-  instanceId: string;
-  principalId: string;
-  sessionId: string;
-  entryId: string;
-  timestamp: string;
-  role: string;
-  project: string | null;
-  cwd: string | null;
-  sourcePath: string;
-  sourceOffset: number;
-  searchableText: string;
-}
-
-export interface SessionSourceState {
-  instanceId: string;
-  principalId: string;
-  sourcePath: string;
-  device: number;
-  inode: number;
-  sizeBytes: number;
-  modifiedMs: number;
-  completedOffset: number;
-  prefixHash: string;
-}
-
-export interface SessionIndexMatch {
-  instanceId: string;
-  principalId: string;
-  sessionId: string;
-  entryId: string;
-  timestamp: string;
-  role: string;
-  project: string | null;
-  sourcePath: string;
-  sourceOffset: number;
-  score: number;
-  snippet: string;
-}
-
-export interface SessionSearchPage {
-  results: SessionIndexMatch[];
-  truncated: boolean;
-  warning?: "invalid_fts_query_fallback";
-}
-
-export interface SessionDocumentSearchRequest {
-  query: string;
-  limit: number;
-  instanceId: string;
-  principalId: string;
-  roles?: string[];
-  from?: string;
-  to?: string;
-  project?: string;
-}
-
-export interface SessionDocumentSearchMatch {
-  source: "session";
-  sessionId: string;
-  entryId: string;
-  timestamp: string;
-  role: string;
-  project?: string;
-  sourcePath: string;
-  sourceOffset: number;
-  score: number;
-  snippet: string;
-}
-
-export interface SessionDocumentSearchPage {
-  results: SessionDocumentSearchMatch[];
-  truncated: boolean;
-  warning?: "invalid_fts_query_fallback";
-}
-
-export interface OpenSearchIndexOptions {
-  stateDir: string;
-}
 
 interface CountRow {
   count: number;
-}
-
-interface SchemaVersionRow {
-  schema_version: number;
 }
 
 interface MemoryMatchRow {
@@ -246,6 +101,7 @@ interface SessionSourceStateRow {
   modified_ms: number;
   completed_offset: number;
   prefix_hash: string;
+  scan_progress: string | null;
 }
 
 interface EntryIdRow {
@@ -294,123 +150,6 @@ function boundSnippet(value: string): string {
   return `${characters.slice(0, 239).join("")}…`;
 }
 
-function initializeSchema(db: DatabaseSync): void {
-  db.exec(`
-    PRAGMA foreign_keys = ON;
-
-    CREATE TABLE IF NOT EXISTS search_index_metadata (
-      singleton       INTEGER PRIMARY KEY CHECK (singleton = 1),
-      schema_version  INTEGER NOT NULL,
-      last_attempt_at TEXT,
-      last_success_at TEXT
-    ) STRICT;
-
-    INSERT OR IGNORE INTO search_index_metadata (singleton, schema_version)
-    VALUES (1, ${SCHEMA_VERSION});
-
-    CREATE TABLE IF NOT EXISTS corpus_status (
-      corpus          TEXT PRIMARY KEY CHECK (corpus IN ('memory', 'session')),
-      last_attempt_at TEXT,
-      last_success_at TEXT
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS memory_document (
-      rowid         INTEGER PRIMARY KEY,
-      note_id       TEXT NOT NULL UNIQUE,
-      relative_path TEXT NOT NULL UNIQUE,
-      revision      TEXT NOT NULL,
-      title         TEXT NOT NULL,
-      tags          TEXT NOT NULL,
-      tags_json     TEXT NOT NULL,
-      body          TEXT NOT NULL,
-      type          TEXT NOT NULL,
-      status        TEXT NOT NULL,
-      scope         TEXT NOT NULL,
-      owner         TEXT,
-      created_at    TEXT NOT NULL,
-      updated_at    TEXT NOT NULL
-    ) STRICT;
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
-      title,
-      tags,
-      body,
-      content = memory_document,
-      content_rowid = rowid
-    );
-
-    CREATE TRIGGER IF NOT EXISTS memory_document_insert AFTER INSERT ON memory_document BEGIN
-      INSERT INTO memory_fts(rowid, title, tags, body)
-      VALUES (new.rowid, new.title, new.tags, new.body);
-    END;
-
-    CREATE TRIGGER IF NOT EXISTS memory_document_delete AFTER DELETE ON memory_document BEGIN
-      INSERT INTO memory_fts(memory_fts, rowid, title, tags, body)
-      VALUES ('delete', old.rowid, old.title, old.tags, old.body);
-    END;
-
-    CREATE TRIGGER IF NOT EXISTS memory_document_update AFTER UPDATE ON memory_document BEGIN
-      INSERT INTO memory_fts(memory_fts, rowid, title, tags, body)
-      VALUES ('delete', old.rowid, old.title, old.tags, old.body);
-      INSERT INTO memory_fts(rowid, title, tags, body)
-      VALUES (new.rowid, new.title, new.tags, new.body);
-    END;
-
-    CREATE TABLE IF NOT EXISTS session_document (
-      rowid           INTEGER PRIMARY KEY,
-      instance_id     TEXT NOT NULL,
-      principal_id    TEXT NOT NULL,
-      session_id      TEXT NOT NULL,
-      entry_id        TEXT NOT NULL,
-      timestamp       TEXT NOT NULL,
-      role            TEXT NOT NULL,
-      project         TEXT,
-      cwd             TEXT,
-      source_path     TEXT NOT NULL,
-      source_offset   INTEGER NOT NULL,
-      searchable_text TEXT NOT NULL,
-      UNIQUE (instance_id, session_id, entry_id)
-    ) STRICT;
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(
-      searchable_text,
-      content = session_document,
-      content_rowid = rowid
-    );
-
-    CREATE TRIGGER IF NOT EXISTS session_document_insert AFTER INSERT ON session_document BEGIN
-      INSERT INTO session_fts(rowid, searchable_text)
-      VALUES (new.rowid, new.searchable_text);
-    END;
-
-    CREATE TRIGGER IF NOT EXISTS session_document_delete AFTER DELETE ON session_document BEGIN
-      INSERT INTO session_fts(session_fts, rowid, searchable_text)
-      VALUES ('delete', old.rowid, old.searchable_text);
-    END;
-
-    CREATE TRIGGER IF NOT EXISTS session_document_update AFTER UPDATE ON session_document BEGIN
-      INSERT INTO session_fts(session_fts, rowid, searchable_text)
-      VALUES ('delete', old.rowid, old.searchable_text);
-      INSERT INTO session_fts(rowid, searchable_text)
-      VALUES (new.rowid, new.searchable_text);
-    END;
-
-    CREATE TABLE IF NOT EXISTS source_file_state (
-      corpus          TEXT NOT NULL CHECK (corpus IN ('memory', 'session')),
-      instance_id     TEXT NOT NULL DEFAULT '',
-      principal_id    TEXT NOT NULL DEFAULT '',
-      source_path     TEXT NOT NULL,
-      device          INTEGER,
-      inode           INTEGER,
-      size_bytes      INTEGER,
-      modified_ms     INTEGER,
-      completed_offset INTEGER,
-      prefix_hash      TEXT,
-      revision        TEXT,
-      PRIMARY KEY (corpus, instance_id, principal_id, source_path)
-    ) STRICT;
-  `);
-}
 
 export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
   mkdirSync(options.stateDir, { recursive: true, mode: 0o700 });
@@ -420,22 +159,7 @@ export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
   const db = new DatabaseSync(databasePath);
   chmodSync(databasePath, 0o600);
   try {
-    const hasMetadata = db
-      .prepare(
-        "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'search_index_metadata'",
-      )
-      .get();
-    if (hasMetadata !== undefined) {
-      const existing = db
-        .prepare("SELECT schema_version FROM search_index_metadata WHERE singleton = 1")
-        .get() as unknown as SchemaVersionRow | undefined;
-      if (existing !== undefined && existing.schema_version !== SCHEMA_VERSION) {
-        throw new Error(
-          `Search index schema version ${existing.schema_version} is not supported; rebuild the derived index`,
-        );
-      }
-    }
-    initializeSchema(db);
+    initializeSearchSchema(db);
   } catch (error) {
     db.close();
     throw error;
@@ -524,22 +248,32 @@ export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
   `;
   const selectSessionSource = db.prepare(`
     SELECT instance_id, principal_id, source_path, device, inode, size_bytes,
-      modified_ms, completed_offset, prefix_hash
+      modified_ms, completed_offset, prefix_hash, scan_progress
     FROM source_file_state
     WHERE corpus = 'session' AND instance_id = ? AND principal_id = ? AND source_path = ?
   `);
   const listSessionSources = db.prepare(`
     SELECT instance_id, principal_id, source_path, device, inode, size_bytes,
-      modified_ms, completed_offset, prefix_hash
+      modified_ms, completed_offset, prefix_hash, scan_progress
     FROM source_file_state
     WHERE corpus = 'session' AND instance_id = ? AND principal_id = ?
     ORDER BY source_path ASC
   `);
   const selectSessionEntryIds = db.prepare(`
     SELECT entry_id FROM session_document
-    WHERE instance_id = ? AND principal_id = ? AND source_path = ?
+    WHERE instance_id = ? AND principal_id = ? AND source_path = ? AND source_offset < ?
+    UNION
+    SELECT entry_id FROM session_seen_entry
+    WHERE instance_id = ? AND principal_id = ? AND source_path = ? AND source_offset < ?
     ORDER BY entry_id ASC
   `);
+  const insertSeenEntry = db.prepare(`INSERT INTO session_seen_entry
+    (instance_id, principal_id, source_path, entry_id, source_offset) VALUES (?, ?, ?, ?, ?)`);
+  const deleteSeenEntries = db.prepare(`DELETE FROM session_seen_entry
+    WHERE instance_id = ? AND principal_id = ? AND source_path = ?`);
+  const saveSeenEntries = (state: SessionSourceState, entries: SessionSeenEntry[]): void => {
+    for (const entry of entries) insertSeenEntry.run(state.instanceId, state.principalId, state.sourcePath, entry.entryId, entry.byteOffset);
+  };
   const selectSessionDocument = db.prepare(`
     SELECT instance_id, principal_id, session_id, entry_id, timestamp, role,
       project, cwd, source_path, source_offset, searchable_text
@@ -557,8 +291,8 @@ export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
   const upsertSessionSource = db.prepare(`
     INSERT INTO source_file_state (
       corpus, instance_id, principal_id, source_path, device, inode,
-      size_bytes, modified_ms, completed_offset, prefix_hash, revision
-    ) VALUES ('session', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+      size_bytes, modified_ms, completed_offset, prefix_hash, scan_progress, revision
+    ) VALUES ('session', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
     ON CONFLICT (corpus, instance_id, principal_id, source_path) DO UPDATE SET
       device = excluded.device,
       inode = excluded.inode,
@@ -566,6 +300,7 @@ export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
       modified_ms = excluded.modified_ms,
       completed_offset = excluded.completed_offset,
       prefix_hash = excluded.prefix_hash,
+      scan_progress = excluded.scan_progress,
       revision = NULL
   `);
   const deleteSessionSourceState = db.prepare(`
@@ -620,9 +355,12 @@ export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
       state.modifiedMs,
       state.completedOffset,
       state.prefixHash,
+      state.progress === undefined ? null : JSON.stringify(state.progress),
     );
   };
-  const mapSessionSourceState = (row: SessionSourceStateRow): SessionSourceState => ({
+  const mapSessionSourceState = (row: SessionSourceStateRow): SessionSourceState => {
+    const progress = parseSourceProgress(row.scan_progress);
+    return {
     instanceId: row.instance_id,
     principalId: row.principal_id,
     sourcePath: row.source_path,
@@ -632,9 +370,32 @@ export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
     modifiedMs: row.modified_ms,
     completedOffset: row.completed_offset,
     prefixHash: row.prefix_hash,
-  });
+    ...(progress === undefined ? {} : { progress }),
+    };
+  };
 
   return {
+    withRefreshLock(corpus, operation) {
+      return withMutationLock(join(options.stateDir, `.search-${corpus}-lock.sqlite`), operation);
+    },
+    memoryScan: createMemoryScanStore(db),
+    sessionScanCursor(instanceId, principalId) {
+      const row = db.prepare("SELECT source_path FROM session_scan_cursor WHERE instance_id = ? AND principal_id = ?")
+        .get(instanceId, principalId);
+      return row === undefined ? undefined : String(row.source_path);
+    },
+    setSessionScanCursor(instanceId, principalId, path) {
+      db.prepare(`INSERT INTO session_scan_cursor VALUES (?, ?, ?)
+        ON CONFLICT (instance_id, principal_id) DO UPDATE SET source_path = excluded.source_path`)
+        .run(instanceId, principalId, path);
+    },
+    sessionContextStart(instanceId, principalId, path, targetOffset, before) {
+      const rows = db.prepare(`SELECT source_offset FROM session_document
+        WHERE instance_id = ? AND principal_id = ? AND source_path = ? AND source_offset < ?
+        ORDER BY source_offset DESC LIMIT ?`).all(instanceId, principalId, path, targetOffset, before + 1);
+      const first = before === 0 ? undefined : rows[Math.min(before, rows.length) - 1];
+      return { offset: first === undefined ? targetOffset : Number(first.source_offset), hasMoreBefore: rows.length > before };
+    },
     status() {
       return {
         schemaVersion: SCHEMA_VERSION,
@@ -836,11 +597,10 @@ export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
       ) as unknown as SessionSourceStateRow[];
       return rows.map(mapSessionSourceState);
     },
-    getSessionEntryIds(instanceId, principalId, sourcePath) {
+    getSessionEntryIds(instanceId, principalId, sourcePath, beforeOffset = Number.MAX_SAFE_INTEGER) {
       const rows = selectSessionEntryIds.all(
-        instanceId,
-        principalId,
-        sourcePath,
+        instanceId, principalId, sourcePath, beforeOffset,
+        instanceId, principalId, sourcePath, beforeOffset,
       ) as unknown as EntryIdRow[];
       return new Set(rows.map((row) => row.entry_id));
     },
@@ -866,7 +626,7 @@ export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
         searchableText: row.searchable_text,
       };
     },
-    replaceSessionSource(state, documents) {
+    replaceSessionSource(state, documents, seenEntries = []) {
       db.exec("BEGIN IMMEDIATE");
       try {
         deleteSessionDocumentsForSource.run(
@@ -874,19 +634,22 @@ export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
           state.principalId,
           state.sourcePath,
         );
+        deleteSeenEntries.run(state.instanceId, state.principalId, state.sourcePath);
         insertSessionDocuments(documents);
         saveSessionSourceState(state);
+        saveSeenEntries(state, seenEntries);
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");
         throw error;
       }
     },
-    appendSessionSource(state, documents) {
+    appendSessionSource(state, documents, seenEntries = []) {
       db.exec("BEGIN IMMEDIATE");
       try {
         insertSessionDocuments(documents);
         saveSessionSourceState(state);
+        saveSeenEntries(state, seenEntries);
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");

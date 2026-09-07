@@ -9,6 +9,13 @@ export interface TelegramSectionView {
 }
 
 export interface TelegramSectionContext {
+  sectionId: string;
+  chatId: number;
+  messageId?: number;
+  answerCallback(text?: string): Promise<void>;
+  edit(view: TelegramSectionView): Promise<void>;
+  open(view: TelegramSectionView): Promise<void>;
+  deleteMessage(): Promise<void>;
   callbackData(action: string, payload?: string): string;
   enqueuePrompt(prompt: string): Promise<void>;
 }

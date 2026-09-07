@@ -32,6 +32,17 @@ reports whether a session is running. Profile data persists outside the release
 under the user's data directory; never print, inspect, or commit its cookies or
 credentials.
 
+The helper refuses to reuse or stop a live PID whose command no longer matches
+the session's profile and debugging port. If it reports uncertain process
+identity, ask for operator inspection; do not kill that PID manually or delete
+its state to bypass the check.
+
+Start, status, and stop serialize through a crash-safe per-session lock. `start`
+reports `created` and a `launchId`; automation that created the session can use
+`stop default --if-launch <launchId>` to avoid stopping a later replacement.
+This is cleanup ownership, not an exclusive browsing lease. Do not run
+independent browser tasks in the same session concurrently.
+
 ## 1Password login credentials
 
 The stock-Chrome helper automatically registers the tracked `onepassword`
@@ -45,6 +56,9 @@ node "$HELPER" run default -- auth login opentable \
   --item "OpenTable" \
   --url https://www.opentable.com/
 ```
+
+Inherited plugin configuration cannot replace the tracked `onepassword`
+provider; the helper replaces any same-name entry with the release-owned one.
 
 The item reference is its exact 1Password title or ID. The provider accepts only
 HTTPS and requires the requested hostname to match the Login item's saved

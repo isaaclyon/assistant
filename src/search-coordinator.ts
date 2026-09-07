@@ -1,33 +1,21 @@
+import { doRebuildMemoryIndex, MEMORY_TYPES, type MemoryRefreshOptions, type MemoryRebuildResult } from "./memory-index-refresh.js";
+export type { IndexWarning, MemoryRebuildResult } from "./memory-index-refresh.js";
 import { createHash } from "node:crypto";
-import { lstat, open, readFile, readdir } from "node:fs/promises";
-import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { pathToFileURL } from "node:url";
+import { constants, type Stats } from "node:fs";
+import { lstat, open, readdir } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type {
   MemoryDocumentSearchPage,
-  MemoryIndexDocument,
   SessionDocumentSearchPage,
   SessionIndexDocument,
   SearchIndex,
+  SessionSourceProgress,
 } from "./search-index.js";
 import { parseSessionJsonlFile } from "./session-jsonl-parser.js";
 
-const MEMORY_TYPE_FOLDERS = {
-  person: "people",
-  preference: "preferences",
-  event: "events",
-  list: "lists",
-  recipe: "recipes",
-  purchase: "purchases",
-  reference: "references",
-} as const;
-const MEMORY_TYPES = Object.keys(MEMORY_TYPE_FOLDERS);
 const MEMORY_STATUSES = ["active", "superseded", "archived"] as const;
-const UUID_NOTE_PATTERN =
-  /^([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.md$/u;
-const MAX_MEMORY_NOTE_BYTES = 256 * 1024;
 const MAX_WARNINGS = 20;
-const DEFAULT_MAX_MEMORY_NOTES = 10_000;
 const DEFAULT_MAX_SESSION_FILES = 10_000;
 const DEFAULT_CONTEXT_BEFORE = 2;
 const DEFAULT_CONTEXT_AFTER = 2;
@@ -55,44 +43,6 @@ export class SessionContextError extends Error {
   }
 }
 
-interface ParsedMemoryNote {
-  schema: number;
-  id: string;
-  type: string;
-  status: string;
-  scope: string;
-  owner?: string;
-  title: string;
-  tags: string[];
-  created: string;
-  updated: string;
-  revision: string;
-  body: string;
-}
-
-interface MemoryStoreModule {
-  createMarkdownMemoryStore(options: {
-    root: string;
-    forbiddenRoots: string[];
-  }): { verifyRoot(): Promise<boolean> };
-  parseMarkdownMemoryNote(
-    raw: string,
-    expected: { id: string; type: string },
-  ): ParsedMemoryNote;
-}
-
-export interface IndexWarning {
-  code: "DUPLICATE_ID" | "IO_ERROR" | "MALFORMED_NOTE" | "UNSAFE_ENTRY";
-  relativePath: string;
-}
-
-export interface MemoryRebuildResult {
-  indexed: number;
-  scanTruncated: boolean;
-  warnings: IndexWarning[];
-  warningsTruncated: boolean;
-}
-
 export interface IndexedMemorySearchRequest {
   query: string;
   principal: string;
@@ -103,6 +53,7 @@ export interface IndexedMemorySearchRequest {
 }
 
 export interface SessionRefreshResult {
+  complete: boolean;
   files: number;
   filesTruncated: boolean;
   indexed: number;
@@ -111,6 +62,7 @@ export interface SessionRefreshResult {
   appendedFiles: number;
   unchangedFiles: number;
   deletedFiles: number;
+  incompleteFiles: number;
   warnings: Array<{ code: string; sourcePath: string; byteOffset?: number }>;
   warningsTruncated: boolean;
 }
@@ -165,10 +117,18 @@ function isWithin(candidate: string, root: string): boolean {
   return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
 }
 
-async function hashFilePrefix(path: string, length: number): Promise<string> {
+async function hashFilePrefix(path: string, length: number, expected: Stats): Promise<string> {
   const hash = createHash("sha256");
-  const handle = await open(path, "r");
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const checkSnapshot = async () => {
+    const current = await handle.stat();
+    if (!current.isFile() || current.dev !== expected.dev || current.ino !== expected.ino ||
+        current.size !== expected.size || current.mtimeMs !== expected.mtimeMs) {
+      throw new Error("Session source changed during refresh");
+    }
+  };
   try {
+    await checkSnapshot();
     const buffer = Buffer.alloc(64 * 1024);
     let position = 0;
     while (position < length) {
@@ -178,192 +138,36 @@ async function hashFilePrefix(path: string, length: number): Promise<string> {
       hash.update(buffer.subarray(0, bytesRead));
       position += bytesRead;
     }
+    await checkSnapshot();
     return `sha256:${hash.digest("hex")}`;
   } finally {
     await handle.close();
   }
 }
 
-async function loadMemoryStoreModule(resourceRoot: string): Promise<MemoryStoreModule> {
-  const modulePath = join(
-    resourceRoot,
-    ".pi",
-    "skills",
-    "personal-memory",
-    "scripts",
-    "store.mjs",
-  );
-  return import(pathToFileURL(modulePath).href) as Promise<MemoryStoreModule>;
+// Identical overlapping requests share work, while different generations and
+// separate DB handles/processes serialize through the same per-corpus lock.
+const pendingRefreshes = new WeakMap<SearchIndex, Map<string, Promise<unknown>>>();
+function coalesceRefresh<T>(index: SearchIndex, corpus: "memory" | "session", key: string, run: () => Promise<T>): Promise<T> {
+  let pending = pendingRefreshes.get(index);
+  if (!pending) { pending = new Map(); pendingRefreshes.set(index, pending); }
+  const identity = `${corpus}:${key}`;
+  const previous = pending.get(identity);
+  if (previous) return previous as Promise<T>;
+  const promise = index.withRefreshLock(corpus, run);
+  pending.set(identity, promise);
+  const clear = () => { pending.delete(identity); };
+  void promise.then(clear, clear);
+  return promise;
 }
 
-export async function rebuildMemoryIndex(options: {
-  index: SearchIndex;
-  vaultRoot: string;
-  resourceRoot?: string;
-  maxWarnings?: number;
-  maxNotes?: number;
-}): Promise<MemoryRebuildResult> {
-  const vaultRoot = resolve(options.vaultRoot);
-  const resourceRoot = resolve(
-    options.resourceRoot ??
-      process.env.PI_TELEGRAM_BRIDGE_RESOURCE_ROOT ??
-      process.cwd(),
-  );
-  const memoryStore = await loadMemoryStoreModule(resourceRoot);
-  const verifiedStore = memoryStore.createMarkdownMemoryStore({
-    root: vaultRoot,
-    forbiddenRoots: [resourceRoot],
-  });
-  if (!(await verifiedStore.verifyRoot())) {
-    options.index.replaceMemoryDocuments([]);
-    return {
-      indexed: 0,
-      scanTruncated: false,
-      warnings: [],
-      warningsTruncated: false,
-    };
-  }
-  const maxNotes = options.maxNotes ?? DEFAULT_MAX_MEMORY_NOTES;
+export function rebuildMemoryIndex(options: MemoryRefreshOptions): Promise<MemoryRebuildResult> {
+  const maxNotes = options.maxNotes ?? 10_000;
   if (!Number.isInteger(maxNotes) || maxNotes < 1 || maxNotes > 100_000) {
     throw new SearchInputError("Memory rebuild note limit is invalid");
   }
-  const candidates: Array<{
-    id: string;
-    type: string;
-    path: string;
-    relativePath: string;
-  }> = [];
-  const warningCandidates: IndexWarning[] = [];
-
-  for (const [type, folder] of Object.entries(MEMORY_TYPE_FOLDERS)) {
-    const directory = join(vaultRoot, folder);
-    let directoryStat;
-    try {
-      directoryStat = await lstat(directory);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-      warningCandidates.push({ code: "IO_ERROR", relativePath: folder });
-      continue;
-    }
-    if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) {
-      warningCandidates.push({ code: "UNSAFE_ENTRY", relativePath: folder });
-      continue;
-    }
-    let names: string[];
-    try {
-      names = await readdir(directory);
-    } catch {
-      warningCandidates.push({ code: "IO_ERROR", relativePath: folder });
-      continue;
-    }
-    for (const name of names) {
-      const match = UUID_NOTE_PATTERN.exec(name);
-      if (!match) continue;
-      const path = join(directory, name);
-      if (!isWithin(path, vaultRoot)) {
-        warningCandidates.push({
-          code: "UNSAFE_ENTRY",
-          relativePath: join(folder, name),
-        });
-        continue;
-      }
-      candidates.push({
-        id: match[1]!,
-        type,
-        path,
-        relativePath: join(folder, name),
-      });
-    }
-  }
-  candidates.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
-  const scanTruncated = candidates.length > maxNotes;
-  const scannedCandidates = candidates.slice(0, maxNotes);
-
-  const parsed: Array<{ document: MemoryIndexDocument; relativePath: string }> = [];
-  for (const candidate of scannedCandidates) {
-    let fileStat;
-    try {
-      fileStat = await lstat(candidate.path);
-    } catch {
-      warningCandidates.push({
-        code: "IO_ERROR",
-        relativePath: candidate.relativePath,
-      });
-      continue;
-    }
-    if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
-      warningCandidates.push({
-        code: "UNSAFE_ENTRY",
-        relativePath: candidate.relativePath,
-      });
-      continue;
-    }
-    if (fileStat.size > MAX_MEMORY_NOTE_BYTES) {
-      warningCandidates.push({
-        code: "MALFORMED_NOTE",
-        relativePath: candidate.relativePath,
-      });
-      continue;
-    }
-    try {
-      const raw = await readFile(candidate.path, "utf8");
-      const note = memoryStore.parseMarkdownMemoryNote(raw, {
-        id: candidate.id,
-        type: candidate.type,
-      });
-      parsed.push({
-        relativePath: candidate.relativePath,
-        document: {
-          noteId: note.id,
-          relativePath: candidate.relativePath,
-          revision: note.revision,
-          title: note.title,
-          tags: note.tags,
-          body: note.body,
-          type: note.type,
-          status: note.status,
-          scope: note.scope,
-          owner: note.owner ?? null,
-          createdAt: note.created,
-          updatedAt: note.updated,
-        },
-      });
-    } catch {
-      warningCandidates.push({
-        code: "MALFORMED_NOTE",
-        relativePath: candidate.relativePath,
-      });
-    }
-  }
-
-  const counts = new Map<string, number>();
-  for (const entry of parsed) {
-    counts.set(entry.document.noteId, (counts.get(entry.document.noteId) ?? 0) + 1);
-  }
-  const documents = parsed
-    .filter((entry) => {
-      if (counts.get(entry.document.noteId) === 1) return true;
-      warningCandidates.push({
-        code: "DUPLICATE_ID",
-        relativePath: entry.relativePath,
-      });
-      return false;
-    })
-    .map((entry) => entry.document);
-
-  options.index.replaceMemoryDocuments(documents);
-  warningCandidates.sort(
-    (a, b) =>
-      a.relativePath.localeCompare(b.relativePath) ||
-      a.code.localeCompare(b.code),
-  );
-  const maxWarnings = options.maxWarnings ?? MAX_WARNINGS;
-  return {
-    indexed: documents.length,
-    scanTruncated,
-    warnings: warningCandidates.slice(0, maxWarnings),
-    warningsTruncated: warningCandidates.length > maxWarnings,
-  };
+  const { index, ...key } = options;
+  return coalesceRefresh(index, "memory", JSON.stringify(key), () => doRebuildMemoryIndex(options));
 }
 
 export function searchIndexedMemories(
@@ -406,7 +210,7 @@ export function searchIndexedMemories(
   });
 }
 
-export async function refreshSessionIndex(options: {
+interface SessionRefreshOptions {
   index: SearchIndex;
   roots: string[];
   instanceId: string;
@@ -414,7 +218,15 @@ export async function refreshSessionIndex(options: {
   includeSafeCwd?: boolean;
   maxWarnings?: number;
   maxFiles?: number;
-}): Promise<SessionRefreshResult> {
+  forceRebuild?: boolean;
+}
+
+export function refreshSessionIndex(options: SessionRefreshOptions): Promise<SessionRefreshResult> {
+  const { index, ...key } = options;
+  return coalesceRefresh(index, "session", JSON.stringify(key), () => doRefreshSessionIndex(options));
+}
+
+async function doRefreshSessionIndex(options: SessionRefreshOptions): Promise<SessionRefreshResult> {
   if (
     options.roots.length === 0 ||
     options.roots.length > 64 ||
@@ -428,15 +240,22 @@ export async function refreshSessionIndex(options: {
     throw new SearchInputError("Session refresh file limit is invalid");
   }
   const files: string[] = [];
+  const discoveredRoots = new Set<string>();
   const warningCandidates: SessionRefreshResult["warnings"] = [];
   for (const root of options.roots.map((value) => resolve(value)).sort()) {
     let entries;
     try {
+      const metadata = await lstat(root);
+      if (!metadata.isDirectory()) {
+        warningCandidates.push({ code: "UNSAFE_ENTRY", sourcePath: root });
+        continue;
+      }
       entries = await readdir(root, { withFileTypes: true });
     } catch {
       warningCandidates.push({ code: "IO_ERROR", sourcePath: root });
       continue;
     }
+    discoveredRoots.add(root);
     for (const entry of entries) {
       if (!entry.name.endsWith(".jsonl")) continue;
       const path = join(root, entry.name);
@@ -449,14 +268,39 @@ export async function refreshSessionIndex(options: {
   }
   files.sort();
   const filesTruncated = files.length > maxFiles;
+  const discoveredFiles = new Set(files);
+  // Discovery is metadata-only and covers all candidates. The parsing budget
+  // limits work, not the ability to recognize a previously completed sweep.
+  const snapshots = new Map<string, Stats>();
+  for (const path of files) {
+    try {
+      const snapshot = await lstat(path);
+      if (!snapshot.isFile()) throw new Error("Unsafe session source");
+      snapshots.set(path, snapshot);
+    } catch {
+      warningCandidates.push({ code: "IO_ERROR", sourcePath: path });
+    }
+  }
+  const cursor = options.index.sessionScanCursor(options.instanceId, options.principalId);
+  if (filesTruncated && cursor !== undefined) {
+    const start = files.findIndex((path) => path > cursor);
+    if (start > 0) files.push(...files.splice(0, start));
+  }
   files.splice(maxFiles);
 
-  const documents: SessionIndexDocument[] = [];
+  let indexed = 0;
   let skipped = 0;
   let rebuiltFiles = 0;
   let appendedFiles = 0;
   let unchangedFiles = 0;
   let deletedFiles = 0;
+  let incompleteFiles = 0;
+  let retainedWarningsTruncated = false;
+  const reportProgress = (sourcePath: string, progress: SessionSourceProgress): void => {
+    warningCandidates.push(...progress.warnings.map((warning) => ({ sourcePath, ...warning })));
+    retainedWarningsTruncated ||= progress.warningsTruncated;
+    if (progress.completion !== "clean-eof") incompleteFiles += 1;
+  };
   for (const path of files) {
     try {
       const fileStat = await lstat(path);
@@ -467,7 +311,10 @@ export async function refreshSessionIndex(options: {
       );
       const modifiedMs = Math.trunc(fileStat.mtimeMs);
       if (
+        !options.forceRebuild &&
         previous &&
+        previous.progress !== undefined &&
+        previous.progress.completion !== "budget-exhausted" &&
         previous.device === fileStat.dev &&
         previous.inode === fileStat.ino &&
         previous.sizeBytes === fileStat.size &&
@@ -477,20 +324,24 @@ export async function refreshSessionIndex(options: {
         continue;
       }
       const appendCandidate =
+        !options.forceRebuild &&
         previous !== undefined &&
+        previous.progress !== undefined &&
         previous.device === fileStat.dev &&
         previous.inode === fileStat.ino &&
-        fileStat.size > previous.sizeBytes;
+        fileStat.size >= previous.sizeBytes &&
+        (fileStat.size > previous.sizeBytes || previous.progress.completion === "budget-exhausted");
       const canAppend =
         appendCandidate &&
         fileStat.size >= previous.completedOffset &&
-        (await hashFilePrefix(path, previous.completedOffset)) === previous.prefixHash;
+        (await hashFilePrefix(path, previous.completedOffset, fileStat)) === previous.prefixHash;
       let parsed = await parseSessionJsonlFile({
         path,
         instanceId: options.instanceId,
         principal: options.principalId,
         ...(canAppend ? {
           offset: previous.completedOffset,
+          discardingLine: previous.progress?.discardingLine ?? false,
           previousFile: {
             device: previous.device,
             inode: previous.inode,
@@ -537,8 +388,19 @@ export async function refreshSessionIndex(options: {
           searchableText: document.text,
         };
         fileDocuments.push(indexedDocument);
-        documents.push(indexedDocument);
       }
+      const warnings = [
+        ...(append ? (previous?.progress?.warnings ?? []).filter((warning) =>
+          warning.code !== "TOTAL_OUTPUT_LIMIT" && warning.code !== "FILE_LIMIT") : []),
+        ...parsed.findings.map((finding) => ({ code: finding.code,
+          ...(finding.byteOffset === undefined ? {} : { byteOffset: finding.byteOffset }) })),
+      ];
+      const progress: SessionSourceProgress = {
+        completion: parsed.completion,
+        ...(parsed.discardingLine === undefined ? {} : { discardingLine: parsed.discardingLine }),
+        warnings: warnings.slice(0, MAX_WARNINGS),
+        warningsTruncated: warnings.length > MAX_WARNINGS || (append && (previous?.progress?.warningsTruncated ?? false)),
+      };
       const state = {
         instanceId: options.instanceId,
         principalId: options.principalId,
@@ -548,36 +410,48 @@ export async function refreshSessionIndex(options: {
         sizeBytes: parsed.file.size,
         modifiedMs,
         completedOffset: parsed.nextOffset,
-        prefixHash: await hashFilePrefix(path, parsed.nextOffset),
+        prefixHash: await hashFilePrefix(path, parsed.nextOffset, fileStat),
+        progress,
       };
       if (append) {
-        options.index.appendSessionSource(state, fileDocuments);
+        options.index.appendSessionSource(state, fileDocuments, parsed.seenEntries);
         appendedFiles += 1;
       } else {
-        options.index.replaceSessionSource(state, fileDocuments);
+        options.index.replaceSessionSource(state, fileDocuments, parsed.seenEntries);
         rebuiltFiles += 1;
       }
+      indexed += fileDocuments.length;
       skipped += parsed.findings.length;
-      for (const finding of parsed.findings) {
-        warningCandidates.push({
-          code: finding.code,
-          sourcePath: finding.path,
-          ...(finding.byteOffset === undefined
-            ? {}
-            : { byteOffset: finding.byteOffset }),
-        });
-      }
     } catch {
       skipped += 1;
       warningCandidates.push({ code: "IO_ERROR", sourcePath: path });
     }
   }
-  const currentFiles = new Set(files);
+  if (files.length > 0) {
+    options.index.setSessionScanCursor(options.instanceId, options.principalId, files.at(-1)!);
+  }
+  // Check every discovered source, not only this pass's bounded subset.
+  // This also invalidates coverage immediately when an unvisited file changes.
+  for (const path of discoveredFiles) {
+    const snapshot = snapshots.get(path);
+    const state = options.index.getSessionSourceState(options.instanceId, options.principalId, path);
+    if (!snapshot || !state?.progress || state.device !== snapshot.dev ||
+        state.inode !== snapshot.ino || state.sizeBytes !== snapshot.size ||
+        state.modifiedMs !== Math.trunc(snapshot.mtimeMs)) {
+      incompleteFiles += 1;
+      continue;
+    }
+    reportProgress(path, state.progress);
+  }
   for (const state of options.index.listSessionSourceStates(
     options.instanceId,
     options.principalId,
   )) {
-    if (currentFiles.has(state.sourcePath)) continue;
+    if (discoveredFiles.has(state.sourcePath)) continue;
+    const root = options.roots.find((root) => isWithin(state.sourcePath, resolve(root)));
+    // Failed discovery is stale coverage, not proof of deletion. Removed roots
+    // are no longer authorized and must not leave searchable private evidence.
+    if (root !== undefined && !discoveredRoots.has(resolve(root))) continue;
     options.index.deleteSessionSource(
       options.instanceId,
       options.principalId,
@@ -593,16 +467,19 @@ export async function refreshSessionIndex(options: {
   );
   const maxWarnings = options.maxWarnings ?? MAX_WARNINGS;
   return {
+    complete: incompleteFiles === 0 && !warningCandidates.some((warning) =>
+      warning.code === "IO_ERROR" || warning.code === "UNSAFE_ENTRY"),
     files: files.length,
     filesTruncated,
-    indexed: documents.length,
+    indexed,
     skipped,
     rebuiltFiles,
     appendedFiles,
     unchangedFiles,
     deletedFiles,
+    incompleteFiles,
     warnings: warningCandidates.slice(0, maxWarnings),
-    warningsTruncated: warningCandidates.length > maxWarnings,
+    warningsTruncated: retainedWarningsTruncated || warningCandidates.length > maxWarnings,
   };
 }
 
@@ -615,123 +492,7 @@ export async function rebuildSessionIndex(options: {
   maxWarnings?: number;
   maxFiles?: number;
 }): Promise<SessionRefreshResult> {
-  if (
-    options.roots.length === 0 ||
-    options.roots.length > 64 ||
-    options.roots.some((root) => !isAbsolute(root)) ||
-    new Set(options.roots.map((root) => resolve(root))).size !== options.roots.length
-  ) {
-    throw new Error("Session roots are invalid");
-  }
-  const maxFiles = options.maxFiles ?? DEFAULT_MAX_SESSION_FILES;
-  if (!Number.isInteger(maxFiles) || maxFiles < 1 || maxFiles > 100_000) {
-    throw new SearchInputError("Session rebuild file limit is invalid");
-  }
-  const files: string[] = [];
-  const warningCandidates: SessionRefreshResult["warnings"] = [];
-  for (const root of options.roots.map((value) => resolve(value)).sort()) {
-    let entries;
-    try {
-      entries = await readdir(root, { withFileTypes: true });
-    } catch {
-      warningCandidates.push({ code: "IO_ERROR", sourcePath: root });
-      continue;
-    }
-    for (const entry of entries) {
-      if (!entry.name.endsWith(".jsonl")) continue;
-      const path = join(root, entry.name);
-      if (!entry.isFile()) {
-        warningCandidates.push({ code: "UNSAFE_ENTRY", sourcePath: path });
-        continue;
-      }
-      files.push(path);
-    }
-  }
-  files.sort();
-  const filesTruncated = files.length > maxFiles;
-  files.splice(maxFiles);
-
-  const documents: SessionIndexDocument[] = [];
-  const states = [];
-  let skipped = 0;
-  for (const path of files) {
-    try {
-      const fileStat = await lstat(path);
-      const parsed = await parseSessionJsonlFile({
-        path,
-        instanceId: options.instanceId,
-        principal: options.principalId,
-        ...(options.includeSafeCwd === undefined
-          ? {}
-          : { includeSafeCwd: options.includeSafeCwd }),
-      });
-      for (const document of parsed.documents) {
-        documents.push({
-          instanceId: document.instanceId,
-          principalId: document.principal,
-          sessionId: document.sessionId,
-          entryId: document.entryId,
-          timestamp: document.timestamp,
-          role: document.role,
-          project: document.cwd ? basename(document.cwd) : null,
-          cwd: document.cwd ?? null,
-          sourcePath: document.source.path,
-          sourceOffset: document.source.byteOffset,
-          searchableText: document.text,
-        });
-      }
-      states.push({
-        instanceId: options.instanceId,
-        principalId: options.principalId,
-        sourcePath: path,
-        device: parsed.file.device,
-        inode: parsed.file.inode,
-        sizeBytes: parsed.file.size,
-        modifiedMs: Math.trunc(fileStat.mtimeMs),
-        completedOffset: parsed.nextOffset,
-        prefixHash: await hashFilePrefix(path, parsed.nextOffset),
-      });
-      skipped += parsed.findings.length;
-      for (const finding of parsed.findings) {
-        warningCandidates.push({
-          code: finding.code,
-          sourcePath: finding.path,
-          ...(finding.byteOffset === undefined
-            ? {}
-            : { byteOffset: finding.byteOffset }),
-        });
-      }
-    } catch {
-      skipped += 1;
-      warningCandidates.push({ code: "IO_ERROR", sourcePath: path });
-    }
-  }
-
-  options.index.replaceSessionCorpus(
-    options.instanceId,
-    options.principalId,
-    states,
-    documents,
-  );
-  warningCandidates.sort(
-    (a, b) =>
-      a.sourcePath.localeCompare(b.sourcePath) ||
-      (a.byteOffset ?? -1) - (b.byteOffset ?? -1) ||
-      a.code.localeCompare(b.code),
-  );
-  const maxWarnings = options.maxWarnings ?? MAX_WARNINGS;
-  return {
-    files: files.length,
-    filesTruncated,
-    indexed: documents.length,
-    skipped,
-    rebuiltFiles: files.length,
-    appendedFiles: 0,
-    unchangedFiles: 0,
-    deletedFiles: 0,
-    warnings: warningCandidates.slice(0, maxWarnings),
-    warningsTruncated: warningCandidates.length > maxWarnings,
-  };
+  return refreshSessionIndex({ ...options, forceRebuild: true });
 }
 
 function validateCanonicalTimestamp(value: string | undefined, label: string): string | undefined {
@@ -838,24 +599,28 @@ export async function readSessionContext(
     throw new SessionContextError("Session context entry was not found in the index");
   }
   const sourcePath = resolve(anchor.sourcePath);
-  const allowed = request.roots.some((root) => isWithin(sourcePath, resolve(root)));
-  if (!allowed) {
+  const root = request.roots.find((root) => dirname(sourcePath) === resolve(root));
+  if (root === undefined) {
     throw new SessionContextError("Session context source is outside the active session roots");
   }
 
+  const contextStart = index.sessionContextStart(request.instanceId, request.principalId, sourcePath, anchor.sourceOffset, before);
   let parsed;
   try {
+    if (!(await lstat(root)).isDirectory()) throw new Error("Unsafe session root");
     parsed = await parseSessionJsonlFile({
       path: sourcePath,
       instanceId: request.instanceId,
       principal: request.principalId,
       includeSafeCwd: true,
+      offset: contextStart.offset,
+      seenEntryIds: index.getSessionEntryIds(request.instanceId, request.principalId, sourcePath, contextStart.offset),
     });
   } catch {
     throw new SessionContextError("Session context source is unavailable");
   }
   const documents = parsed.documents.filter((document) => document.sessionId === sessionId);
-  const targetIndex = documents.findIndex((document) => document.entryId === entryId);
+  const targetIndex = documents.findIndex((document) => document.entryId === entryId && document.source.byteOffset === anchor.sourceOffset);
   if (targetIndex < 0) {
     throw new SessionContextError("Session context entry is no longer available in the source");
   }
@@ -888,8 +653,8 @@ export async function readSessionContext(
     entries,
     beforeReturned: targetIndex - start,
     afterReturned: end - targetIndex - 1,
-    hasMoreBefore: start > 0,
-    hasMoreAfter: end < documents.length,
+    hasMoreBefore: contextStart.hasMoreBefore || start > 0,
+    hasMoreAfter: end < documents.length || parsed.completion !== "clean-eof",
     truncated: entries.some((entry) => entry.truncated),
   };
 }

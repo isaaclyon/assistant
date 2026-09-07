@@ -49,6 +49,28 @@ async function expectMemoryError(promise, code) {
 }
 
 describe("Markdown personal memory store", () => {
+  it("tightens an existing owned vault before creating its mutation lock", async () => {
+    const { root, store } = await fixture();
+    await mkdir(root);
+    await chmod(root, 0o777);
+    await store.add({ type: "reference", title: "Private", body: "Synthetic" });
+    expect((await lstat(root)).mode & 0o777).toBe(0o700);
+  });
+
+  it("allows only one concurrent mutation of the same revision", async () => {
+    const { root, store } = await fixture();
+    const note = await store.add({ type: "reference", title: "Concurrent", tags: [], body: "Original" });
+    const results = await Promise.allSettled(Array.from({ length: 20 }, (_, index) =>
+      createMarkdownMemoryStore({ root }).update({
+        id: note.id, ifRevision: note.revision, patch: { body: `Edit ${index}` },
+      }),
+    ));
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    for (const result of results.filter((result) => result.status === "rejected")) {
+      expect(result.reason.code).toBe("REVISION_CONFLICT");
+    }
+  });
+
   it("creates a private canonical note and round-trips it", async () => {
     const { root, store } = await fixture();
     const added = await store.add({

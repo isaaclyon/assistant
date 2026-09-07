@@ -14,6 +14,39 @@ describe("search index foundation", () => {
     for (const index of indexes.splice(0)) index.close();
   });
 
+  it("migrates the version-1 derived index without losing source rows or checkpoints", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "search-migration-"));
+    const initial = openSearchIndex({ stateDir });
+    const source = {
+      instanceId: "i", principalId: "p", sourcePath: "/synthetic/session.jsonl",
+      device: 1, inode: 2, sizeBytes: 1000, modifiedMs: 3, completedOffset: 500, prefixHash: "sha256:synthetic",
+    };
+    const document = {
+      instanceId: "i", principalId: "p", sourcePath: source.sourcePath,
+      sessionId: "same", entryId: "same", timestamp: "2026-07-25T12:00:00.000Z",
+      role: "user", project: null, cwd: null, sourceOffset: 100, searchableText: "migration evidence",
+    };
+    initial.replaceSessionSource(source, [document]);
+    initial.close();
+    const db = new DatabaseSync(join(stateDir, "search-index.db"));
+    const legacySessionSql = String(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'session_document'").get()!.sql)
+      .replace("UNIQUE (instance_id, principal_id, session_id, entry_id)", "UNIQUE (instance_id, session_id, entry_id)");
+    db.exec("CREATE TABLE saved_sessions AS SELECT * FROM session_document; DROP TABLE session_document;");
+    db.exec(legacySessionSql);
+    db.exec("INSERT INTO session_document SELECT * FROM saved_sessions; DROP TABLE saved_sessions;");
+    db.exec("ALTER TABLE source_file_state DROP COLUMN scan_progress");
+    db.exec("UPDATE search_index_metadata SET schema_version = 1");
+    db.close();
+    const migrated = openSearchIndex({ stateDir });
+    indexes.push(migrated);
+    expect(migrated.status().schemaVersion).toBe(2);
+    expect(migrated.getSessionSourceState("i", "p", source.sourcePath)).toEqual(source);
+    expect(migrated.getSessionDocument("i", "p", "same", "same")).toEqual(document);
+    migrated.replaceSessionSource({ ...source, principalId: "other" }, [{ ...document, principalId: "other" }]);
+    expect(migrated.searchSessionDocuments({ query: "migration", limit: 10, instanceId: "i", principalId: "other" }).results).toHaveLength(1);
+    expect(migrated.status().sessionDocuments).toBe(2);
+  });
+
   it("creates a private versioned index with separate corpora", async () => {
     const root = await mkdtemp(join(tmpdir(), "assistant-search-index-"));
     const stateDir = join(root, "instances", "isaac");
@@ -21,7 +54,7 @@ describe("search index foundation", () => {
     indexes.push(index);
 
     expect(index.status()).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       memoryDocuments: 0,
       sessionDocuments: 0,
     });

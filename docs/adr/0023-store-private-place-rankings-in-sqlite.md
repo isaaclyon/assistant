@@ -46,6 +46,22 @@ instance, and insertion ownership uses the trusted runtime instance ID and
 principal—not user-selected chat input. Shared or collaborative rankings
 require a later identity and product decision.
 
+The tool and Telegram section share one `PlacesApplication.execute` command
+boundary, including read queries and operation-bound confirmations. The service
+and store retain ranking and persistence invariants; Telegram views, provisional
+name/category drafts, and reply capture remain transport concerns. This is the
+application-boundary reconciliation for issue #96, not a second UI framework.
+
+Delete confirmations snapshot the existing category mutation revision and
+compare it inside the deletion transaction. Cancel confirmations bind the exact
+insertion revision. Section callback capabilities are one-use, expire after ten
+minutes, and bind category/sentiment selection to its specific draft. Text entry
+uses fresh standalone prompts with unique references and only one pending input
+per private chat. Because raw update handlers run before default authorization,
+the handler requires the already-authorized section's exact private actor/chat,
+an exact fresh bot-prompt body, and a newer reply-target message ID. Failed result
+delivery cannot forward a possibly saved input to Pi for another execution.
+
 ## Consequences
 
 - Rankings and unfinished comparisons survive process restarts, session

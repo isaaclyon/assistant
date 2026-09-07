@@ -52,8 +52,10 @@ async function installLegacyService(): Promise<void> {
     { mode: 0o600 },
   );
   await execFileAsync("systemctl", ["--user", "daemon-reload"]);
-  await execFileAsync("systemctl", ["--user", "enable", "--now", unitName]);
-  console.log(`Installed and started ${unitPath}`);
+  if (process.env.PI_TELEGRAM_BRIDGE_INSTALL_NO_START !== "1") {
+    await execFileAsync("systemctl", ["--user", "enable", "--now", unitName]);
+  }
+  console.log(`${process.env.PI_TELEGRAM_BRIDGE_INSTALL_NO_START === "1" ? "Installed" : "Installed and started"} ${unitPath}`);
 }
 
 async function installInstanceFleet(manifestPath: string): Promise<void> {

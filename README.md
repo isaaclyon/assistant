@@ -97,7 +97,7 @@ To ship a new commit to the box running the service, push to `origin/main`, then
 npm run deploy
 ```
 
-`scripts/deploy.sh` connects over SSH and invokes the same exact-SHA, immutable-release, locked deployment path used by Actions. It deploys only commits on `origin/main`, preserves tracked live edits by refusing to overwrite them, and applies the same rollback and readiness checks. The target is overridable:
+`scripts/deploy.sh` connects over SSH and invokes the same exact-SHA, immutable-release, locked deployment path used by Actions. It deploys only commits on `origin/main`, preserves tracked live edits by refusing to overwrite them, and applies the same recovery barrier and readiness checks. Activation failures hold services disabled with a paired state/application-binary checkpoint; see the [recovery runbook](docs/household-fleet.md#recovery-checkpoints-and-failure-holds). The target is overridable:
 
 | Variable | Default |
 | --- | --- |

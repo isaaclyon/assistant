@@ -1,0 +1,392 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`google workspace extension > preserves the closed public operation union 1`] = `
+{
+  "anyOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "account": {
+          "maxLength": 254,
+          "minLength": 1,
+          "type": "string",
+        },
+        "operation": {
+          "const": "account_status",
+          "type": "string",
+        },
+      },
+      "required": [
+        "operation",
+      ],
+      "type": "object",
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "account": {
+          "maxLength": 254,
+          "minLength": 1,
+          "type": "string",
+        },
+        "max_results": {
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "operation": {
+          "const": "calendar_list",
+          "type": "string",
+        },
+      },
+      "required": [
+        "operation",
+      ],
+      "type": "object",
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "account": {
+          "maxLength": 254,
+          "minLength": 1,
+          "type": "string",
+        },
+        "calendar_ids": {
+          "items": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string",
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "type": "array",
+        },
+        "from": {
+          "maxLength": 64,
+          "minLength": 10,
+          "type": "string",
+        },
+        "max_results": {
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "operation": {
+          "const": "calendar_events",
+          "type": "string",
+        },
+        "time_zone": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string",
+        },
+        "to": {
+          "maxLength": 64,
+          "minLength": 10,
+          "type": "string",
+        },
+      },
+      "required": [
+        "operation",
+        "from",
+        "to",
+      ],
+      "type": "object",
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "account": {
+          "maxLength": 254,
+          "minLength": 1,
+          "type": "string",
+        },
+        "calendar_ids": {
+          "items": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string",
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "type": "array",
+        },
+        "from": {
+          "maxLength": 64,
+          "minLength": 10,
+          "type": "string",
+        },
+        "max_results": {
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "operation": {
+          "const": "calendar_search",
+          "type": "string",
+        },
+        "query": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "time_zone": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string",
+        },
+        "to": {
+          "maxLength": 64,
+          "minLength": 10,
+          "type": "string",
+        },
+      },
+      "required": [
+        "operation",
+        "query",
+        "from",
+        "to",
+      ],
+      "type": "object",
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "accounts": {
+          "items": {
+            "maxLength": 254,
+            "minLength": 1,
+            "type": "string",
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "type": "array",
+        },
+        "calendar_ids": {
+          "items": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string",
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "type": "array",
+        },
+        "from": {
+          "maxLength": 64,
+          "minLength": 10,
+          "type": "string",
+        },
+        "operation": {
+          "const": "calendar_availability",
+          "type": "string",
+        },
+        "to": {
+          "maxLength": 64,
+          "minLength": 10,
+          "type": "string",
+        },
+      },
+      "required": [
+        "operation",
+        "from",
+        "to",
+      ],
+      "type": "object",
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "account": {
+          "maxLength": 254,
+          "minLength": 1,
+          "type": "string",
+        },
+        "max_results": {
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "operation": {
+          "const": "gmail_search",
+          "type": "string",
+        },
+        "query": {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "operation",
+        "query",
+      ],
+      "type": "object",
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "account": {
+          "maxLength": 254,
+          "minLength": 1,
+          "type": "string",
+        },
+        "operation": {
+          "const": "gmail_thread",
+          "type": "string",
+        },
+        "thread_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "operation",
+        "thread_id",
+      ],
+      "type": "object",
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "account": {
+          "maxLength": 254,
+          "minLength": 1,
+          "type": "string",
+        },
+        "max_results": {
+          "maximum": 10,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "operation": {
+          "const": "contacts_search",
+          "type": "string",
+        },
+        "query": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "operation",
+        "query",
+      ],
+      "type": "object",
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "field_profile": {
+          "const": "identity",
+          "type": "string",
+        },
+        "language": {
+          "maxLength": 35,
+          "minLength": 2,
+          "type": "string",
+        },
+        "operation": {
+          "const": "places_search",
+          "type": "string",
+        },
+        "query": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "region": {
+          "maxLength": 2,
+          "minLength": 2,
+          "type": "string",
+        },
+      },
+      "required": [
+        "operation",
+        "field_profile",
+        "query",
+      ],
+      "type": "object",
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "language": {
+          "maxLength": 35,
+          "minLength": 2,
+          "type": "string",
+        },
+        "max_results": {
+          "maximum": 15,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "operation": {
+          "const": "places_search_candidates",
+          "type": "string",
+        },
+        "query": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "region": {
+          "maxLength": 2,
+          "minLength": 2,
+          "type": "string",
+        },
+      },
+      "required": [
+        "operation",
+        "query",
+      ],
+      "type": "object",
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "field_profile": {
+          "anyOf": [
+            {
+              "const": "identity",
+              "type": "string",
+            },
+            {
+              "const": "rich_details",
+              "type": "string",
+            },
+          ],
+        },
+        "language": {
+          "maxLength": 35,
+          "minLength": 2,
+          "type": "string",
+        },
+        "operation": {
+          "const": "places_details",
+          "type": "string",
+        },
+        "place_id": {
+          "maxLength": 263,
+          "minLength": 1,
+          "type": "string",
+        },
+        "region": {
+          "maxLength": 2,
+          "minLength": 2,
+          "type": "string",
+        },
+      },
+      "required": [
+        "operation",
+        "field_profile",
+        "place_id",
+      ],
+      "type": "object",
+    },
+  ],
+}
+`;

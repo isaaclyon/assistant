@@ -271,6 +271,8 @@ describe("startJobScheduler", () => {
         jobType: "at",
         target: "emma",
         eventId: `at:emma-reminder:${Date.parse("2026-07-18T15:00:00Z")}`,
+        occurrenceId: expect.stringMatching(/^emma-reminder-[a-f0-9]{64}$/),
+        definitionFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
       },
     );
   });
@@ -280,6 +282,58 @@ describe("startJobScheduler", () => {
     await writeFile(temporary, jobsFile(jobs), "utf8");
     await rename(temporary, join(stateDir, "jobs.json"));
   }
+
+  it("recovers a materialized cron occurrence across restart without replaying missed cron slots", async () => {
+    const { stateDir, inject, now } = await makeScheduler();
+    await writeJobs(stateDir, [{ id: "brief", type: "cron", schedule: "0 * * * *", tz: "UTC", prompt: "Synthetic" }]);
+    await scheduler!.reload();
+    inject.mockRejectedValue(new Error("recipient publication unavailable"));
+    now.ms = Date.parse("2026-07-18T11:00:05Z");
+    await scheduler!.tick();
+    expect(inject).toHaveBeenCalledTimes(1);
+    const originalDispatch = inject.mock.calls[0]![1];
+    await scheduler!.stop();
+    now.ms = Date.parse("2026-07-18T14:00:05Z");
+    const recovered = vi.fn(async () => {});
+    scheduler = await startJobScheduler({
+      stateDir, inject: recovered, webhookHost: "127.0.0.1", webhookPort: 0,
+      logger: silentLogger, nowMs: () => now.ms, tickIntervalMs: 3_600_000,
+    });
+    await scheduler.tick();
+    expect(recovered).toHaveBeenCalledExactlyOnceWith(expect.any(String), originalDispatch);
+  });
+
+  it("gives an edited one-shot definition a new occurrence rather than inheriting fired state", async () => {
+    const { stateDir, inject } = await makeScheduler();
+    const job = { id: "once", type: "at", at: "2026-07-18T09:00:00Z", prompt: "First" };
+    await writeJobs(stateDir, [job]);
+    await scheduler!.reload();
+    await scheduler!.tick();
+    await writeJobs(stateDir, [{ ...job, prompt: "Second" }]);
+    await scheduler!.reload();
+    await scheduler!.tick();
+    expect(inject).toHaveBeenCalledTimes(2);
+    expect(inject.mock.calls[1]![0]).toContain("Second");
+    expect(inject.mock.calls[1]![1].occurrenceId).not.toBe(inject.mock.calls[0]![1].occurrenceId);
+  });
+
+  it("waits for in-flight publication on shutdown", async () => {
+    const { stateDir, inject } = await makeScheduler();
+    await writeJobs(stateDir, [{ id: "once", type: "at", at: "2026-07-18T09:00:00Z", prompt: "Synthetic" }]);
+    await scheduler!.reload();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    inject.mockImplementation(() => gate);
+    const ticking = scheduler!.tick();
+    await vi.waitFor(() => expect(inject).toHaveBeenCalledTimes(1));
+    let stopped = false;
+    const stopping = scheduler!.stop().then(() => { stopped = true; });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const stoppedEarly = stopped;
+    release();
+    await Promise.all([ticking, stopping]);
+    expect(stoppedEarly).toBe(false);
+  });
 
   it("fires a cron job when its schedule elapses and not before", async () => {
     const { stateDir, inject, now } = await makeScheduler();
@@ -303,6 +357,34 @@ describe("startJobScheduler", () => {
     now.ms = Date.parse("2026-07-19T11:00:30Z");
     await scheduler!.tick();
     expect(inject).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves an unchanged job's due occurrence across an unrelated reload", async () => {
+    const { stateDir, inject, now } = await makeScheduler();
+    const job = { id: "brief", type: "cron", schedule: "0 11 * * *", tz: "UTC", prompt: "Morning brief" };
+    await writeJobs(stateDir, [job]);
+    await scheduler!.reload();
+    now.ms = Date.parse("2026-07-18T11:00:05Z");
+    await writeJobs(stateDir, [job, { id: "later", type: "at", at: "2027-01-01T00:00:00Z", prompt: "Later" }]);
+    await scheduler!.reload();
+    await scheduler!.tick();
+    expect(inject).toHaveBeenCalledTimes(1);
+  });
+
+  it("records exact observed and accepted content identities", async () => {
+    const { stateDir } = await makeScheduler();
+    const raw = jobsFile([{ id: "brief", type: "cron", schedule: "0 11 * * *", prompt: "p" }]);
+    await writeFile(join(stateDir, "jobs.json"), raw);
+    await scheduler!.reload();
+    const accepted = JSON.parse(await readFile(join(stateDir, "jobs-state.json"), "utf8"));
+    expect(accepted.acceptedHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(accepted.observedHash).toBe(accepted.acceptedHash);
+    await writeFile(join(stateDir, "jobs.json"), "invalid");
+    await scheduler!.reload();
+    const rejected = JSON.parse(await readFile(join(stateDir, "jobs-state.json"), "utf8"));
+    expect(rejected.observedHash).not.toBe(accepted.observedHash);
+    expect(rejected.acceptedHash).toBe(accepted.acceptedHash);
+    expect(rejected.lastLoadError).toBeTypeOf("string");
   });
 
   it("fires an at job exactly once, even late and across reloads", async () => {

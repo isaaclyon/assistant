@@ -125,9 +125,11 @@ describe("places extension", () => {
     });
     expect(directCategories?.terminate).toBe(true);
     expect(presentedView?.text).toContain("Choose a category");
-    await section.handleCallback?.({ ...baseContext, action: "category", payload: categoryId });
+    const chooseCategory = presentedView?.replyMarkup?.inline_keyboard[0]?.[0]?.callback_data.split(":");
+    await section.handleCallback?.({ ...baseContext, action: chooseCategory?.[2] ?? "", payload: chooseCategory?.[3] ?? "" });
     expect(presentedView?.text).toContain("overall impression");
-    await section.handleCallback?.({ ...baseContext, action: "sentiment", payload: "disliked" });
+    const chooseSentiment = presentedView?.replyMarkup?.inline_keyboard[0]?.[2]?.callback_data.split(":");
+    await section.handleCallback?.({ ...baseContext, action: chooseSentiment?.[2] ?? "", payload: chooseSentiment?.[3] ?? "" });
     expect(presentedView?.text).toContain("Ranked Direct Place");
     expect(presentedView?.text).toContain("#1 of 1 in Restaurants");
     const first = await tool?.execute("call-first", {

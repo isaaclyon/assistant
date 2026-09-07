@@ -25,6 +25,15 @@ a generic `memory: <action> <UUID>` message. Git children discard ambient
 `GIT_*` routing and command-configuration variables, force an empty hooks path,
 disable commit signing, and have a bounded runtime. Never push.
 
+Serialize each complete CLI mutation, from Git preflight through revision check,
+canonical file replacement, and optional commit, with the shared SQLite advisory
+lock. Store mutations use the same protocol even without Git. The private,
+user-owned lock releases on process death and has a bounded acquisition wait;
+never unlink a live lock file. Markdown, not the lock database, is authoritative.
+This coordinates cooperating writers, not arbitrary Obsidian or Git edits.
+Strict no-lost-edit guarantees require quiescent external writers; atomic file
+replacement alone does not remove the external check/replace race.
+
 Preflight failure prevents the memory mutation. If staging or committing fails
 after the canonical file changed, return mutation success with a sanitized
 `GIT_COMMIT_FAILED` result rather than inviting an unsafe retry. The changed

@@ -30,8 +30,10 @@ job triggers; durable handoffs route work to stable target IDs.
 
 Deploy the fleet as one release transaction: preflight every instance and the
 jobs graph, install every unit, activate sequentially, and require exact
-release/instance/PID readiness. Roll back every changed unit if any instance
-fails. Preserve mutable state and worktrees during both deployment and rollback.
+release/instance/PID readiness. ADR-0030 replaces the original unit-only rollback:
+quiesce all writers and retain a paired state/application-binary snapshot before
+activation. Failures hold the fleet disabled; after candidate startup, preserve
+state and reconcile or roll forward rather than rewinding accepted work.
 
 ## Consequences
 

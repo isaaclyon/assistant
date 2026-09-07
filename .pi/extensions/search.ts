@@ -163,7 +163,7 @@ export default function searchExtension(pi: ExtensionAPI): void {
       vaultRoot: context.vaultRoot,
       resourceRoot: context.resourceRoot,
     });
-    activeIndex.recordCorpusSuccess("memory", new Date().toISOString());
+    if (result.complete) activeIndex.recordCorpusSuccess("memory", new Date().toISOString());
     return result;
   };
   const refreshSessions = async (
@@ -179,12 +179,13 @@ export default function searchExtension(pi: ExtensionAPI): void {
       principalId: context.principalId,
       includeSafeCwd: true,
     });
-    activeIndex.recordCorpusSuccess("session", new Date().toISOString());
+    if (result.complete) activeIndex.recordCorpusSuccess("session", new Date().toISOString());
     return result;
   };
   pi.on("session_start", () => {
-    index?.close();
+    const activeIndex = index;
     index = undefined;
+    void Promise.allSettled([...pendingRefreshes]).then(() => activeIndex?.close());
   });
   pi.on("session_shutdown", () => {
     const activeIndex = index;
@@ -226,14 +227,17 @@ export default function searchExtension(pi: ExtensionAPI): void {
           trackRefresh(refreshMemory(activeIndex, context)),
           INTERACTIVE_REFRESH_BUDGET_MS,
         );
-        if (refresh.status === "fresh") {
+        if (refresh.status === "fresh" && refresh.value.complete) {
           page = searchIndexedMemories(activeIndex, request);
+        } else {
+          // An old scope/owner is not proof of current canonical visibility.
+          page = { results: [], truncated: false };
         }
         return resultEnvelope({
           ...page,
           index:
             refresh.status === "fresh"
-              ? { status: "fresh", ...refresh.value }
+              ? { status: refresh.value.complete ? "fresh" : "partial", ...refresh.value }
               : {
                   status: "stale",
                   warning:
@@ -290,14 +294,16 @@ export default function searchExtension(pi: ExtensionAPI): void {
           trackRefresh(refreshSessions(activeIndex, context)),
           INTERACTIVE_REFRESH_BUDGET_MS,
         );
-        if (refresh.status === "fresh") {
+        if (refresh.status === "fresh" && refresh.value.complete) {
           page = searchIndexedSessions(activeIndex, request);
+        } else {
+          page = { results: [], truncated: false };
         }
         return resultEnvelope({
           ...page,
           index:
             refresh.status === "fresh"
-              ? { status: "fresh", ...refresh.value }
+              ? { status: refresh.value.complete ? "fresh" : "partial", ...refresh.value }
               : {
                   status: "stale",
                   warning:
@@ -383,14 +389,14 @@ export default function searchExtension(pi: ExtensionAPI): void {
         const corpus = params.corpus ?? "all";
         const result: Record<string, unknown> = {};
         if (corpus === "memory" || corpus === "all") {
-          result.memory = await refreshMemory(activeIndex, context);
+          result.memory = await trackRefresh(refreshMemory(activeIndex, context));
         }
         if (corpus === "session" || corpus === "all") {
-          result.session = await refreshSessions(
+          result.session = await trackRefresh(refreshSessions(
             activeIndex,
             context,
             params.operation === "rebuild",
-          );
+          ));
         }
         return resultEnvelope({
           ...result,

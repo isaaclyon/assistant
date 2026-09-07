@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -247,7 +247,7 @@ describe("search extension", () => {
     expect(status.details).toMatchObject({
       ok: true,
       result: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         memoryDocuments: 1,
         sessionDocuments: 3,
       },
@@ -255,6 +255,20 @@ describe("search extension", () => {
     expect(invalid.details).toMatchObject({
       ok: false,
       error: { code: "INVALID_INPUT" },
+    });
+    // Once the canonical boundary cannot be verified, an old index cannot
+    // establish that a previously visible note is still visible to this user.
+    await rename(vault, `${vault}-moved`);
+    await symlink(`${vault}-moved`, vault, "dir");
+    const unavailable = await tools.get("assistant_memory_search")!.execute("memory-unavailable", { query: "coffee" });
+    expect(unavailable.details).toMatchObject({
+      ok: true, result: { results: [], index: { status: "stale" } },
+    });
+    await rename(sessions, `${sessions}-moved`);
+    await symlink(`${sessions}-moved`, sessions, "dir");
+    const unavailableSessions = await tools.get("assistant_session_search")!.execute("sessions-unavailable", { query: "discussed" });
+    expect(unavailableSessions.details).toMatchObject({
+      ok: true, result: { results: [], index: { status: "partial", complete: false } },
     });
     handlers.get("session_shutdown")?.();
   });

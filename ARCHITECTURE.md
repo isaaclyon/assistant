@@ -27,6 +27,8 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 | Temporary browser handoff | `<browserRuntime>/handoff.{json,log}` and `handoff-password` | Browser handoff supervisor |
 | Scheduled job definitions | `<stateDir>/jobs.json` | Agent/user |
 | Scheduled job run state | `<stateDir>/jobs-state.json` | Host |
+| Materialized job occurrences and terminal identities | `<coordinatorStateDir>/job-occurrences.db` | Scheduler |
+| Recipient job claims, acceptance, and recovery evidence | `<stateDir>/job-handoffs/` | Host / explicit operator recovery |
 | Human-idle session epoch | `<stateDir>/conversation-session-state.json` | Host |
 | Heartbeat observations | `<stateDir>/checkers/*.json` | Host |
 | Background subagent batches and temporary sessions | `<stateDir>/subagents/` | Host |
@@ -195,7 +197,7 @@ without a repeated-rotation loop after a post-replacement state-write failure.
 
 ## Deployment
 
-Pushes to `main` run checks on a GitHub-hosted runner. After they pass, the `assistant-production` self-hosted runner builds one immutable release for the exact merged SHA. If the external instance manifest exists, it preflights every instance and the job graph, installs all units, stops the compatibility singleton, and activates instances sequentially. Readiness requires exact instance ID, full release SHA, and stable systemd PID from private runtime metadata. Any failure restores every changed unit. Mutable state/workspaces and separate builder worktrees are preserved. Without a manifest, the compatibility singleton deployment remains available. See ADR-0005 and [the fleet runbook](docs/household-fleet.md).
+Pushes to `main` run checks on a GitHub-hosted runner. After they pass, the `assistant-production` self-hosted runner builds one immutable release for the exact merged SHA. If the external instance manifest exists, it preflights every instance and the job graph, disables and stops all bridge units, and captures matching state, units, and previous immutable application releases before offline job migration. It then installs all units and activates instances sequentially. Readiness requires exact instance ID, full release SHA, and stable systemd PID from private runtime metadata. Failures hold the fleet disabled; they never restart an old binary over changed recovery state. A durable pre-start barrier forbids state rewind after a candidate may have accepted work. Unit `ExecCondition` checks enforce the surviving maintenance hold on reboot. Workspaces and separate builder worktrees are preserved. The singleton uses the same recovery barrier. See ADR-0005, ADR-0030, and [the fleet runbook](docs/household-fleet.md).
 
 After every fleet instance is ready and the canonical checkout advances, the
 deployment runner sends one fixed completion message through the engineering

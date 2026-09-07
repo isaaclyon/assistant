@@ -98,9 +98,17 @@ user may cancel and resume later if they cannot choose.
 
 The command and deterministic buttons use pi-telegram's registered-section
 callbacks directly. Menu navigation, category/sentiment choices, comparisons,
-Back, browsing, and pagination do not start model turns. Free-text collection
-for names, notes, and new categories still enters the agent so natural-language
-requests and the button flow share the same typed `rank_places` operations.
+Back, browsing, pagination, and management do not start model turns. Names,
+notes, and category edits use one pending private reply input. Reply to the fresh
+standalone bot prompt; its unique input reference distinguishes it from older
+prompts. Input expires after ten minutes and can be cancelled. Replies must
+match the trusted private actor/chat and that exact bot prompt; unrelated
+messages retain ordinary Telegram routing. Input and button tokens are ephemeral;
+unfinished database insertions remain durable.
+
+The tool and section use the transport-independent `PlacesApplication.execute`
+command boundary. Telegram rendering, drafts, and reply capture stay outside it.
+No web UI or generic workflow framework is introduced (issue #96).
 
 Only one unfinished place insertion may exist for an interaction owner. Asking
 to add another place first offers Resume or Cancel existing ranking; it never
@@ -126,7 +134,7 @@ conversation rather than guessing a mutation.
 1. **Collect name.** The bot asks for a place name unless one was supplied
    unambiguously. Cancel returns to the menu without creating a place.
 2. **Choose category.** The bot shows existing categories plus **New category**.
-   Creating a category returns to this step with the new category selected.
+   Creating a category returns to this step with the new category available.
 3. **Check duplicate.** An existing normalized name in the category stops the
    flow and offers **View existing**, **Enter another name**, or **Cancel**.
 4. **Choose sentiment.** The bot offers **Liked**, **Alright**, and **Disliked**.
@@ -200,6 +208,7 @@ No unnecessary comparison is requested.
 - Canceling an unfinished insertion asks for confirmation after the place name
   has been entered.
 - The confirmation is a short-lived, one-use token bound to the insertion and
+  exact comparison revision. Advancing the comparison invalidates that approval.
 - Tokens live only in the selected extension session, whose Telegram surface
   is restricted by the host to one configured private actor. They expire after
   ten minutes, are capped at 32 pending operations, and are cleared on reload,
@@ -212,7 +221,9 @@ No unnecessary comparison is requested.
 
 - Immediately after completion, **Undo addition** asks for confirmation.
 - Delete-place and delete-category actions use the same operation-bound,
-  one-use confirmation mechanism.
+  one-use confirmation mechanism. They also snapshot the category mutation
+  revision and check it inside the deletion transaction. A later mutation in
+  that category requires a fresh confirmation, including same-timestamp edits.
 - Confirming removes that newly added place and its comparison history.
 - The action is available until another place mutation occurs in that category.
   After that, normal confirmed deletion is used instead.
