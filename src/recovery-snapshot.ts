@@ -32,6 +32,8 @@ async function digestTree(root: string, allowLinks: boolean, sync = false,
   includeRootEntry: (name: string) => boolean = () => true): Promise<string> {
   const hash = createHash("sha256");
   const canonicalRoot = await realpath(root);
+  // npm packages such as esbuild hard-link binaries inside node_modules.
+  const hardLinks = new Map<string, { expected: number; seen: number }>();
   let count = 0;
   async function walk(path: string): Promise<void> {
     if (++count > 250_000) throw new Error("Recovery snapshot file limit exceeded");
@@ -55,7 +57,13 @@ async function digestTree(root: string, allowLinks: boolean, sync = false,
       if (sync) await syncDirectory(path);
       return;
     }
-    if (!info.isFile() || info.nlink !== 1) throw new Error("Unsafe recovery snapshot entry");
+    if (!info.isFile() || (info.nlink !== 1 && !allowLinks)) throw new Error("Unsafe recovery snapshot entry");
+    if (info.nlink > 1) {
+      const key = `${info.dev}:${info.ino}`;
+      const entry = hardLinks.get(key) ?? { expected: info.nlink, seen: 0 };
+      entry.seen += 1;
+      hardLinks.set(key, entry);
+    }
     hash.update(`file:${info.size}:`);
     const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
@@ -71,6 +79,9 @@ async function digestTree(root: string, allowLinks: boolean, sync = false,
     } finally { await handle.close(); }
   }
   await walk(root);
+  for (const { expected, seen } of hardLinks.values()) {
+    if (seen !== expected) throw new Error("Release hard link escapes the immutable tree");
+  }
   return hash.digest("hex");
 }
 

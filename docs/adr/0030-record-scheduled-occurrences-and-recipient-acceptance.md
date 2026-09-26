@@ -90,7 +90,9 @@ and singleton units, before snapshot or migration. Cooperative job locks exclude
 active manual definition/recovery operations; external writers must also pause.
 A private retained checkpoint contains state, previous units, and their immutable
 application releases, with source/copy and restored-copy digest verification.
-Only relative, in-tree release symlinks are allowed. Node itself, external
+Only relative, in-tree release symlinks are allowed. Release hard links (npm
+creates them, for example for esbuild) are allowed only when every link to the
+file is inside the same release; state files must not be hard-linked. Node itself, external
 credentials, and memory outside the state tree are not migrated or rewound.
 
 Before any candidate can start, deployment persists an irreversible startup

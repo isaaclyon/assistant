@@ -43,6 +43,22 @@ describe("paired recovery snapshot rehearsal", () => {
     await rm(daemon); await originalFs.symlink(join(f.stateRoot, "jobs-state.json"), daemon);
     await expect(captureRecoverySnapshot(f)).rejects.toThrow(/release.*symlink/i);
   });
+  it("captures in-tree release hard links and rejects ones shared outside the release", async () => {
+    const f = await fixture();
+    const binary = join(f.release, "node_modules", "pkg", "bin", "tool");
+    await mkdir(join(f.release, "node_modules", "pkg", "bin"), { recursive: true });
+    await writeFile(binary, "native binary");
+    await originalFs.link(binary, join(f.release, "node_modules", "tool"));
+    await captureRecoverySnapshot(f);
+    await rm(f.release, { recursive: true });
+    await restoreRecoverySnapshot(f.snapshotDir);
+    expect(await readFile(join(f.release, "node_modules", "tool"), "utf8")).toBe("native binary");
+
+    const g = await fixture();
+    await writeFile(join(g.release, "dist", "src", "helper.js"), "helper");
+    await originalFs.link(join(g.release, "dist", "src", "helper.js"), join(g.stateRoot, "..", "outside-alias"));
+    await expect(captureRecoverySnapshot(g)).rejects.toThrow(/hard link escapes/i);
+  });
   it("refuses a state source that changes during capture", async () => {
     const f = await fixture();
     vi.mocked(cp).mockImplementation(async (...args) => {
