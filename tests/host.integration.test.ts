@@ -19,7 +19,12 @@ import {
 import { startBridgeHost } from "../src/host.js";
 import { parseBridgeInstanceManifest } from "../src/instances.js";
 import { enqueueJobHandoff } from "../src/job-handoff.js";
-import { bindTelegramHostHouseholdGroup } from "../src/telegram-capabilities.js";
+import {
+  bindBridgeRestart,
+  bindBridgeRuntimeMarker,
+  bindTelegramHostHouseholdGroup,
+  bindTelegramHostNewSession,
+} from "../src/telegram-capabilities.js";
 import {
   resolveRetryExtensionPath,
   resolveTelegramExtensionPath,
@@ -802,6 +807,45 @@ describe("startBridgeHost", () => {
 
     expect(unbindInbox).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
+  }, 20_000);
+
+  it("releases every earlier binding when a later startup binding fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-telegram-host-bind-failure-"));
+    const extensionPath = join(root, "noop-extension.mjs");
+    await writeFile(extensionPath, `export default function() {}\n`);
+    const close = vi.fn();
+    const fakeInbox = { persist: vi.fn(), remove: vi.fn(), loadPending: vi.fn(() => []), close };
+    const unbindInbox = vi.fn();
+    const occupied = bindTelegramHostNewSession(async () => ({ cancelled: false }));
+
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+      await expect(startTestBridgeHost({
+        config: {
+          agentDir: join(root, "agent"),
+          cwd: root,
+          sessionDir: join(root, "state", "sessions"),
+          stateDir: join(root, "state"),
+          codexConfigPath: join(root, "state", "pi-codex-conversion.json"),
+          webhookHost: "127.0.0.1",
+          webhookPort: 0,
+        },
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        telegramExtensionPath: extensionPath,
+        openInbox: vi.fn(() => fakeInbox),
+        bindInbox: vi.fn(() => unbindInbox),
+      })).rejects.toThrow(/newSession capability is already registered/);
+    } finally {
+      occupied();
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
+
+    expect(unbindInbox).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+    // Bindings registered before the failure were released, so they bind again.
+    bindBridgeRuntimeMarker()();
+    bindBridgeRestart(() => {})();
   }, 20_000);
 
   it("round-trips a real turn: host SQLite inbox ↔ pinned fork reconcile/replay", async () => {

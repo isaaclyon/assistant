@@ -3,30 +3,12 @@ import { constants } from "node:fs";
 import { access, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
-import { MAX_PLACE_CANDIDATES } from "./google-operations.ts";
 
-const DEFAULT_TIMEOUT_MS = 10_000;
-const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
+export const DEFAULT_TIMEOUT_MS = 10_000;
+export const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
 const MAX_PASSWORD_BYTES = 4 * 1024;
-const FAILURE_MESSAGE = "Google Workspace command failed";
+export const FAILURE_MESSAGE = "Google Workspace command failed";
 const MAX_PLACES_MONTHLY_LIMIT = 1_000_000;
-const IDENTITY_PLACE_FIELDS = ["id", "displayName", "formattedAddress", "googleMapsUri"];
-const SEARCH_FIELD_MASKS = {
-  identity: IDENTITY_PLACE_FIELDS,
-  candidates: [...IDENTITY_PLACE_FIELDS, "rating", "userRatingCount"],
-} as const;
-const DETAILS_FIELD_MASKS = {
-  identity: IDENTITY_PLACE_FIELDS,
-  rich: [
-    ...IDENTITY_PLACE_FIELDS, "rating", "userRatingCount", "regularOpeningHours",
-    "nationalPhoneNumber", "websiteUri", "priceLevel", "reviews.rating", "reviews.text",
-    "reviews.originalText", "reviews.publishTime", "reviews.relativePublishTimeDescription",
-    "reviews.authorAttribution", "reviews.googleMapsUri", "reviews.visitDate",
-  ],
-} as const;
-
-export type PlaceSearchFields = keyof typeof SEARCH_FIELD_MASKS;
-export type PlaceDetailsFields = keyof typeof DETAILS_FIELD_MASKS;
 
 export interface GoogleRuntime {
   account?: string;
@@ -56,7 +38,7 @@ function selectedEnvironment(password: string, gogHome: string): NodeJS.ProcessE
   return selected;
 }
 
-async function readPrivatePassword(path: string): Promise<string> {
+export async function readPrivatePassword(path: string): Promise<string> {
   if (!isAbsolute(path)) throw new Error(FAILURE_MESSAGE);
   const metadata = await stat(path);
   const currentUid = process.getuid?.();
@@ -74,7 +56,7 @@ async function readPrivatePassword(path: string): Promise<string> {
   return password;
 }
 
-async function readBoundedResponse(response: Response, maxBytes: number): Promise<string> {
+export async function readBoundedResponse(response: Response, maxBytes: number): Promise<string> {
   const contentLength = response.headers.get("content-length");
   if (contentLength && Number(contentLength) > maxBytes) throw new Error(FAILURE_MESSAGE);
   if (!response.body) throw new Error(FAILURE_MESSAGE);
@@ -99,82 +81,6 @@ async function readBoundedResponse(response: Response, maxBytes: number): Promis
     offset += chunk.byteLength;
   }
   return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-}
-
-async function fetchPlacesJson(options: {
-  apiKeyFile: string;
-  signal?: AbortSignal;
-}, prepare: () => { url: URL; fieldMask: string; body?: Record<string, unknown> }): Promise<unknown> {
-  try {
-    if (options.signal?.aborted) throw new Error(FAILURE_MESSAGE);
-    const request = prepare();
-    const apiKey = await readPrivatePassword(options.apiKeyFile);
-    const timeout = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
-    const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
-    if (signal.aborted) throw new Error(FAILURE_MESSAGE);
-    const response = await fetch(request.url, {
-      ...(request.body ? { method: "POST", body: JSON.stringify(request.body) } : {}),
-      headers: {
-        "X-Goog-Api-Key": apiKey,
-        "X-Goog-FieldMask": request.fieldMask,
-        ...(request.body ? { "Content-Type": "application/json" } : {}),
-      },
-      signal,
-    });
-    if (!response.ok) throw new Error(FAILURE_MESSAGE);
-    const body = await readBoundedResponse(response, DEFAULT_MAX_OUTPUT_BYTES);
-    return JSON.parse(body) as unknown;
-  } catch {
-    throw new Error(FAILURE_MESSAGE);
-  }
-}
-
-export async function fetchPlaceDetails(options: {
-  apiKeyFile: string;
-  fields: PlaceDetailsFields;
-  placeId: string;
-  language?: string;
-  region?: string;
-  signal?: AbortSignal;
-}): Promise<unknown> {
-  return fetchPlacesJson(options, () => {
-    const fields = Object.hasOwn(DETAILS_FIELD_MASKS, options.fields) ? DETAILS_FIELD_MASKS[options.fields] : undefined;
-    if (!fields) throw new Error(FAILURE_MESSAGE);
-    const url = new URL(`https://places.googleapis.com/v1/places/${encodeURIComponent(options.placeId)}`);
-    if (options.language) url.searchParams.set("languageCode", options.language);
-    if (options.region) url.searchParams.set("regionCode", options.region);
-    return { url, fieldMask: fields.join(",") };
-  });
-}
-
-export async function fetchPlaceSearch(options: {
-  apiKeyFile: string;
-  fields: PlaceSearchFields;
-  query: string;
-  maxResults: number;
-  language?: string;
-  region?: string;
-  signal?: AbortSignal;
-}): Promise<unknown> {
-  return fetchPlacesJson(options, () => {
-    const fields = Object.hasOwn(SEARCH_FIELD_MASKS, options.fields) ? SEARCH_FIELD_MASKS[options.fields] : undefined;
-    if (
-      !fields || !Number.isInteger(options.maxResults) ||
-      options.maxResults < 1 || options.maxResults > MAX_PLACE_CANDIDATES
-    ) {
-      throw new Error(FAILURE_MESSAGE);
-    }
-    return {
-      url: new URL("https://places.googleapis.com/v1/places:searchText"),
-      fieldMask: fields.map((field) => `places.${field}`).join(","),
-      body: {
-        textQuery: options.query,
-        pageSize: options.maxResults,
-        ...(options.language ? { languageCode: options.language } : {}),
-        ...(options.region ? { regionCode: options.region } : {}),
-      },
-    };
-  });
 }
 
 export async function runGogJson(options: {
@@ -280,20 +186,13 @@ export async function resolveGoogleRuntime(): Promise<GoogleRuntime> {
   const placesCandidatesMonthlyLimit = monthlyPlacesLimit(
     process.env.PI_TELEGRAM_GOOGLE_PLACES_CANDIDATES_MONTHLY_LIMIT,
   );
-  if (
-    !binary ||
-    !isAbsolute(binary) ||
-    !passwordFile ||
-    !isAbsolute(passwordFile) ||
-    !gogHome ||
-    !isAbsolute(gogHome)
-  ) {
-    throw new Error("Google Workspace runtime is unavailable");
-  }
+  const gogConfigured = Boolean(
+    binary && isAbsolute(binary) &&
+    passwordFile && isAbsolute(passwordFile) &&
+    gogHome && isAbsolute(gogHome),
+  );
   return {
-    binary,
-    passwordFile,
-    gogHome,
+    ...(gogConfigured ? { binary: binary!, passwordFile: passwordFile!, gogHome: gogHome! } : {}),
     ...(account ? { account } : {}),
     ...(stateDir && isAbsolute(stateDir) ? { stateDir } : {}),
     ...(placesApiKeyFile && isAbsolute(placesApiKeyFile) ? { placesApiKeyFile } : {}),
@@ -301,6 +200,13 @@ export async function resolveGoogleRuntime(): Promise<GoogleRuntime> {
     ...(placesDetailsMonthlyLimit === undefined ? {} : { placesDetailsMonthlyLimit }),
     ...(placesCandidatesMonthlyLimit === undefined ? {} : { placesCandidatesMonthlyLimit }),
   };
+}
+
+/** Workspace operations need all three gog settings; Places needs none. */
+export function hasGogRuntime(
+  runtime: GoogleRuntime,
+): runtime is GoogleRuntime & { binary: string; passwordFile: string; gogHome: string } {
+  return Boolean(runtime.binary && runtime.passwordFile && runtime.gogHome);
 }
 
 function monthlyPlacesLimit(value: string | undefined): number | undefined {
