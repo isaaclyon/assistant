@@ -30,6 +30,22 @@ function heartbeatJob(overrides: Record<string, unknown> = {}): Record<string, u
   };
 }
 
+const semanticRule = {
+  type: "semantic-match",
+  question:
+    "Is the email in {item} from our landlord and does it propose, confirm, or change the move-out inspection date?",
+  criteria: {
+    true: "The landlord suggests, agrees to, or reschedules a move-out inspection date",
+    false: "Any other topic or sender",
+  },
+  context: "Landlord: Maple Property Management (maplepm.com).",
+  notifyAt: 0.5,
+};
+
+function inbox(...items: Array<{ id: string; subject: string }>): string {
+  return JSON.stringify({ version: 1, value: { items } });
+}
+
 function observation(value: unknown, display?: string): string {
   return JSON.stringify({ version: 1, value, ...(display === undefined ? {} : { display }) });
 }
@@ -188,6 +204,9 @@ describe("parseJobsFile", () => {
           heartbeatJob({ id: "shell-check", checker: { command: "touch /tmp/not-allowed" } }),
           heartbeatJob({ id: "bad-rule", rule: { type: "condition", operator: "less-than", target: 0, for: "soon", notify: "once-per-episode" } }),
           heartbeatJob({ id: "bad-action", onTrigger: { type: "command", prompt: "p" } }),
+          heartbeatJob({ id: "no-placeholder", rule: { ...semanticRule, question: "Is this relevant?" } }),
+          heartbeatJob({ id: "bad-threshold", rule: { ...semanticRule, notifyAt: 1 } }),
+          heartbeatJob({ id: "no-criteria", rule: { ...semanticRule, criteria: { true: "yes" } } }),
           { id: "no-prompt", type: "cron", schedule: "0 8 * * *", prompt: "" },
           { id: "bad-type", type: "monthly", prompt: "p" },
         ]),
@@ -200,6 +219,9 @@ describe("parseJobsFile", () => {
     expect(invalid).toThrow(/shell-check.*"checker.id"/);
     expect(invalid).toThrow(/bad-rule.*"for"/);
     expect(invalid).toThrow(/bad-action.*"onTrigger"/);
+    expect(invalid).toThrow(/no-placeholder.*"question".*\{item\}/);
+    expect(invalid).toThrow(/bad-threshold.*"notifyAt"/);
+    expect(invalid).toThrow(/no-criteria.*"criteria"/);
     expect(invalid).toThrow(/no-prompt.*"prompt"/);
     expect(invalid).toThrow(/bad-type.*"type"/);
   });
@@ -520,6 +542,123 @@ describe("startJobScheduler", () => {
     now.ms = firstObserved + 33 * 24 * 60 * 60 * 1000;
     await scheduler!.tick();
     expect(inject).toHaveBeenCalledTimes(2);
+  });
+
+  it("judges only new items after a silent baseline and wakes the agent for matches", async () => {
+    const runCheck = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, stdout: inbox({ id: "old", subject: "Welcome" }) })
+      .mockResolvedValueOnce({ ok: true, stdout: inbox({ id: "old", subject: "Welcome" }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        stdout: inbox(
+          { id: "old", subject: "Welcome" },
+          { id: "t1", subject: "Re: Move-out walkthrough Oct 3?" },
+          { id: "t2", subject: "October rent reminder" },
+        ),
+      });
+    const judge = vi.fn(async (_request: unknown) => ({
+      model: "jev-1.13.0",
+      probabilities: { item_0: 0.91, item_1: 0.04 },
+    }));
+    const { stateDir, inject, now } = await makeScheduler({ runCheck, judge });
+    await writeJobs(stateDir, [heartbeatJob({ rule: semanticRule })]);
+    await scheduler!.reload();
+
+    for (const hour of [11, 12]) {
+      now.ms = Date.parse(`2026-07-18T${hour}:00:05Z`);
+      await scheduler!.tick();
+    }
+    expect(judge).not.toHaveBeenCalled();
+    expect(inject).not.toHaveBeenCalled();
+
+    now.ms = Date.parse("2026-07-18T13:00:05Z");
+    await scheduler!.tick();
+    expect(judge).toHaveBeenCalledTimes(1);
+    expect(judge.mock.calls[0]![0]).toEqual({
+      state: {
+        watch: { context: semanticRule.context },
+        items: [
+          { id: "t1", subject: "Re: Move-out walkthrough Oct 3?" },
+          { id: "t2", subject: "October rent reminder" },
+        ],
+      },
+      questions: {
+        item_0: {
+          type: "noul",
+          instructions: expect.stringMatching(/^Is the email in `items\[0\]` from our landlord/),
+          criteria: semanticRule.criteria,
+        },
+        item_1: {
+          type: "noul",
+          instructions: expect.stringMatching(/^Is the email in `items\[1\]` from/),
+          criteria: semanticRule.criteria,
+        },
+      },
+    });
+    expect(inject).toHaveBeenCalledTimes(1);
+    const prompt = inject.mock.calls[0]![0] as string;
+    expect(prompt).toContain('"ruleType": "semantic-match"');
+    expect(prompt).toContain("Move-out walkthrough");
+    expect(prompt).toContain('"probability": 0.91');
+    expect(prompt).not.toContain("October rent reminder");
+  });
+
+  it("re-judges the same new items after a judge failure instead of treating it as no", async () => {
+    const runCheck = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, stdout: inbox() })
+      .mockResolvedValue({ ok: true, stdout: inbox({ id: "t1", subject: "Walkthrough Oct 3" }) });
+    const judge = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("TypeSafe returned HTTP 529"))
+      .mockResolvedValueOnce({ model: "jev-1.13.0", probabilities: { item_0: 0.8 } });
+    const { stateDir, inject, now } = await makeScheduler({ runCheck, judge });
+    await writeJobs(stateDir, [heartbeatJob({ rule: semanticRule })]);
+    await scheduler!.reload();
+
+    for (const hour of [11, 12]) {
+      now.ms = Date.parse(`2026-07-18T${hour}:00:05Z`);
+      await scheduler!.tick();
+    }
+    expect(inject).not.toHaveBeenCalled();
+    const failed = JSON.parse(await readFile(join(stateDir, "checkers", "hb.json"), "utf8"));
+    expect(failed.lastObservation.value).toEqual({ items: [] });
+    expect(failed.lastFailureAt).toBe(Date.parse("2026-07-18T12:00:05Z"));
+
+    now.ms = Date.parse("2026-07-18T13:00:05Z");
+    await scheduler!.tick();
+    expect(judge).toHaveBeenCalledTimes(2);
+    expect(inject).toHaveBeenCalledTimes(1);
+
+    now.ms = Date.parse("2026-07-18T14:00:05Z");
+    await scheduler!.tick();
+    expect(judge).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects semantic observations without unique item ids", async () => {
+    const runCheck = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, stdout: inbox() })
+      .mockResolvedValueOnce({ ok: true, stdout: observation(12) })
+      .mockResolvedValueOnce({
+        ok: true,
+        stdout: inbox({ id: "a", subject: "x" }, { id: "a", subject: "y" }),
+      });
+    const judge = vi.fn();
+    const { stateDir, inject, now } = await makeScheduler({ runCheck, judge });
+    await writeJobs(stateDir, [heartbeatJob({ rule: semanticRule })]);
+    await scheduler!.reload();
+
+    for (const hour of [11, 12, 13]) {
+      now.ms = Date.parse(`2026-07-18T${hour}:00:05Z`);
+      await scheduler!.tick();
+    }
+    expect(judge).not.toHaveBeenCalled();
+    expect(inject).not.toHaveBeenCalled();
+    const state = JSON.parse(await readFile(join(stateDir, "checkers", "hb.json"), "utf8"));
+    expect(state.lastObservation.value).toEqual({ items: [] });
+    expect(state.lastFailureAt).toBe(Date.parse("2026-07-18T13:00:05Z"));
   });
 
   it("starts a new baseline when a heartbeat checker configuration changes", async () => {

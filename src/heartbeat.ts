@@ -5,6 +5,8 @@ import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promise
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { SemanticJudge, SemanticJudgeRequest } from "./semantic-judge.js";
+
 export type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
 export type JsonObject = { [key: string]: JsonValue };
 
@@ -32,7 +34,18 @@ export interface ConditionRule {
   notify: "once-per-episode";
 }
 
-export type HeartbeatRule = ChangedRule | ConditionRule;
+export interface SemanticMatchRule {
+  type: "semantic-match";
+  /** Yes/no question about one item; every `{item}` becomes that item's state path. */
+  question: string;
+  criteria: { true: string; false: string };
+  /** Optional background placed in state as `watch.context`. */
+  context?: string;
+  /** Minimum P(yes) that wakes the agent. */
+  notifyAt: number;
+}
+
+export type HeartbeatRule = ChangedRule | ConditionRule | SemanticMatchRule;
 
 export interface PromptTrigger {
   type: "prompt";
@@ -74,11 +87,18 @@ interface StoredObservation {
   observedAt: number;
 }
 
+interface SemanticMatch {
+  item: JsonObject;
+  probability: number;
+}
+
 interface PendingEvent {
-  type: "changed" | "condition";
+  type: "changed" | "condition" | "semantic-match";
   currentObservation: StoredObservation;
   previousObservation?: StoredObservation;
   conditionSince?: number;
+  matches?: SemanticMatch[];
+  model?: string;
 }
 
 interface HeartbeatState {
@@ -99,6 +119,11 @@ const MAX_OBSERVATION_BYTES = 4 * 1024;
 const MAX_DISPLAY_BYTES = 1024;
 const DURATION_PATTERN = /^(\d+)([smhd])$/;
 const CHECKER_ID_PATTERN = /^[a-z0-9-]{1,64}$/;
+const ITEM_PLACEHOLDER = "{item}";
+const MAX_SEMANTIC_TEXT_BYTES = 1024;
+const MAX_SEMANTIC_CONTEXT_BYTES = 2048;
+const MAX_SEMANTIC_ITEMS = 50;
+const MAX_ITEM_ID_BYTES = 128;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -119,6 +144,103 @@ function isJsonValue(value: unknown): value is JsonValue {
   }
   if (Array.isArray(value)) return value.every(isJsonValue);
   return isRecord(value) && Object.values(value).every(isJsonValue);
+}
+
+function isBoundedText(value: unknown, maxBytes: number): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    Buffer.byteLength(value, "utf8") <= maxBytes
+  );
+}
+
+function parseSemanticMatchRule(
+  ruleValue: Record<string, unknown>,
+  label: string,
+  errors: string[],
+): SemanticMatchRule | undefined {
+  let valid = true;
+  const { question, criteria, context, notifyAt } = ruleValue;
+  if (!isBoundedText(question, MAX_SEMANTIC_TEXT_BYTES) || !question.includes(ITEM_PLACEHOLDER)) {
+    errors.push(
+      `${label}: semantic-match "question" must be a non-empty string of at most 1 KB containing ${ITEM_PLACEHOLDER}`,
+    );
+    valid = false;
+  }
+  if (
+    !isRecord(criteria) ||
+    !isBoundedText(criteria.true, MAX_SEMANTIC_TEXT_BYTES) ||
+    !isBoundedText(criteria.false, MAX_SEMANTIC_TEXT_BYTES)
+  ) {
+    errors.push(
+      `${label}: semantic-match "criteria" must have non-empty "true" and "false" strings of at most 1 KB`,
+    );
+    valid = false;
+  }
+  if (context !== undefined && !isBoundedText(context, MAX_SEMANTIC_CONTEXT_BYTES)) {
+    errors.push(`${label}: semantic-match "context" must be a non-empty string of at most 2 KB`);
+    valid = false;
+  }
+  if (typeof notifyAt !== "number" || !(notifyAt > 0 && notifyAt < 1)) {
+    errors.push(`${label}: semantic-match "notifyAt" must be a number between 0 and 1`);
+    valid = false;
+  }
+  if (!valid) return undefined;
+  const parsedCriteria = criteria as { true: string; false: string };
+  return {
+    type: "semantic-match",
+    question: question as string,
+    criteria: { true: parsedCriteria.true, false: parsedCriteria.false },
+    ...(context === undefined ? {} : { context: context as string }),
+    notifyAt: notifyAt as number,
+  };
+}
+
+/** Validates the item list a semantic-match checker must emit as `value.items`. */
+export function parseSemanticItems(value: JsonValue): JsonObject[] {
+  if (!isRecord(value) || !Array.isArray(value.items)) {
+    throw new Error('semantic-match rule requires an observation "value" with an "items" array');
+  }
+  if (value.items.length > MAX_SEMANTIC_ITEMS) {
+    throw new Error(`semantic-match observations may contain at most ${MAX_SEMANTIC_ITEMS} items`);
+  }
+  const ids = new Set<string>();
+  const items: JsonObject[] = [];
+  for (const item of value.items) {
+    if (
+      !isRecord(item) ||
+      typeof item.id !== "string" ||
+      item.id.length === 0 ||
+      Buffer.byteLength(item.id, "utf8") > MAX_ITEM_ID_BYTES ||
+      ids.has(item.id)
+    ) {
+      throw new Error("semantic-match items must be objects with unique non-empty string ids");
+    }
+    ids.add(item.id);
+    items.push(item as JsonObject);
+  }
+  return items;
+}
+
+export function buildSemanticRequest(
+  rule: SemanticMatchRule,
+  items: readonly JsonObject[],
+): SemanticJudgeRequest {
+  const questions: SemanticJudgeRequest["questions"] = {};
+  items.forEach((_item, index) => {
+    questions[`item_${index}`] = {
+      type: "noul",
+      instructions: rule.question.replaceAll(ITEM_PLACEHOLDER, `\`items[${index}]\``),
+      criteria: { true: rule.criteria.true, false: rule.criteria.false },
+    };
+  });
+  return {
+    state: {
+      ...(rule.context === undefined ? {} : { watch: { context: rule.context } }),
+      items,
+    },
+    questions,
+  };
 }
 
 function parseDurationMs(value: string): number | undefined {
@@ -210,8 +332,11 @@ export function parseHeartbeatFields(
         notify: "once-per-episode",
       };
     }
+  } else if (ruleValue.type === "semantic-match") {
+    rule = parseSemanticMatchRule(ruleValue, label, errors);
+    if (rule === undefined) valid = false;
   } else {
-    errors.push(`${label}: "rule.type" must be one of changed, condition`);
+    errors.push(`${label}: "rule.type" must be one of changed, condition, semantic-match`);
     valid = false;
   }
 
@@ -309,8 +434,31 @@ function isStoredObservation(value: unknown): value is StoredObservation {
   );
 }
 
+function isSemanticMatch(value: unknown): value is SemanticMatch {
+  return (
+    isRecord(value) &&
+    isRecord(value.item) &&
+    isJsonValue(value.item) &&
+    typeof value.probability === "number" &&
+    Number.isFinite(value.probability)
+  );
+}
+
 function isPendingEvent(value: unknown): value is PendingEvent {
-  if (!isRecord(value) || (value.type !== "changed" && value.type !== "condition")) return false;
+  if (
+    !isRecord(value) ||
+    (value.type !== "changed" && value.type !== "condition" && value.type !== "semantic-match")
+  ) {
+    return false;
+  }
+  if (
+    value.type === "semantic-match" &&
+    (!Array.isArray(value.matches) ||
+      !value.matches.every(isSemanticMatch) ||
+      typeof value.model !== "string")
+  ) {
+    return false;
+  }
   if (!isStoredObservation(value.currentObservation)) return false;
   if (value.previousObservation !== undefined && !isStoredObservation(value.previousObservation)) {
     return false;
@@ -396,7 +544,7 @@ function eventPrompt(job: StatefulHeartbeatDefinition, event: PendingEvent): str
   const eventData: Record<string, unknown> = {
     jobId: job.id,
     ruleType: event.type,
-    currentValue: event.currentObservation.value,
+    ...(event.type === "semantic-match" ? {} : { currentValue: event.currentObservation.value }),
     currentObservedAt: new Date(event.currentObservation.observedAt).toISOString(),
   };
   if (event.currentObservation.display !== undefined) {
@@ -405,7 +553,14 @@ function eventPrompt(job: StatefulHeartbeatDefinition, event: PendingEvent): str
   if (event.currentObservation.context !== undefined) {
     eventData.context = event.currentObservation.context;
   }
-  if (event.type === "changed") {
+  if (event.type === "semantic-match") {
+    if (job.rule.type === "semantic-match") eventData.question = job.rule.question;
+    eventData.matches = (event.matches ?? []).map((match) => ({
+      item: match.item,
+      probability: Math.round(match.probability * 1000) / 1000,
+    }));
+    eventData.model = event.model;
+  } else if (event.type === "changed") {
     eventData.previousValue = event.previousObservation?.value;
     eventData.previousObservedAt = timestamp(event.previousObservation?.observedAt);
     if (event.previousObservation?.display !== undefined) {
@@ -426,6 +581,10 @@ function applyObservation(
   const previousObservation = state.lastObservation;
   state.lastObservation = currentObservation;
   state.lastSuccessfulObservationAt = now;
+
+  if (job.rule.type === "semantic-match") {
+    throw new Error("semantic-match observations are applied by applySemanticObservation");
+  }
 
   if (job.rule.type === "changed") {
     if (previousObservation === null) {
@@ -457,6 +616,59 @@ function applyObservation(
   }
 }
 
+interface SemanticEvaluation {
+  matches: SemanticMatch[];
+  judged: number;
+  model?: string;
+}
+
+async function evaluateSemanticObservation(
+  rule: SemanticMatchRule,
+  previousObservation: StoredObservation | null,
+  currentObservation: StoredObservation,
+  judge: SemanticJudge,
+): Promise<SemanticEvaluation> {
+  // The first successful observation is a silent baseline, as with `changed`.
+  if (previousObservation === null) return { matches: [], judged: 0 };
+  let previousIds: Set<string>;
+  try {
+    previousIds = new Set(parseSemanticItems(previousObservation.value).map((item) => item.id as string));
+  } catch {
+    return { matches: [], judged: 0 };
+  }
+  const fresh = parseSemanticItems(currentObservation.value).filter(
+    (item) => !previousIds.has(item.id as string),
+  );
+  if (fresh.length === 0) return { matches: [], judged: 0 };
+
+  const result = await judge(buildSemanticRequest(rule, fresh));
+  const matches = fresh.flatMap((item, index) => {
+    const probability = result.probabilities[`item_${index}`];
+    if (typeof probability !== "number") throw new Error("semantic judge omitted an answer");
+    return probability >= rule.notifyAt ? [{ item, probability }] : [];
+  });
+  return { matches, judged: fresh.length, model: result.model };
+}
+
+function applySemanticObservation(
+  state: HeartbeatState,
+  currentObservation: StoredObservation,
+  now: number,
+  evaluation: SemanticEvaluation,
+): void {
+  state.lastObservation = currentObservation;
+  state.lastSuccessfulObservationAt = now;
+  if (evaluation.judged > 0) state.changedAt = now;
+  if (evaluation.matches.length > 0 && evaluation.model !== undefined) {
+    state.pendingEvent = {
+      type: "semantic-match",
+      currentObservation,
+      matches: evaluation.matches,
+      model: evaluation.model,
+    };
+  }
+}
+
 export function createHeartbeatRunner({
   stateDir,
   runCheck,
@@ -464,6 +676,7 @@ export function createHeartbeatRunner({
   logger,
   nowMs,
   checkTimeoutMs,
+  judge,
 }: {
   stateDir: string;
   runCheck: (checkerId: string, timeoutMs: number) => Promise<HeartbeatCheckResult>;
@@ -474,6 +687,7 @@ export function createHeartbeatRunner({
   logger: HeartbeatLogger;
   nowMs: () => number;
   checkTimeoutMs: number;
+  judge: SemanticJudge;
 }): HeartbeatRunner {
   const checkerStateDir = join(stateDir, "checkers");
 
@@ -567,6 +781,7 @@ export function createHeartbeatRunner({
         if (job.rule.type === "condition" && typeof currentObservation.value !== "number") {
           throw new Error('condition rule requires a numeric observation "value"');
         }
+        if (job.rule.type === "semantic-match") parseSemanticItems(currentObservation.value);
       } catch (error) {
         await persistFailure(job, state, now);
         const message = error instanceof Error ? error.message : String(error);
@@ -578,7 +793,30 @@ export function createHeartbeatRunner({
         logger.info(`Heartbeat '${job.id}' changed while its checker ran; discarding the result.`);
         return;
       }
-      applyObservation(job, state, currentObservation, now);
+      if (job.rule.type === "semantic-match") {
+        let evaluation: SemanticEvaluation;
+        try {
+          evaluation = await evaluateSemanticObservation(
+            job.rule,
+            state.lastObservation,
+            currentObservation,
+            judge,
+          );
+        } catch (error) {
+          // A judge failure is not a "no": keep the old baseline so these items are judged again.
+          await persistFailure(job, state, now);
+          const message = error instanceof Error ? error.message : String(error);
+          logger.error(`Heartbeat '${job.id}' semantic judgment failed: ${message}`);
+          return;
+        }
+        if (!(await isCurrent())) {
+          logger.info(`Heartbeat '${job.id}' changed while it was judged; discarding the result.`);
+          return;
+        }
+        applySemanticObservation(state, currentObservation, now, evaluation);
+      } else {
+        applyObservation(job, state, currentObservation, now);
+      }
 
       try {
         await persist(job, state);
