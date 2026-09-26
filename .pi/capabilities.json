@@ -38,6 +38,11 @@
         "enabled": true
       },
       {
+        "id": "tasks",
+        "path": ".pi/extensions/tasks.ts",
+        "enabled": true
+      },
+      {
         "id": "google-workspace",
         "path": ".pi/extensions/google-workspace.ts",
         "enabled": true
@@ -72,6 +77,11 @@
       {
         "id": "google-contacts",
         "path": ".pi/skills/google-contacts/SKILL.md",
+        "enabled": true
+      },
+      {
+        "id": "manage-tasks",
+        "path": ".pi/skills/manage-tasks/SKILL.md",
         "enabled": true
       },
       {
@@ -131,13 +141,14 @@
   "profiles": [
     {
       "id": "personal-isaac",
-      "extensions": ["core-memory", "reload", "restart", "skills", "search", "places", "google-workspace", "subagents"],
+      "extensions": ["core-memory", "reload", "restart", "skills", "search", "places", "tasks", "google-workspace", "subagents"],
       "skills": [
         "agent-browser",
         "check-weather",
         "google-calendar",
         "gmail-read",
         "google-contacts",
+        "manage-tasks",
         "find-places",
         "message-link",
         "schedule-reminders-and-jobs",

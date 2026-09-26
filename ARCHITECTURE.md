@@ -33,6 +33,7 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 | Heartbeat observations | `<stateDir>/checkers/*.json` | Host |
 | Background subagent batches and temporary sessions | `<stateDir>/subagents/` | Host |
 | Private place rankings and active comparisons | `<stateDir>/places.db` | Places extension/store |
+| Personal tasks | `<stateDir>/tasks.db` | Tasks extension/service |
 | Pending direct place-add draft | `<stateDir>/places-add-draft.json` | Places extension |
 | Personal memory vault | `~/.local/share/pi-telegram-bridge/memory` (override: `PI_TELEGRAM_MEMORY_DIR`) | `personal-memory` skill CLI |
 | Derived memory/session search index | `<stateDir>/search-index.db` | Search extension/coordinator |
@@ -77,6 +78,11 @@ The places extension presents its deterministic Telegram UI through a
 pi-telegram registered section. Slash commands and active-turn tool handoffs
 can open that section directly, so menu navigation and ranking callbacks stay
 outside the model loop while free-text interpretation remains agent-owned.
+
+Personal tasks use a separate per-instance SQLite store and typed `tasks` tool.
+The current core provides deterministic CRUD, lifecycle transitions, bounded
+date views, search, and confirmed permanent deletion; reminders, check-ins,
+snoozing, and recurrence remain separate capabilities.
 
 Google integrations share one repo-local `google_workspace` tool backed by an
 externally configured `gog` binary. Its closed operation schema never accepts a

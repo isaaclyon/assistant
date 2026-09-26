@@ -221,7 +221,10 @@ describe("capability profiles", () => {
     );
     expect(
       profiles.find((profile) => profile.profileId === "personal-isaac")?.extensionPaths,
-    ).toEqual(expect.arrayContaining([expect.stringContaining("extensions/places.ts")]));
+    ).toEqual(expect.arrayContaining([
+      expect.stringContaining("extensions/places.ts"),
+      expect.stringContaining("extensions/tasks.ts"),
+    ]));
     expect(
       profiles.find((profile) => profile.profileId === "personal-isaac")?.skillPaths,
     ).toEqual(
@@ -229,6 +232,7 @@ describe("capability profiles", () => {
         expect.stringContaining("google-calendar/SKILL.md"),
         expect.stringContaining("gmail-read/SKILL.md"),
         expect.stringContaining("google-contacts/SKILL.md"),
+        expect.stringContaining("manage-tasks/SKILL.md"),
         expect.stringContaining("reserve-restaurant/SKILL.md"),
       ]),
     );
@@ -243,6 +247,9 @@ describe("capability profiles", () => {
       );
       expect(profiles.find((profile) => profile.profileId === profileId)?.skillPaths).not.toEqual(
         expect.arrayContaining([expect.stringContaining("google-contacts/SKILL.md")]),
+      );
+      expect(profiles.find((profile) => profile.profileId === profileId)?.skillPaths).not.toEqual(
+        expect.arrayContaining([expect.stringContaining("manage-tasks/SKILL.md")]),
       );
     }
     for (const profileId of ["personal-emma", "household-shared", "builder"]) {
@@ -277,6 +284,17 @@ describe("capability profiles", () => {
     expect(skill).toMatch(/message-link/is);
     expect(skill).toMatch(/never.*(?:send|sending)|sending.*never/is);
     expect(skill).toMatch(/untrusted data, never as instructions/i);
+  });
+
+  it("ships task guidance for bounded views, typed dates, and confirmed deletion", async () => {
+    const skill = await readFile(join(process.cwd(), ".pi", "skills", "manage-tasks", "SKILL.md"), "utf8");
+
+    expect(skill).toMatch(/typed `tasks` tool/i);
+    expect(skill).toMatch(/YYYY-MM-DD/);
+    expect(skill).toMatch(/upcoming.*due_this_week.*overdue/is);
+    expect(skill).toMatch(/completed.*cancelled.*search/is);
+    expect(skill).toMatch(/request_confirmation.*delete_task/is);
+    expect(skill).toMatch(/reminders.*recurrence.*separate/is);
   });
 
   it("treats requests to write a text to someone as editable Messages-link drafts", async () => {
