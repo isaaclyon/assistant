@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import backgroundSubagents from "../.pi/extensions/subagents/index.js";
 
 describe("background subagent model scope", () => {
-  it("exposes only the three available GPT-5.6 models", () => {
+  it("exposes only the three available GPT-6 models", () => {
     let parameters: Record<string, unknown> | undefined;
     backgroundSubagents({
       registerTool(tool: { parameters: Record<string, unknown> }) {
@@ -13,9 +13,9 @@ describe("background subagent model scope", () => {
 
     const properties = parameters?.properties as Record<string, Record<string, unknown>>;
     const expected = [
-      "openai-codex/gpt-5.6-luna",
-      "openai-codex/gpt-5.6-sol",
-      "openai-codex/gpt-5.6-terra",
+      "openai-codex/gpt-6-luna",
+      "openai-codex/gpt-6-sol",
+      "openai-codex/gpt-6-astra",
     ];
     expect(properties.model?.enum).toEqual(expected);
 
