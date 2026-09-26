@@ -50,6 +50,43 @@ export interface EnqueueJobHandoffOptions {
   now?: () => Date;
 }
 
+export interface JobHandoffLocation {
+  stateRoot: string;
+  coordinatorStateDir: string;
+  local: boolean;
+  target: string;
+}
+
+/**
+ * Resolves where a dispatch's handoffs live. A singleton host delivers to its
+ * own state directory under the fixed "local" target; a fleet host delivers to
+ * each recipient's instance tree under the shared state root.
+ */
+export function jobHandoffLocation(
+  host: { stateDir: string } | { stateDir: string; stateRoot: string; instanceId: string },
+  target: string | undefined,
+): JobHandoffLocation {
+  if (!("instanceId" in host)) {
+    return { stateRoot: host.stateDir, coordinatorStateDir: host.stateDir, local: true, target: "local" };
+  }
+  if (!target) throw new Error("Fleet job target is required");
+  return { stateRoot: host.stateRoot, coordinatorStateDir: host.stateDir, local: false, target };
+}
+
+function handoffRecipients(target: string): string[] {
+  return target === "both-personal" ? ["isaac", "emma"] : [target];
+}
+
+function recipientHandoffRoot(
+  location: { stateRoot: string; coordinatorStateDir: string; local?: boolean },
+  recipient: string,
+): string {
+  const recipientStateDir = location.local
+    ? location.coordinatorStateDir
+    : join(location.stateRoot, "instances", recipient);
+  return join(recipientStateDir, "job-handoffs");
+}
+
 export interface EnqueueJobHandoffResult {
   dispatchId: string;
   recipients: Record<string, RecipientStatus>;
@@ -136,7 +173,7 @@ export async function enqueueJobHandoff({
   ) {
     throw new Error("Job handoff prompt must be non-empty and at most 32 KB");
   }
-  const recipients = target === "both-personal" ? ["isaac", "emma"] : [target];
+  const recipients = handoffRecipients(target);
   const eventHash = createHash("sha256").update(eventId).digest("hex");
   const dispatchId = definitionFingerprint === undefined ? `${jobId}-${eventHash.slice(0, 16)}`
     : `${jobId}-${createHash("sha256").update(JSON.stringify([jobId, definitionFingerprint, eventId])).digest("hex")}`;
@@ -173,7 +210,8 @@ export async function enqueueJobHandoff({
 
   for (const recipient of recipients) {
     if (status.recipients[recipient] === "enqueued") continue;
-    const pendingDir = join(local ? coordinatorStateDir : join(stateRoot, "instances", recipient), "job-handoffs", "pending");
+    const recipientRoot = recipientHandoffRoot({ stateRoot, coordinatorStateDir, local }, recipient);
+    const pendingDir = join(recipientRoot, "pending");
     try {
       await mkdir(pendingDir, { recursive: true, mode: 0o700 });
       const handoff: JobHandoffFile = {
@@ -185,7 +223,6 @@ export async function enqueueJobHandoff({
         prompt,
         createdAt: status.createdAt,
       };
-      const recipientRoot = dirname(pendingDir);
       await withMutationLock(join(recipientRoot, ".transition-lock.sqlite"), async () => {
         // Recipient evidence may be ahead of coordinator state. Never recreate
         // pending work after a claim, acceptance, or terminal rejection.
@@ -227,9 +264,8 @@ export async function cancelJobHandoff(options: {
     throw new Error("Invalid cancellation identity");
   }
   const result: Record<string, "cancelled" | "completed" | "acknowledged" | "processing" | "failed"> = {};
-  const recipients = options.target === "both-personal" ? ["isaac", "emma"] : [options.target];
-  for (const recipient of recipients) {
-    const root = join(options.local ? options.coordinatorStateDir : join(options.stateRoot, "instances", recipient), "job-handoffs");
+  for (const recipient of handoffRecipients(options.target)) {
+    const root = recipientHandoffRoot(options, recipient);
     await mkdir(root, { recursive: true, mode: 0o700 });
     result[recipient] = await withMutationLock(join(root, ".transition-lock.sqlite"), async () => {
       const name = `${options.dispatchId}.json`;

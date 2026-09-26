@@ -15,11 +15,23 @@ import {
   enqueueJobHandoff,
   cancelJobHandoff,
   inspectUnresolvedJobHandoffs,
+  jobHandoffLocation,
   recoverJobHandoff,
 } from "../src/job-handoff.js";
 import { definitionFingerprint } from "../src/job-occurrences.js";
 
 describe("durable instance job handoff", () => {
+  it("resolves singleton and fleet handoff locations from the host config", () => {
+    expect(jobHandoffLocation({ stateDir: "/state" }, "isaac")).toEqual({
+      stateRoot: "/state", coordinatorStateDir: "/state", local: true, target: "local",
+    });
+    const fleet = { stateDir: "/root/instances/isaac", stateRoot: "/root", instanceId: "isaac" };
+    expect(jobHandoffLocation(fleet, "both-personal")).toEqual({
+      stateRoot: "/root", coordinatorStateDir: "/root/instances/isaac", local: false, target: "both-personal",
+    });
+    expect(() => jobHandoffLocation(fleet, undefined)).toThrow("Fleet job target is required");
+  });
+
   it.each([true, false])("finishes at durable preflight=%s even if the run never settles", async (accepted) => {
     const stateRoot = await mkdtemp(join(tmpdir(), "bridge-job-preflight-return-"));
     const stateDir = join(stateRoot, "instances", "isaac");

@@ -957,27 +957,19 @@ describe("google workspace extension", () => {
     const tools = new Map<string, ToolDefinition>();
     const root = await mkdtemp(join(tmpdir(), "google-places-extension-"));
     roots.push(root);
-    const run = vi.fn().mockResolvedValue({
-      place: {
-        id: "ChIJ123",
-        name: "Cafe",
-        formatted_address: "1 Main St",
-        google_maps_uri: "https://maps.google.com/?cid=123",
-      },
-    });
+    const identity = {
+      id: "ChIJ123",
+      displayName: { text: "Cafe" },
+      formattedAddress: "1 Main St",
+      googleMapsUri: "https://maps.google.com/?cid=123",
+    };
+    const fetchPlaceSearch = vi.fn().mockResolvedValue({ places: [identity, { ...identity, id: "ChIJ999" }] });
+    const fetchPlaceDetails = vi.fn().mockResolvedValue(identity);
+    const run = vi.fn();
     const module = await import(`${extensionUrl}?places=${Date.now()}`) as {
       registerGoogleWorkspaceTool(
         pi: { registerTool(tool: ToolDefinition): void },
-        options: {
-          resolveRuntime(): Promise<Record<string, unknown>>;
-          run(
-            runtime: Record<string, unknown>,
-            args: string[],
-            signal?: AbortSignal,
-            secrets?: { placesApiKeyFile: string },
-          ): Promise<unknown>;
-          now(): number;
-        },
+        options: Record<string, unknown>,
       ): void;
     };
     module.registerGoogleWorkspaceTool(
@@ -991,6 +983,8 @@ describe("google workspace extension", () => {
           placesDetailsMonthlyLimit: 1,
         }),
         run,
+        fetchPlaceSearch,
+        fetchPlaceDetails,
         now: () => Date.UTC(2026, 0, 1),
       },
     );
@@ -1021,15 +1015,22 @@ describe("google workspace extension", () => {
       query: "cafe",
     });
 
-    expect(run).toHaveBeenCalledTimes(2);
-    expect(run).toHaveBeenNthCalledWith(1, expect.any(Object), [
-      "--no-input", "--readonly", "--gmail-no-send", "--wrap-untrusted", "--json",
-      "maps", "places", "search", "cafe near me", "--language=en", "--region=US",
-    ], undefined, { placesApiKeyFile: "/private/places-api-key" });
-    expect(run).toHaveBeenNthCalledWith(2, expect.any(Object), [
-      "--no-input", "--readonly", "--gmail-no-send", "--wrap-untrusted", "--json",
-      "maps", "places", "details", "ChIJ123",
-    ], undefined, { placesApiKeyFile: "/private/places-api-key" });
+    expect(run).not.toHaveBeenCalled();
+    expect(fetchPlaceSearch).toHaveBeenCalledTimes(1);
+    expect(fetchPlaceSearch).toHaveBeenCalledWith({
+      apiKeyFile: "/private/places-api-key",
+      fields: "identity",
+      query: "cafe near me",
+      maxResults: 1,
+      language: "en",
+      region: "US",
+    });
+    expect(fetchPlaceDetails).toHaveBeenCalledTimes(1);
+    expect(fetchPlaceDetails).toHaveBeenCalledWith({
+      apiKeyFile: "/private/places-api-key",
+      fields: "identity",
+      placeId: "ChIJ123",
+    });
     expect(first.details).toMatchObject({
       ok: true,
       result: {
@@ -1060,13 +1061,24 @@ describe("google workspace extension", () => {
     const schema = JSON.stringify(tool.parameters);
     expect(schema).not.toMatch(/places_(?:status|override|reset|configure)/);
     expect(JSON.stringify([first, cached, details, blocked, invalid])).not.toContain("/private/places-api-key");
+    // SKU names are durable monthly-usage keys; renaming one silently resets its limit.
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(join(root, "google-places.db"));
+    try {
+      expect(db.prepare("SELECT sku, attempts FROM places_usage ORDER BY sku").all()).toEqual([
+        { sku: "places_details_basic", attempts: 1 },
+        { sku: "places_text_search_basic", attempts: 1 },
+      ]);
+    } finally {
+      db.close();
+    }
   });
 
   it("returns up to fifteen bounded Places candidates in one metered search", async () => {
     const tools = new Map<string, ToolDefinition>();
     const root = await mkdtemp(join(tmpdir(), "google-places-candidates-"));
     roots.push(root);
-    const fetchPlaceCandidates = vi.fn().mockResolvedValue({
+    const fetchPlaceSearch = vi.fn().mockResolvedValue({
       places: Array.from({ length: 16 }, (_, index) => ({
         id: `ChIJ${index}`,
         displayName: { text: `Coffee shop ${index}` },
@@ -1095,7 +1107,7 @@ describe("google workspace extension", () => {
           placesCandidatesMonthlyLimit: 1,
         }),
         run: vi.fn(),
-        fetchPlaceCandidates,
+        fetchPlaceSearch,
         now: () => Date.UTC(2026, 0, 1),
       },
     );
@@ -1111,9 +1123,10 @@ describe("google workspace extension", () => {
     const first = await tool.execute("candidate-1", request);
     const cached = await tool.execute("candidate-2", request);
 
-    expect(fetchPlaceCandidates).toHaveBeenCalledTimes(1);
-    expect(fetchPlaceCandidates).toHaveBeenCalledWith(expect.objectContaining({
+    expect(fetchPlaceSearch).toHaveBeenCalledTimes(1);
+    expect(fetchPlaceSearch).toHaveBeenCalledWith(expect.objectContaining({
       apiKeyFile: "/private/places-api-key",
+      fields: "candidates",
       query: "coffee shops in Utah Valley",
       maxResults: 15,
       language: "en",
@@ -1167,7 +1180,7 @@ describe("google workspace extension", () => {
           placesCandidatesMonthlyLimit: 1,
         }),
         run: vi.fn(),
-        fetchPlaceCandidates: vi.fn().mockResolvedValue({}),
+        fetchPlaceSearch: vi.fn().mockResolvedValue({}),
       },
     );
 
@@ -1257,6 +1270,7 @@ describe("google workspace extension", () => {
     expect(fetchPlaceDetails).toHaveBeenCalledTimes(2);
     expect(fetchPlaceDetails).toHaveBeenNthCalledWith(1, expect.objectContaining({
       apiKeyFile: "/private/places-api-key",
+      fields: "rich",
       placeId: "ChIJ123",
       language: "en",
       region: "US",
@@ -1332,11 +1346,12 @@ describe("google workspace extension", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
     const module = await import(`${extensionUrl}?places-http=${Date.now()}`) as {
-      fetchRichPlaceDetails(options: Record<string, unknown>): Promise<unknown>;
+      fetchPlaceDetails(options: Record<string, unknown>): Promise<unknown>;
     };
 
-    await expect(module.fetchRichPlaceDetails({
+    await expect(module.fetchPlaceDetails({
       apiKeyFile: keyFile,
+      fields: "rich",
       placeId: "ChIJ123",
       language: "en",
       region: "US",
@@ -1360,11 +1375,12 @@ describe("google workspace extension", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
     const module = await import(`${extensionUrl}?places-candidate-http=${Date.now()}`) as {
-      fetchPlaceCandidates(options: Record<string, unknown>): Promise<unknown>;
+      fetchPlaceSearch(options: Record<string, unknown>): Promise<unknown>;
     };
 
-    await expect(module.fetchPlaceCandidates({
+    await expect(module.fetchPlaceSearch({
       apiKeyFile: keyFile,
+      fields: "candidates",
       query: "coffee shops in Utah Valley",
       maxResults: 15,
       language: "en",
@@ -1387,24 +1403,51 @@ describe("google workspace extension", () => {
     expect(requestInit.headers["X-Goog-FieldMask"]).not.toContain("reviews");
   });
 
+  it("uses the fixed identity-only HTTPS field masks for identity lookups", async () => {
+    const root = await mkdtemp(join(tmpdir(), "google-places-identity-http-"));
+    roots.push(root);
+    const keyFile = join(root, "places-key");
+    await writeFile(keyFile, "secret-api-key\n", { mode: 0o600 });
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const module = await import(`${extensionUrl}?places-identity-http=${Date.now()}`) as {
+      fetchPlaceSearch(options: Record<string, unknown>): Promise<unknown>;
+      fetchPlaceDetails(options: Record<string, unknown>): Promise<unknown>;
+    };
+
+    await module.fetchPlaceSearch({ apiKeyFile: keyFile, fields: "identity", query: "cafe", maxResults: 1 });
+    await module.fetchPlaceDetails({ apiKeyFile: keyFile, fields: "identity", placeId: "ChIJ123" });
+    await expect(module.fetchPlaceDetails({ apiKeyFile: keyFile, fields: "toString", placeId: "ChIJ123" }))
+      .rejects.toThrow("Google Workspace command failed");
+
+    const calls = fetchMock.mock.calls as unknown as Array<[URL, { headers: Record<string, string>; body?: string }]>;
+    expect(calls).toHaveLength(2);
+    expect(calls[0]![1].headers["X-Goog-FieldMask"]).toBe(
+      "places.id,places.displayName,places.formattedAddress,places.googleMapsUri",
+    );
+    expect(JSON.parse(calls[0]![1].body!)).toEqual({ textQuery: "cafe", pageSize: 1 });
+    expect(String(calls[1]![0])).toBe("https://places.googleapis.com/v1/places/ChIJ123");
+    expect(calls[1]![1].headers["X-Goog-FieldMask"]).toBe("id,displayName,formattedAddress,googleMapsUri");
+  });
+
   it("rejects oversized and failed rich-details HTTP responses with a redacted error", async () => {
     const root = await mkdtemp(join(tmpdir(), "google-places-http-errors-"));
     roots.push(root);
     const keyFile = join(root, "places-key");
     await writeFile(keyFile, "secret-api-key\n", { mode: 0o600 });
     const module = await import(`${extensionUrl}?places-http-errors=${Date.now()}`) as {
-      fetchRichPlaceDetails(options: Record<string, unknown>): Promise<unknown>;
+      fetchPlaceDetails(options: Record<string, unknown>): Promise<unknown>;
     };
-    const options = { apiKeyFile: keyFile, placeId: "ChIJ123" };
+    const options = { apiKeyFile: keyFile, fields: "rich", placeId: "ChIJ123" };
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("upstream leaked secret", { status: 500 })));
-    await expect(module.fetchRichPlaceDetails(options)).rejects.toThrow("Google Workspace command failed");
+    await expect(module.fetchPlaceDetails(options)).rejects.toThrow("Google Workspace command failed");
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("x", {
       status: 200,
       headers: { "content-length": "999999" },
     })));
-    await expect(module.fetchRichPlaceDetails(options)).rejects.toThrow("Google Workspace command failed");
+    await expect(module.fetchPlaceDetails(options)).rejects.toThrow("Google Workspace command failed");
   });
 
   it("requires an explicit or configured account and returns redacted failures", async () => {
@@ -1452,10 +1495,8 @@ describe("google workspace extension", () => {
     const root = await mkdtemp(join(tmpdir(), "gog-runner-"));
     roots.push(root);
     const passwordPath = join(root, "keyring-password");
-    const placesApiKeyPath = join(root, "places-api-key");
     const executable = join(root, "fake-gog.mjs");
     await writeFile(passwordPath, "keyring-secret\n", { mode: 0o600 });
-    await writeFile(placesApiKeyPath, "places-secret\n", { mode: 0o600 });
     await writeFile(
       executable,
       [
@@ -1467,6 +1508,7 @@ describe("google workspace extension", () => {
     );
     await chmod(executable, 0o700);
     process.env.PI_CREDENTIAL_ENGINEERING_SHOULD_NOT_LEAK = "ambient-secret";
+    process.env.GOG_PLACES_API_KEY = "ambient-places-secret";
     const module = await import(`${extensionUrl}?runner=${Date.now()}`) as {
       runGogJson(options: {
         binary: string;
@@ -1475,7 +1517,6 @@ describe("google workspace extension", () => {
         args: string[];
         timeoutMs?: number;
         maxOutputBytes?: number;
-        placesApiKeyFile?: string;
       }): Promise<unknown>;
     };
 
@@ -1485,21 +1526,9 @@ describe("google workspace extension", () => {
         passwordFile: passwordPath,
         gogHome: root,
         args: ["test"],
-        placesApiKeyFile: placesApiKeyPath,
       }),
-    ).resolves.toEqual({ password: "keyring-secret", places: "places-secret", home: root });
-
-    await chmod(placesApiKeyPath, 0o640);
-    await expect(
-      module.runGogJson({
-        binary: executable,
-        passwordFile: passwordPath,
-        gogHome: root,
-        args: ["test"],
-        placesApiKeyFile: placesApiKeyPath,
-      }),
-    ).rejects.toThrow("Google Workspace command failed");
-    await chmod(placesApiKeyPath, 0o600);
+    ).resolves.toEqual({ password: "keyring-secret", home: root });
+    delete process.env.GOG_PLACES_API_KEY;
 
     await writeFile(executable, "#!/usr/bin/env node\nprocess.stdout.write('not json')\n", {
       mode: 0o700,

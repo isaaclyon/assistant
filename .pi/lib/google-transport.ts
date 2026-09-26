@@ -3,24 +3,30 @@ import { constants } from "node:fs";
 import { access, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
+import { MAX_PLACE_CANDIDATES } from "./google-operations.ts";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
 const MAX_PASSWORD_BYTES = 4 * 1024;
 const FAILURE_MESSAGE = "Google Workspace command failed";
 const MAX_PLACES_MONTHLY_LIMIT = 1_000_000;
-const MAX_PLACE_CANDIDATES = 15;
-const CANDIDATE_PLACE_FIELDS = [
-  "places.id", "places.displayName", "places.formattedAddress", "places.googleMapsUri",
-  "places.rating", "places.userRatingCount",
-].join(",");
-const RICH_PLACE_FIELDS = [
-  "id", "displayName", "formattedAddress", "googleMapsUri", "rating",
-  "userRatingCount", "regularOpeningHours", "nationalPhoneNumber", "websiteUri",
-  "priceLevel", "reviews.rating", "reviews.text", "reviews.originalText",
-  "reviews.publishTime", "reviews.relativePublishTimeDescription",
-  "reviews.authorAttribution", "reviews.googleMapsUri", "reviews.visitDate",
-].join(",");
+const IDENTITY_PLACE_FIELDS = ["id", "displayName", "formattedAddress", "googleMapsUri"];
+const SEARCH_FIELD_MASKS = {
+  identity: IDENTITY_PLACE_FIELDS,
+  candidates: [...IDENTITY_PLACE_FIELDS, "rating", "userRatingCount"],
+} as const;
+const DETAILS_FIELD_MASKS = {
+  identity: IDENTITY_PLACE_FIELDS,
+  rich: [
+    ...IDENTITY_PLACE_FIELDS, "rating", "userRatingCount", "regularOpeningHours",
+    "nationalPhoneNumber", "websiteUri", "priceLevel", "reviews.rating", "reviews.text",
+    "reviews.originalText", "reviews.publishTime", "reviews.relativePublishTimeDescription",
+    "reviews.authorAttribution", "reviews.googleMapsUri", "reviews.visitDate",
+  ],
+} as const;
+
+export type PlaceSearchFields = keyof typeof SEARCH_FIELD_MASKS;
+export type PlaceDetailsFields = keyof typeof DETAILS_FIELD_MASKS;
 
 export interface GoogleRuntime {
   account?: string;
@@ -34,7 +40,7 @@ export interface GoogleRuntime {
   placesCandidatesMonthlyLimit?: number;
 }
 
-function selectedEnvironment(password: string, gogHome: string, placesApiKey?: string): NodeJS.ProcessEnv {
+function selectedEnvironment(password: string, gogHome: string): NodeJS.ProcessEnv {
   const selected: NodeJS.ProcessEnv = {
     HOME: process.env.HOME ?? homedir(),
     PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
@@ -42,7 +48,6 @@ function selectedEnvironment(password: string, gogHome: string, placesApiKey?: s
     NO_COLOR: "1",
     GOG_KEYRING_PASSWORD: password,
     GOG_HOME: gogHome,
-    ...(placesApiKey ? { GOG_PLACES_API_KEY: placesApiKey } : {}),
   };
   for (const key of ["LC_ALL", "TMPDIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"]) {
     const value = process.env[key];
@@ -124,23 +129,27 @@ async function fetchPlacesJson(options: {
   }
 }
 
-export async function fetchRichPlaceDetails(options: {
+export async function fetchPlaceDetails(options: {
   apiKeyFile: string;
+  fields: PlaceDetailsFields;
   placeId: string;
   language?: string;
   region?: string;
   signal?: AbortSignal;
 }): Promise<unknown> {
   return fetchPlacesJson(options, () => {
+    const fields = Object.hasOwn(DETAILS_FIELD_MASKS, options.fields) ? DETAILS_FIELD_MASKS[options.fields] : undefined;
+    if (!fields) throw new Error(FAILURE_MESSAGE);
     const url = new URL(`https://places.googleapis.com/v1/places/${encodeURIComponent(options.placeId)}`);
     if (options.language) url.searchParams.set("languageCode", options.language);
     if (options.region) url.searchParams.set("regionCode", options.region);
-    return { url, fieldMask: RICH_PLACE_FIELDS };
+    return { url, fieldMask: fields.join(",") };
   });
 }
 
-export async function fetchPlaceCandidates(options: {
+export async function fetchPlaceSearch(options: {
   apiKeyFile: string;
+  fields: PlaceSearchFields;
   query: string;
   maxResults: number;
   language?: string;
@@ -148,12 +157,16 @@ export async function fetchPlaceCandidates(options: {
   signal?: AbortSignal;
 }): Promise<unknown> {
   return fetchPlacesJson(options, () => {
-    if (!Number.isInteger(options.maxResults) || options.maxResults < 1 || options.maxResults > MAX_PLACE_CANDIDATES) {
+    const fields = Object.hasOwn(SEARCH_FIELD_MASKS, options.fields) ? SEARCH_FIELD_MASKS[options.fields] : undefined;
+    if (
+      !fields || !Number.isInteger(options.maxResults) ||
+      options.maxResults < 1 || options.maxResults > MAX_PLACE_CANDIDATES
+    ) {
       throw new Error(FAILURE_MESSAGE);
     }
     return {
       url: new URL("https://places.googleapis.com/v1/places:searchText"),
-      fieldMask: CANDIDATE_PLACE_FIELDS,
+      fieldMask: fields.map((field) => `places.${field}`).join(","),
       body: {
         textQuery: options.query,
         pageSize: options.maxResults,
@@ -172,7 +185,6 @@ export async function runGogJson(options: {
   signal?: AbortSignal;
   timeoutMs?: number;
   maxOutputBytes?: number;
-  placesApiKeyFile?: string;
 }): Promise<unknown> {
   try {
     if (options.signal?.aborted) throw new Error(FAILURE_MESSAGE);
@@ -181,9 +193,6 @@ export async function runGogJson(options: {
     }
     await access(options.binary, constants.X_OK);
     const password = await readPrivatePassword(options.passwordFile);
-    const placesApiKey = options.placesApiKeyFile
-      ? await readPrivatePassword(options.placesApiKeyFile)
-      : undefined;
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
     if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || !Number.isInteger(maxOutputBytes) || maxOutputBytes < 1) {
@@ -206,7 +215,7 @@ export async function runGogJson(options: {
       };
       const abort = () => fail();
       const child = spawn(options.binary, options.args, {
-        env: selectedEnvironment(password, options.gogHome, placesApiKey),
+        env: selectedEnvironment(password, options.gogHome),
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
         detached: process.platform !== "win32",
