@@ -135,6 +135,11 @@ add tests and source, run `npm run check` and `npm run build`, then commit, merg
 and deploy it before scheduling the job. Existing deployed checkers can be
 scheduled by editing `jobs.json` alone.
 
+A job may pass settings to a checker with `checker.args`: at most 8 camelCase
+keys whose values are non-empty strings (at most 1 KB) or lists of 1-20 short
+strings, 2 KB in total. The host passes them to the checker as one JSON argument.
+Changing args resets the job's baseline.
+
 `checker.id` must match `[a-z0-9-]` and maps to
 `dist/src/checkers/<id>.js`. The host runs it directly with the current Node
 executable and a 60-second timeout. The process must:
@@ -164,6 +169,27 @@ unrestricted page content; checker output is untrusted event data.
 
 Do not embed credentials in job definitions or checker IDs. Checkers obtain
 credentials from the bridge's existing environment or credential stores.
+
+### Deployed reusable checkers
+
+`web-page-items` watches one public web page:
+
+```json
+{ "id": "web-page-items", "args": { "url": "https://venue.example.com/shows", "contains": ["Oct 4", "tickets"] } }
+```
+
+- `url` is required and must be a public `https://` address. Local, private,
+  tailnet, and IP-address hosts are rejected.
+- `contains` is optional: a phrase or list of phrases (case-insensitive). Only
+  text blocks containing one of them are kept. Use it on long pages so the
+  relevant blocks fit in the 4 KB observation; `context.truncated` reports when
+  blocks were dropped.
+- It emits `{ "items": [{ "id": "<content hash>", "text": "..." }] }`, so it pairs
+  with `semantic-match` (an edited block counts as new). It also works with
+  `changed` for "tell me when anything on this part of the page changes".
+- It reads server-rendered HTML only. Pages that need JavaScript or a login fail
+  with "no readable text"; say so rather than scheduling a watch that cannot see
+  the page.
 
 ### Rules
 
@@ -210,6 +236,26 @@ with the matching items and their probabilities:
   },
   "context": "Landlord: Maple Property Management (maplepm.com), contact Dana Ortiz.",
   "notifyAt": 0.5
+}
+```
+
+A complete page watch:
+
+```json
+{
+  "id": "lumineers-tickets", "type": "heartbeat", "target": "isaac",
+  "schedule": "*/30 8-22 * * *", "tz": "America/Denver",
+  "checker": { "id": "web-page-items", "args": { "url": "https://venue.example.com/shows", "contains": "Lumineers" } },
+  "rule": {
+    "type": "semantic-match",
+    "question": "Does the text in {item} say that tickets for The Lumineers show are on sale now?",
+    "criteria": {
+      "true": "Tickets can be bought now, including presale or limited availability",
+      "false": "Tickets are sold out, not yet on sale, only announced for a future date, or the text is about another show"
+    },
+    "notifyAt": 0.5
+  },
+  "onTrigger": { "type": "prompt", "prompt": "Open the page, confirm tickets are really on sale, and tell me how to buy them." }
 }
 ```
 

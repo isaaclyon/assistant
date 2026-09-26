@@ -17,8 +17,12 @@ export interface HeartbeatObservationV1 {
   context?: JsonObject;
 }
 
+/** Bounded settings a job passes to its checker as one JSON argv argument. */
+export type HeartbeatCheckerArgs = Record<string, string | string[]>;
+
 export interface HeartbeatChecker {
   id: string;
+  args?: HeartbeatCheckerArgs;
 }
 
 export interface ChangedRule {
@@ -119,6 +123,12 @@ const MAX_OBSERVATION_BYTES = 4 * 1024;
 const MAX_DISPLAY_BYTES = 1024;
 const DURATION_PATTERN = /^(\d+)([smhd])$/;
 const CHECKER_ID_PATTERN = /^[a-z0-9-]{1,64}$/;
+const CHECKER_ARG_KEY_PATTERN = /^[a-z][a-zA-Z0-9]{0,31}$/;
+const MAX_CHECKER_ARG_KEYS = 8;
+const MAX_CHECKER_ARG_STRING_BYTES = 1024;
+const MAX_CHECKER_ARG_LIST_ITEMS = 20;
+const MAX_CHECKER_ARG_LIST_ITEM_BYTES = 200;
+const MAX_CHECKER_ARGS_BYTES = 2048;
 const ITEM_PLACEHOLDER = "{item}";
 const MAX_SEMANTIC_TEXT_BYTES = 1024;
 const MAX_SEMANTIC_CONTEXT_BYTES = 2048;
@@ -152,6 +162,29 @@ function isBoundedText(value: unknown, maxBytes: number): value is string {
     value.trim().length > 0 &&
     Buffer.byteLength(value, "utf8") <= maxBytes
   );
+}
+
+function parseCheckerArgs(value: unknown): HeartbeatCheckerArgs | undefined {
+  if (!isRecord(value)) return undefined;
+  const entries = Object.entries(value);
+  if (entries.length === 0 || entries.length > MAX_CHECKER_ARG_KEYS) return undefined;
+  const args: HeartbeatCheckerArgs = {};
+  for (const [key, entry] of entries) {
+    if (!CHECKER_ARG_KEY_PATTERN.test(key)) return undefined;
+    if (isBoundedText(entry, MAX_CHECKER_ARG_STRING_BYTES)) {
+      args[key] = entry;
+    } else if (
+      Array.isArray(entry) &&
+      entry.length > 0 &&
+      entry.length <= MAX_CHECKER_ARG_LIST_ITEMS &&
+      entry.every((item) => isBoundedText(item, MAX_CHECKER_ARG_LIST_ITEM_BYTES))
+    ) {
+      args[key] = [...(entry as string[])];
+    } else {
+      return undefined;
+    }
+  }
+  return Buffer.byteLength(JSON.stringify(args), "utf8") <= MAX_CHECKER_ARGS_BYTES ? args : undefined;
 }
 
 function parseSemanticMatchRule(
@@ -284,8 +317,18 @@ export function parseHeartbeatFields(
     if (typeof checkerId !== "string" || !CHECKER_ID_PATTERN.test(checkerId)) {
       errors.push(`${label}: "checker.id" must match ${CHECKER_ID_PATTERN}`);
       valid = false;
-    } else {
+    } else if (checkerValue.args === undefined) {
       checker = { id: checkerId };
+    } else {
+      const args = parseCheckerArgs(checkerValue.args);
+      if (args === undefined) {
+        errors.push(
+          `${label}: "checker.args" must be an object of at most ${MAX_CHECKER_ARG_KEYS} camelCase keys whose values are non-empty strings (at most 1 KB) or lists of 1-${MAX_CHECKER_ARG_LIST_ITEMS} short strings, at most 2 KB in total`,
+        );
+        valid = false;
+      } else {
+        checker = { id: checkerId, args };
+      }
     }
   }
 
@@ -372,11 +415,14 @@ export function resolveHeartbeatCheckerPath(
 export function runCompiledHeartbeatChecker(
   checkerId: string,
   timeoutMs: number,
+  args?: HeartbeatCheckerArgs,
 ): Promise<HeartbeatCheckResult> {
+  const argv = [resolveHeartbeatCheckerPath(checkerId)];
+  if (args !== undefined) argv.push(JSON.stringify(args));
   return new Promise((resolve) => {
     execFile(
       process.execPath,
-      [resolveHeartbeatCheckerPath(checkerId)],
+      argv,
       { timeout: timeoutMs, maxBuffer: 1024 * 1024 },
       (error, stdout) => {
         resolve({ ok: !error, stdout: stdout ?? "" });
@@ -679,7 +725,11 @@ export function createHeartbeatRunner({
   judge,
 }: {
   stateDir: string;
-  runCheck: (checkerId: string, timeoutMs: number) => Promise<HeartbeatCheckResult>;
+  runCheck: (
+    checkerId: string,
+    timeoutMs: number,
+    args?: HeartbeatCheckerArgs,
+  ) => Promise<HeartbeatCheckResult>;
   inject: (
     prompt: string,
     job: StatefulHeartbeatDefinition,
@@ -761,7 +811,10 @@ export function createHeartbeatRunner({
       state.lastAttemptAt = now;
       let result: HeartbeatCheckResult;
       try {
-        result = await runCheck(job.checker.id, checkTimeoutMs);
+        result =
+          job.checker.args === undefined
+            ? await runCheck(job.checker.id, checkTimeoutMs)
+            : await runCheck(job.checker.id, checkTimeoutMs, job.checker.args);
       } catch (error) {
         await persistFailure(job, state, now);
         const message = error instanceof Error ? error.message : String(error);

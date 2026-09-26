@@ -76,7 +76,10 @@ rule sends only newly observed checker items to TypeSafe's Jev model, one pinned
 yes/no question per item, and wakes the agent only for items at or above the
 job's threshold. A judge failure keeps the previous observation so the same items
 are judged again; see
-[ADR-0031](docs/adr/0031-judge-heartbeat-items-with-jev.md).
+[ADR-0031](docs/adr/0031-judge-heartbeat-items-with-jev.md). Jobs may pass
+bounded `checker.args` to a checker as one JSON argument, which lets the reusable
+`web-page-items` checker watch any public HTTPS page; see
+[ADR-0032](docs/adr/0032-pass-bounded-arguments-to-heartbeat-checkers.md).
 
 The places extension presents its deterministic Telegram UI through a
 pi-telegram registered section. Slash commands and active-turn tool handoffs

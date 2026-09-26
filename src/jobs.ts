@@ -7,6 +7,7 @@ import { isDeepStrictEqual } from "node:util";
 
 import {
   createHeartbeatRunner,
+  type HeartbeatCheckerArgs,
   parseHeartbeatFields,
   runCompiledHeartbeatChecker,
   type StatefulHeartbeatDefinition,
@@ -339,7 +340,11 @@ export interface JobSchedulerOptions {
   nowMs?: () => number;
   tickIntervalMs?: number;
   checkTimeoutMs?: number;
-  runCheck?: (checkerId: string, timeoutMs: number) => Promise<CheckResult>;
+  runCheck?: (
+    checkerId: string,
+    timeoutMs: number,
+    args?: HeartbeatCheckerArgs,
+  ) => Promise<CheckResult>;
   judge?: SemanticJudge;
 }
 

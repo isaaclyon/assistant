@@ -204,6 +204,7 @@ describe("parseJobsFile", () => {
           heartbeatJob({ id: "shell-check", checker: { command: "touch /tmp/not-allowed" } }),
           heartbeatJob({ id: "bad-rule", rule: { type: "condition", operator: "less-than", target: 0, for: "soon", notify: "once-per-episode" } }),
           heartbeatJob({ id: "bad-action", onTrigger: { type: "command", prompt: "p" } }),
+          heartbeatJob({ id: "bad-args", checker: { id: "web-page-items", args: { url: "", "Bad-Key": "x" } } }),
           heartbeatJob({ id: "no-placeholder", rule: { ...semanticRule, question: "Is this relevant?" } }),
           heartbeatJob({ id: "bad-threshold", rule: { ...semanticRule, notifyAt: 1 } }),
           heartbeatJob({ id: "no-criteria", rule: { ...semanticRule, criteria: { true: "yes" } } }),
@@ -219,6 +220,7 @@ describe("parseJobsFile", () => {
     expect(invalid).toThrow(/shell-check.*"checker.id"/);
     expect(invalid).toThrow(/bad-rule.*"for"/);
     expect(invalid).toThrow(/bad-action.*"onTrigger"/);
+    expect(invalid).toThrow(/bad-args.*"checker.args"/);
     expect(invalid).toThrow(/no-placeholder.*"question".*\{item\}/);
     expect(invalid).toThrow(/bad-threshold.*"notifyAt"/);
     expect(invalid).toThrow(/no-criteria.*"criteria"/);
@@ -602,6 +604,31 @@ describe("startJobScheduler", () => {
     expect(prompt).toContain("Move-out walkthrough");
     expect(prompt).toContain('"probability": 0.91');
     expect(prompt).not.toContain("October rent reminder");
+  });
+
+  it("passes checker args and resets the baseline when they change", async () => {
+    const runCheck = vi.fn(async () => ({ ok: true, stdout: inbox({ id: "a", subject: "x" }) }));
+    const judge = vi.fn();
+    const { stateDir, now } = await makeScheduler({ runCheck, judge });
+    const pageJob = (url: string) =>
+      heartbeatJob({ checker: { id: "web-page-items", args: { url, contains: ["tickets"] } }, rule: semanticRule });
+    await writeJobs(stateDir, [pageJob("https://venue.example.com/a")]);
+    await scheduler!.reload();
+    now.ms = Date.parse("2026-07-18T11:00:05Z");
+    await scheduler!.tick();
+    expect(runCheck).toHaveBeenLastCalledWith("web-page-items", expect.any(Number), {
+      url: "https://venue.example.com/a",
+      contains: ["tickets"],
+    });
+
+    runCheck.mockResolvedValue({ ok: true, stdout: inbox({ id: "b", subject: "y" }) });
+    await writeJobs(stateDir, [pageJob("https://venue.example.com/b")]);
+    await scheduler!.reload();
+    now.ms = Date.parse("2026-07-18T12:00:05Z");
+    await scheduler!.tick();
+    expect(judge).not.toHaveBeenCalled();
+    const state = JSON.parse(await readFile(join(stateDir, "checkers", "hb.json"), "utf8"));
+    expect(state.lastObservation.value).toEqual({ items: [{ id: "b", subject: "y" }] });
   });
 
   it("re-judges the same new items after a judge failure instead of treating it as no", async () => {
