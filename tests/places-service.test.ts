@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PlacesService, PlacesServiceError } from "../src/places-service.js";
 import { openPlacesStore, type PlacesStore } from "../src/places-store.js";
@@ -24,6 +24,7 @@ describe("PlacesService", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     store.close();
     await rm(root, { recursive: true, force: true });
   });
@@ -155,5 +156,60 @@ describe("PlacesService", () => {
     expect(() => service.createCategory("bakeries")).toThrowError(
       expect.objectContaining({ code: "DUPLICATE_CATEGORY" }),
     );
+  });
+
+  it.each([
+    "stale private database path",
+    "revision metadata failed",
+    "Undo is no longer available: private database path",
+    "Only an empty category can be deleted: private database path",
+    "UNIQUE constraint failed: category.normalized_name",
+    "UNIQUE constraint failed: place.category_id, place.normalized_name",
+  ])("sanitizes unexpected failures regardless of their wording: %s", (message) => {
+    const category = service.createCategory("Temporary");
+    vi.spyOn(store, "deleteCategory").mockImplementation(() => { throw new Error(message); });
+    expect(() => service.deleteCategory(category.id)).toThrowError(expect.objectContaining({
+      code: "PERSISTENCE_ERROR",
+      message: "The places database could not accept that action. Nothing was changed.",
+    }));
+  });
+
+  it("preserves stale comparison and deletion recovery codes", () => {
+    const category = service.createCategory("Test");
+    const added = service.start({ name: "First", categoryId: category.id, sentiment: "liked" });
+    if (added.kind !== "complete") throw new Error("expected completion");
+    const snapshot = service.deletionSnapshot("place", added.place.id);
+    service.editPlace(added.place.id, { notes: "Changed" });
+    expect(() => service.deletePlace(added.place.id, snapshot)).toThrowError(
+      expect.objectContaining({ code: "STALE_ACTION" }),
+    );
+    const comparison = service.start({ name: "Second", categoryId: category.id, sentiment: "liked" });
+    if (comparison.kind !== "compare") throw new Error("expected comparison");
+    expect(() => service.answer({
+      insertionId: comparison.insertionId, revision: comparison.revision,
+      existingPlaceId: "wrong-target", winner: "candidate",
+    })).toThrowError(expect.objectContaining({ code: "STALE_ACTION" }));
+    expect(service.resume()).toEqual(comparison);
+    expect(() => service.undoAddition(added.undoInsertionId!)).toThrowError(
+      expect.objectContaining({ code: "INVALID_ACTION" }),
+    );
+    expect(() => service.deleteCategory(category.id)).toThrowError(
+      expect.objectContaining({ code: "INVALID_ACTION" }),
+    );
+  });
+
+  it("reports duplicate renames while preserving published data", () => {
+    const category = service.createCategory("Test");
+    const other = service.createCategory("Other");
+    expect(() => service.renameCategory(other.id, " test ")).toThrowError(
+      expect.objectContaining({ code: "DUPLICATE_CATEGORY" }),
+    );
+    const first = service.start({ name: "First", categoryId: category.id, sentiment: "liked" });
+    const second = service.start({ name: "Second", categoryId: category.id, sentiment: "disliked" });
+    if (first.kind !== "complete" || second.kind !== "complete") throw new Error("expected completions");
+    expect(() => service.editPlace(second.place.id, { name: " first " })).toThrowError(
+      expect.objectContaining({ code: "DUPLICATE_PLACE" }),
+    );
+    expect(service.listRanking(category.id).map((place) => place.name)).toEqual(["First", "Second"]);
   });
 });
