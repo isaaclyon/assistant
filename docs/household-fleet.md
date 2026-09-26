@@ -202,7 +202,12 @@ pending merely to pass migration. Exact current one-shot terminal evidence can
 seed suppression without fabricating an occurrence. A legacy `fired[id]` alone
 is insufficient; a reused ID or changed definition requires operator resolution.
 Additional coordinator roots and singleton-to-fleet job-state relocation also
-require explicit reconciliation rather than silent copying.
+require explicit reconciliation rather than silent copying. After a fleet
+migration, retire the stale singleton `jobs.json`/`jobs-state.json` from the
+state root and any bridge unit file whose release was pruned: the snapshot must
+copy every unit's release and refuses a unit it cannot prove. Move them to a
+private archive outside the state root and unit directory instead of deleting
+them.
 
 On failure, leave the fleet stopped and disabled. Do not delete the maintenance
 marker, a ledger, or recipient files to make deployment pass. Find the private
