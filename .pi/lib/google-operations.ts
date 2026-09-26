@@ -71,16 +71,6 @@ export function commonArgs(account: string): string[] {
   ];
 }
 
-export function commonPlacesArgs(): string[] {
-  return [
-    "--no-input",
-    "--readonly",
-    "--gmail-no-send",
-    "--wrap-untrusted",
-    "--json",
-  ];
-}
-
 export function parseWindow(
   input: Record<string, unknown>,
   maxDays: number,
@@ -480,32 +470,6 @@ export function parseContact(payload: unknown, expectedResource: string): {
   return { contact, truncated: emails.truncated || phones.truncated };
 }
 
-export function parseGooglePlace(payload: unknown): Record<string, unknown> {
-  if (!payload || typeof payload !== "object") throw new Error(FAILURE_MESSAGE);
-  const rawPlace = (payload as { place?: unknown }).place;
-  if (!rawPlace || typeof rawPlace !== "object" || Array.isArray(rawPlace)) throw new Error(FAILURE_MESSAGE);
-  const item = rawPlace as Record<string, unknown>;
-  const id = requiredSafeString(item.id, 256);
-  if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(FAILURE_MESSAGE);
-  const place: Record<string, unknown> = { id, untrusted: true };
-  const displayName = contactValue(item.name, 500);
-  if (displayName) place.displayName = displayName.output;
-  const formattedAddress = contactValue(item.formatted_address, 1_000);
-  if (formattedAddress) place.formattedAddress = formattedAddress.output;
-  const mapsUri = requiredSafeString(item.google_maps_uri, 2_048);
-  if (mapsUri) {
-    try {
-      const parsed = new URL(mapsUri);
-      if (parsed.protocol === "https:" && !parsed.username && !parsed.password) {
-        place.googleMapsUri = mapsUri;
-      }
-    } catch {
-      // Invalid remote URLs are excluded from the typed result.
-    }
-  }
-  return place;
-}
-
 function parseGooglePlaceCandidate(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const item = value as Record<string, unknown>;
@@ -554,6 +518,18 @@ export function parseGooglePlaceCandidates(payload: unknown, limit: number): {
     places,
     truncated: item.places.length > limit || Boolean(requiredSafeString(item.nextPageToken, 2_048)),
   };
+}
+
+export function parseGooglePlace(payload: unknown, expectedPlaceId: string): Record<string, unknown> {
+  const place = parseGooglePlaceCandidate(payload);
+  if (!place || place.id !== expectedPlaceId) throw new Error(FAILURE_MESSAGE);
+  return place;
+}
+
+export function parseFirstGooglePlace(payload: unknown): Record<string, unknown> {
+  const [place] = parseGooglePlaceCandidates(payload, 1).places;
+  if (!place) throw new Error(FAILURE_MESSAGE);
+  return place;
 }
 
 function safeHttpsUrl(value: unknown): string | undefined {

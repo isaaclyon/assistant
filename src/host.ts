@@ -31,7 +31,7 @@ import {
 } from "./config.js";
 import { type InboundInbox, openInbox } from "./inbox.js";
 import { type JobDispatch, type JobScheduler, startJobScheduler } from "./jobs.js";
-import { cancelJobHandoff, drainJobHandoffs, enqueueJobHandoff } from "./job-handoff.js";
+import { cancelJobHandoff, drainJobHandoffs, enqueueJobHandoff, jobHandoffLocation } from "./job-handoff.js";
 import { injectJobPrompt as injectRuntimeJobPrompt } from "./job-prompt.js";
 import { createPiSubagentRunner } from "./subagent-process.js";
 import { type SubagentService, startSubagentService } from "./subagents.js";
@@ -800,17 +800,12 @@ export async function startBridgeHost({
       dispatch?: JobDispatch,
     ): Promise<void> => {
       if (!dispatch?.definitionFingerprint) throw new Error("Job occurrence identity is required");
-      const fleet = "instanceId" in config;
-      if (fleet && !dispatch.target) throw new Error("Fleet job target is required");
       await enqueueJobHandoff({
-        stateRoot: fleet ? config.stateRoot : config.stateDir,
-        coordinatorStateDir: config.stateDir,
-        local: !fleet,
+        ...jobHandoffLocation(config, dispatch.target),
         eventId: dispatch.eventId,
         definitionFingerprint: dispatch.definitionFingerprint,
         jobId: dispatch.jobId,
         jobType: dispatch.jobType,
-        target: fleet ? dispatch.target! : "local",
         prompt,
       });
       // Publication is the scheduler's boundary. Pi runs independently and
@@ -825,15 +820,10 @@ export async function startBridgeHost({
         inject: dispatchJobPrompt,
         cancel: async (dispatch) => {
           if (!dispatch.occurrenceId) throw new Error("Job occurrence identity is required");
-          const fleet = "instanceId" in config;
-          if (fleet && !dispatch.target) throw new Error("Fleet job target is required");
           await cancelJobHandoff({
-            stateRoot: fleet ? config.stateRoot : config.stateDir,
-            coordinatorStateDir: config.stateDir,
-            local: !fleet,
+            ...jobHandoffLocation(config, dispatch.target),
             dispatchId: dispatch.occurrenceId,
             jobId: dispatch.jobId,
-            target: fleet ? dispatch.target! : "local",
           });
         },
         logger,

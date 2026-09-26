@@ -124,13 +124,13 @@ to enable multi-place search. All three accept integers from 0 through
 blocks all cache misses. Configure limits below the provider budget because
 failed attempts remain counted.
 
-`places_search` uses gogcli's fixed identity/address field mask and caches the
-best query match for 24 hours. The `places_details` identity profile uses the
-same fixed identity/address fields and caches by place ID and locale for 30
+All Places operations use one repo-owned fixed-field Places API (New) HTTPS
+transport; `gog` never receives the Places API key. `places_search` requests
+only identity, display name, formatted address, and Google Maps URI, and caches
+the best query match for 24 hours. The `places_details` identity profile uses
+the same fixed identity/address fields and caches by place ID and locale for 30
 days. The opt-in `rich_details` profile requests ratings/count, regular hours,
-national phone, website, price level, and at most three attributed reviews
-through a repo-owned fixed-field HTTPS call because the pinned gogcli does not
-support custom Places fields. Rich details use a separate accounting SKU and
+national phone, website, price level, and at most three attributed reviews. Rich details use a separate accounting SKU and
 receive their own copy of the configured details ceiling; identity and rich
 details can therefore make up to twice that numeric setting in total. Rich
 details are never written to the local cache.

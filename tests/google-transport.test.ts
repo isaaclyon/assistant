@@ -26,14 +26,14 @@ async function fixture() {
 describe.each([
   {
     operation: "rich details",
-    request: (apiKeyFile: string, signal?: AbortSignal) => transport.fetchRichPlaceDetails({
-      apiKeyFile, placeId: "test", ...(signal ? { signal } : {}),
+    request: (apiKeyFile: string, signal?: AbortSignal) => transport.fetchPlaceDetails({
+      apiKeyFile, fields: "rich", placeId: "test", ...(signal ? { signal } : {}),
     }),
   },
   {
     operation: "candidate search",
-    request: (apiKeyFile: string, signal?: AbortSignal) => transport.fetchPlaceCandidates({
-      apiKeyFile, query: "coffee", maxResults: 15, ...(signal ? { signal } : {}),
+    request: (apiKeyFile: string, signal?: AbortSignal) => transport.fetchPlaceSearch({
+      apiKeyFile, fields: "candidates", query: "coffee", maxResults: 15, ...(signal ? { signal } : {}),
     }),
   },
 ])("Places HTTPS safeguards: $operation", ({ request }) => {
@@ -91,10 +91,10 @@ it("redacts setup paths and malformed HTTPS response bodies at the transport bou
   for (const change of [{ binary: join(options.gogHome, "missing-binary") }, { passwordFile: join(options.gogHome, "missing-secret") }]) {
     await expect(transport.runGogJson({ ...options, ...change })).rejects.toThrow(/^Google Workspace command failed$/);
   }
-  await expect(transport.fetchRichPlaceDetails({ apiKeyFile: join(options.gogHome, "missing-secret"), placeId: "test" }))
+  await expect(transport.fetchPlaceDetails({ apiKeyFile: join(options.gogHome, "missing-secret"), fields: "rich", placeId: "test" }))
     .rejects.toThrow(/^Google Workspace command failed$/);
   vi.stubGlobal("fetch", vi.fn(async () => new Response("private-response-body", { status: 200 })));
-  await expect(transport.fetchRichPlaceDetails({ apiKeyFile: options.passwordFile, placeId: "test" }))
+  await expect(transport.fetchPlaceDetails({ apiKeyFile: options.passwordFile, fields: "rich", placeId: "test" }))
     .rejects.toThrow(/^Google Workspace command failed$/);
 });
 

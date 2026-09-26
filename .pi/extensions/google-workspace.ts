@@ -2,8 +2,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { join } from "node:path";
 import { Type } from "typebox";
 import { openGooglePlacesGateway } from "../../src/google-places-gateway.ts";
-import { fetchPlaceCandidates, fetchRichPlaceDetails, resolveGoogleRuntime, runGogJson, type GoogleRuntime } from "../lib/google-transport.ts";
-export { fetchPlaceCandidates, fetchRichPlaceDetails, resolveGoogleRuntime, runGogJson } from "../lib/google-transport.ts";
+import { fetchPlaceDetails, fetchPlaceSearch, resolveGoogleRuntime, runGogJson, type GoogleRuntime } from "../lib/google-transport.ts";
+export { fetchPlaceDetails, fetchPlaceSearch, resolveGoogleRuntime, runGogJson } from "../lib/google-transport.ts";
 import {
   MAX_EVENT_WINDOW_DAYS,
   MAX_AVAILABILITY_WINDOW_DAYS,
@@ -13,7 +13,6 @@ import {
   requiredSafeString,
   selectedAccount,
   commonArgs,
-  commonPlacesArgs,
   parseWindow,
   maxResults,
   calendarIds,
@@ -26,6 +25,7 @@ import {
   parseContactSearchResources,
   parseContact,
   parseGooglePlace,
+  parseFirstGooglePlace,
   parseGooglePlaceCandidates,
   parseRichGooglePlace,
   normalizedPlacesLocale,
@@ -46,29 +46,132 @@ interface GoogleToolDetails {
 
 interface GoogleWorkspaceRegistrationOptions {
   resolveRuntime(): Promise<GoogleRuntime>;
-  run(
-    runtime: GoogleRuntime,
-    args: string[],
-    signal?: AbortSignal,
-    secrets?: { placesApiKeyFile: string },
-  ): Promise<unknown>;
-  fetchPlaceDetails?(options: {
-    apiKeyFile: string;
-    placeId: string;
-    language?: string;
-    region?: string;
-    signal?: AbortSignal;
-  }): Promise<unknown>;
-  fetchPlaceCandidates?(options: {
-    apiKeyFile: string;
-    query: string;
-    maxResults: number;
-    language?: string;
-    region?: string;
-    signal?: AbortSignal;
-  }): Promise<unknown>;
+  run(runtime: GoogleRuntime, args: string[], signal?: AbortSignal): Promise<unknown>;
+  fetchPlaceDetails?: typeof fetchPlaceDetails;
+  fetchPlaceSearch?: typeof fetchPlaceSearch;
   now?(): number;
 }
+
+interface PlacesFetchContext {
+  apiKeyFile: string;
+  locale: { language?: string; region?: string };
+  signal?: AbortSignal;
+  fetchPlaceDetails: typeof fetchPlaceDetails;
+  fetchPlaceSearch: typeof fetchPlaceSearch;
+}
+
+// One entry per public Places operation and field profile. The cache profile
+// and SKU strings are durable keys in google-places.db; changing them resets
+// cached entries or monthly usage counts.
+interface PlacesProfile {
+  gatewayOperation: "search" | "details";
+  cacheProfile: string;
+  sku: string;
+  ttlMs: number;
+  cache: boolean;
+  monthlyLimit(runtime: GoogleRuntime): number | undefined;
+  cacheArguments(input: Record<string, unknown>): Record<string, string> | undefined;
+  fetch(cacheArguments: Record<string, string>, context: PlacesFetchContext): Promise<unknown>;
+  result(value: unknown): Record<string, unknown>;
+}
+
+function placesQuery(input: Record<string, unknown>): string | undefined {
+  const query = requiredSafeString(input.query, 200)?.replace(/\s+/g, " ");
+  return query && !query.startsWith("-") ? query : undefined;
+}
+
+function placesId(input: Record<string, unknown>): string | undefined {
+  const placeId = requiredSafeString(input.place_id, 263)?.replace(/^places\//, "");
+  return placeId && /^[A-Za-z0-9_-]+$/.test(placeId) ? placeId : undefined;
+}
+
+function localeOptions(context: PlacesFetchContext) {
+  return {
+    apiKeyFile: context.apiKeyFile,
+    ...(context.locale.language ? { language: context.locale.language } : {}),
+    ...(context.locale.region ? { region: context.locale.region } : {}),
+    ...(context.signal ? { signal: context.signal } : {}),
+  };
+}
+
+const PLACES_PROFILES = new Map<string, PlacesProfile>([
+  ["places_search:identity", {
+    gatewayOperation: "search",
+    cacheProfile: "search_identity",
+    sku: "places_text_search_basic",
+    ttlMs: PLACES_SEARCH_TTL_MS,
+    cache: true,
+    monthlyLimit: (runtime) => runtime.placesSearchMonthlyLimit,
+    cacheArguments: (input) => {
+      const query = placesQuery(input);
+      return query ? { query } : undefined;
+    },
+    fetch: async (args, context) => parseFirstGooglePlace(await context.fetchPlaceSearch({
+      ...localeOptions(context), fields: "identity", query: args.query!, maxResults: 1,
+    })),
+    result: (place) => ({ fieldProfile: "identity", place }),
+  }],
+  ["places_search_candidates:", {
+    gatewayOperation: "search",
+    cacheProfile: "search_candidates",
+    sku: "places_text_search_candidates",
+    ttlMs: PLACES_CANDIDATES_TTL_MS,
+    cache: true,
+    monthlyLimit: (runtime) => runtime.placesCandidatesMonthlyLimit,
+    cacheArguments: (input) => {
+      const query = placesQuery(input);
+      const limit = input.max_results === undefined ? MAX_PLACE_CANDIDATES : input.max_results;
+      if (!query || !Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > MAX_PLACE_CANDIDATES) {
+        return undefined;
+      }
+      return { query, maxResults: String(limit) };
+    },
+    fetch: async (args, context) => parseGooglePlaceCandidates(await context.fetchPlaceSearch({
+      ...localeOptions(context), fields: "candidates", query: args.query!, maxResults: Number(args.maxResults),
+    }), Number(args.maxResults)),
+    result: (value) => {
+      const candidates = value as { places: Array<Record<string, unknown>>; truncated: boolean };
+      return {
+        fieldProfile: "candidates",
+        places: candidates.places,
+        noResults: candidates.places.length === 0,
+        truncated: candidates.truncated,
+      };
+    },
+  }],
+  ["places_details:identity", {
+    gatewayOperation: "details",
+    cacheProfile: "details_identity",
+    sku: "places_details_basic",
+    ttlMs: PLACES_DETAILS_TTL_MS,
+    cache: true,
+    monthlyLimit: (runtime) => runtime.placesDetailsMonthlyLimit,
+    cacheArguments: (input) => {
+      const placeId = placesId(input);
+      return placeId ? { placeId } : undefined;
+    },
+    fetch: async (args, context) => parseGooglePlace(await context.fetchPlaceDetails({
+      ...localeOptions(context), fields: "identity", placeId: args.placeId!,
+    }), args.placeId!),
+    result: (place) => ({ fieldProfile: "identity", place }),
+  }],
+  ["places_details:rich_details", {
+    gatewayOperation: "details",
+    cacheProfile: "details_rich_details",
+    sku: "places_details_rich",
+    ttlMs: PLACES_RICH_DETAILS_TTL_MS,
+    cache: false,
+    monthlyLimit: (runtime) => runtime.placesDetailsMonthlyLimit,
+    cacheArguments: (input) => {
+      const placeId = placesId(input);
+      return placeId ? { placeId } : undefined;
+    },
+    fetch: async (args, context) => parseRichGooglePlace(await context.fetchPlaceDetails({
+      ...localeOptions(context), fields: "rich", placeId: args.placeId!,
+    }), args.placeId!),
+    result: (place) => ({ fieldProfile: "rich_details", place }),
+  }],
+]);
 
 interface MinimalPiApi {
   registerTool(tool: Parameters<ExtensionAPI["registerTool"]>[0]): void;
@@ -203,8 +306,8 @@ export function registerGoogleWorkspaceTool(
       const operation = requiredSafeString(input.operation, 64);
       if (!operation) return failure("GOOGLE_OPERATION_INVALID", "The Google Workspace operation is invalid");
       const account = selectedAccount(input, runtime);
-      const isCandidateSearch = operation === "places_search_candidates";
-      const isPlacesOperation = isCandidateSearch || operation === "places_search" || operation === "places_details";
+      const isPlacesOperation =
+        operation === "places_search" || operation === "places_search_candidates" || operation === "places_details";
       if (operation !== "calendar_availability" && !isPlacesOperation && !account) {
         return failure(
           "GOOGLE_ACCOUNT_REQUIRED",
@@ -216,127 +319,46 @@ export function registerGoogleWorkspaceTool(
       }
 
       if (isPlacesOperation) {
-        const fieldProfile = requiredSafeString(input.field_profile, 32);
+        const fieldProfile = input.field_profile === undefined ? "" : input.field_profile;
+        const profile = typeof fieldProfile === "string" ? PLACES_PROFILES.get(`${operation}:${fieldProfile}`) : undefined;
         const locale = normalizedPlacesLocale(input);
-        const configured =
-          runtime.stateDir &&
-          runtime.placesApiKeyFile &&
-          runtime.placesSearchMonthlyLimit !== undefined &&
-          runtime.placesDetailsMonthlyLimit !== undefined &&
-          (!isCandidateSearch || runtime.placesCandidatesMonthlyLimit !== undefined);
-        if (
-          (isCandidateSearch ? fieldProfile !== undefined :
-            (fieldProfile !== "identity" && fieldProfile !== "rich_details") ||
-            (operation === "places_search" && fieldProfile !== "identity")) ||
-          !locale
-        ) {
+        const requestArguments = profile?.cacheArguments(input);
+        if (!profile || !locale || !requestArguments) {
           return failure("GOOGLE_PLACES_INPUT_INVALID", "The Google Places request is invalid");
         }
-        if (!configured) {
+        // Identity search and details limits enable Places as a group; each
+        // profile additionally needs its own limit.
+        const monthlyLimit = profile.monthlyLimit(runtime);
+        if (
+          !runtime.stateDir || !runtime.placesApiKeyFile || monthlyLimit === undefined ||
+          runtime.placesSearchMonthlyLimit === undefined || runtime.placesDetailsMonthlyLimit === undefined
+        ) {
           return failure("GOOGLE_PLACES_UNAVAILABLE", "Google Places is temporarily unavailable");
         }
-        const args = [...commonPlacesArgs(), "maps", "places"];
-        let cacheArguments: Record<string, string>;
-        let sku: string;
-        let monthlyLimit: number;
-        let ttlMs: number;
-        let candidateLimit: number | undefined;
-        if (isCandidateSearch) {
-          const query = requiredSafeString(input.query, 200)?.replace(/\s+/g, " ");
-          candidateLimit = input.max_results === undefined
-            ? MAX_PLACE_CANDIDATES
-            : Number.isInteger(input.max_results) && Number(input.max_results) >= 1 &&
-              Number(input.max_results) <= MAX_PLACE_CANDIDATES
-              ? Number(input.max_results)
-              : undefined;
-          if (!query || query.startsWith("-") || candidateLimit === undefined) {
-            return failure("GOOGLE_PLACES_INPUT_INVALID", "The Google Places request is invalid");
-          }
-          cacheArguments = { query, maxResults: String(candidateLimit), ...locale };
-          sku = "places_text_search_candidates";
-          monthlyLimit = runtime.placesCandidatesMonthlyLimit!;
-          ttlMs = PLACES_CANDIDATES_TTL_MS;
-        } else if (operation === "places_search") {
-          const query = requiredSafeString(input.query, 200)?.replace(/\s+/g, " ");
-          if (!query || query.startsWith("-")) {
-            return failure("GOOGLE_PLACES_INPUT_INVALID", "The Google Places request is invalid");
-          }
-          args.push("search", query);
-          cacheArguments = { query, ...locale };
-          sku = "places_text_search_basic";
-          monthlyLimit = runtime.placesSearchMonthlyLimit!;
-          ttlMs = PLACES_SEARCH_TTL_MS;
-        } else {
-          const placeId = requiredSafeString(input.place_id, 263)?.replace(/^places\//, "");
-          if (!placeId || !/^[A-Za-z0-9_-]+$/.test(placeId)) {
-            return failure("GOOGLE_PLACES_INPUT_INVALID", "The Google Places request is invalid");
-          }
-          args.push("details", placeId);
-          cacheArguments = { placeId, ...locale };
-          sku = fieldProfile === "rich_details" ? "places_details_rich" : "places_details_basic";
-          monthlyLimit = runtime.placesDetailsMonthlyLimit!;
-          ttlMs = fieldProfile === "rich_details" ? PLACES_RICH_DETAILS_TTL_MS : PLACES_DETAILS_TTL_MS;
-        }
-        if (locale.language) args.push(`--language=${locale.language}`);
-        if (locale.region) args.push(`--region=${locale.region}`);
+        const context: PlacesFetchContext = {
+          apiKeyFile: runtime.placesApiKeyFile,
+          locale,
+          ...(signal ? { signal } : {}),
+          fetchPlaceDetails: options.fetchPlaceDetails ?? fetchPlaceDetails,
+          fetchPlaceSearch: options.fetchPlaceSearch ?? fetchPlaceSearch,
+        };
         try {
-          const gateway = openGooglePlacesGateway(join(runtime.stateDir!, "google-places.db"));
+          const gateway = openGooglePlacesGateway(join(runtime.stateDir, "google-places.db"));
           try {
             const result = await gateway.request({
-              operation: isCandidateSearch || operation === "places_search" ? "search" : "details",
-              profile: isCandidateSearch ? "search_candidates" :
-                operation === "places_search" ? "search_identity" : `details_${fieldProfile}`,
-              cacheArguments,
-              sku,
+              operation: profile.gatewayOperation,
+              profile: profile.cacheProfile,
+              cacheArguments: { ...requestArguments, ...locale },
+              sku: profile.sku,
               monthlyLimit,
-              ttlMs,
+              ttlMs: profile.ttlMs,
               now: options.now?.() ?? Date.now(),
-              cache: fieldProfile !== "rich_details",
-            }, async () => isCandidateSearch
-              ? parseGooglePlaceCandidates(await (options.fetchPlaceCandidates ?? fetchPlaceCandidates)({
-                  apiKeyFile: runtime.placesApiKeyFile!,
-                  query: cacheArguments.query!,
-                  maxResults: candidateLimit!,
-                  ...(locale.language ? { language: locale.language } : {}),
-                  ...(locale.region ? { region: locale.region } : {}),
-                  ...(signal ? { signal } : {}),
-                }), candidateLimit!)
-              : fieldProfile === "rich_details"
-              ? parseRichGooglePlace(await (options.fetchPlaceDetails ?? fetchRichPlaceDetails)({
-                  apiKeyFile: runtime.placesApiKeyFile!,
-                  placeId: cacheArguments.placeId!,
-                  ...(locale.language ? { language: locale.language } : {}),
-                  ...(locale.region ? { region: locale.region } : {}),
-                  ...(signal ? { signal } : {}),
-                }), cacheArguments.placeId!)
-              : parseGooglePlace(await options.run(runtime,
-                  args,
-                  signal,
-                  { placesApiKeyFile: runtime.placesApiKeyFile! },
-                )));
+              cache: profile.cache,
+            }, () => profile.fetch(requestArguments, context));
             if (result.status === "blocked") {
               return success({ operation, blocked: true, reason: "monthly_limit" });
             }
-            if (isCandidateSearch) {
-              const candidates = result.value as {
-                places: Array<Record<string, unknown>>;
-                truncated: boolean;
-              };
-              return success({
-                operation,
-                fieldProfile: "candidates",
-                cached: result.cached,
-                places: candidates.places,
-                noResults: candidates.places.length === 0,
-                truncated: candidates.truncated,
-              });
-            }
-            return success({
-              operation,
-              fieldProfile,
-              cached: result.cached,
-              place: result.value,
-            });
+            return success({ operation, cached: result.cached, ...profile.result(result.value) });
           } finally {
             gateway.close();
           }
@@ -511,16 +533,13 @@ export function registerGoogleWorkspaceTool(
 export default function googleWorkspaceExtension(pi: ExtensionAPI): void {
   registerGoogleWorkspaceTool(pi, {
     resolveRuntime: resolveGoogleRuntime,
-    async run(runtime, args, signal, secrets) {
+    async run(runtime, args, signal) {
       return await runGogJson({
         binary: runtime.binary!,
         passwordFile: runtime.passwordFile!,
         gogHome: runtime.gogHome!,
         args,
         ...(signal ? { signal } : {}),
-        ...(secrets?.placesApiKeyFile
-          ? { placesApiKeyFile: secrets.placesApiKeyFile }
-          : {}),
       });
     },
   });

@@ -84,10 +84,11 @@ minimal environment plus a just-in-time keyring password, and returns only a
 normalized operation-specific result. Per-instance private configuration owns
 the binary path, default account, and credential-file path; see ADR-0027.
 Google Places requests additionally pass through conservative per-instance
-monthly attempt reservation. Identity requests use the SQLite cache before gog
-receives a just-in-time API key; bounded multi-place candidate searches use a
-repo-owned fixed-field Places API (New) HTTPS request; opt-in rich details use a
-separate repo-owned fixed-field HTTPS request and are never cached. Candidate
+monthly attempt reservation. Places requests bypass gog: identity lookups,
+bounded multi-place candidate searches, and opt-in rich details all use one
+repo-owned fixed-field Places API (New) HTTPS transport that reads the API key
+just in time. Identity and candidate results use the SQLite cache; rich details
+are never cached. Candidate
 search and rich details have separate accounting keys and limits; see
 ADR-0029.
 
