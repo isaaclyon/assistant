@@ -42,7 +42,6 @@ export interface EnqueueJobHandoffOptions {
   coordinatorStateDir: string;
   eventId: string;
   definitionFingerprint?: string;
-  local?: boolean;
   jobId: string;
   jobType?: JobHandoffFile["jobType"];
   target: string;
@@ -53,38 +52,24 @@ export interface EnqueueJobHandoffOptions {
 export interface JobHandoffLocation {
   stateRoot: string;
   coordinatorStateDir: string;
-  local: boolean;
   target: string;
 }
 
-/**
- * Resolves where a dispatch's handoffs live. A singleton host delivers to its
- * own state directory under the fixed "local" target; a fleet host delivers to
- * each recipient's instance tree under the shared state root.
- */
+/** Resolves where a dispatch's handoffs live: each recipient's instance tree under the shared state root. */
 export function jobHandoffLocation(
-  host: { stateDir: string } | { stateDir: string; stateRoot: string; instanceId: string },
+  host: { stateDir: string; stateRoot: string },
   target: string | undefined,
 ): JobHandoffLocation {
-  if (!("instanceId" in host)) {
-    return { stateRoot: host.stateDir, coordinatorStateDir: host.stateDir, local: true, target: "local" };
-  }
   if (!target) throw new Error("Fleet job target is required");
-  return { stateRoot: host.stateRoot, coordinatorStateDir: host.stateDir, local: false, target };
+  return { stateRoot: host.stateRoot, coordinatorStateDir: host.stateDir, target };
 }
 
 function handoffRecipients(target: string): string[] {
   return target === "both-personal" ? ["isaac", "emma"] : [target];
 }
 
-function recipientHandoffRoot(
-  location: { stateRoot: string; coordinatorStateDir: string; local?: boolean },
-  recipient: string,
-): string {
-  const recipientStateDir = location.local
-    ? location.coordinatorStateDir
-    : join(location.stateRoot, "instances", recipient);
-  return join(recipientStateDir, "job-handoffs");
+function recipientHandoffRoot(location: { stateRoot: string }, recipient: string): string {
+  return join(location.stateRoot, "instances", recipient, "job-handoffs");
 }
 
 export interface EnqueueJobHandoffResult {
@@ -154,7 +139,6 @@ export async function enqueueJobHandoff({
   coordinatorStateDir,
   eventId,
   definitionFingerprint,
-  local = false,
   jobId,
   jobType,
   target,
@@ -163,7 +147,6 @@ export async function enqueueJobHandoff({
 }: EnqueueJobHandoffOptions): Promise<EnqueueJobHandoffResult> {
   if (!/^[a-z0-9-]{1,64}$/.test(jobId)) throw new Error("Invalid handoff job ID");
   if (!/^[a-z0-9-]{1,64}$/.test(target)) throw new Error("Invalid handoff target");
-  if (local && target !== "local") throw new Error("Invalid local handoff target");
   if (definitionFingerprint !== undefined && !/^[a-f0-9]{64}$/.test(definitionFingerprint)) {
     throw new Error("Invalid handoff definition fingerprint");
   }
@@ -210,7 +193,7 @@ export async function enqueueJobHandoff({
 
   for (const recipient of recipients) {
     if (status.recipients[recipient] === "enqueued") continue;
-    const recipientRoot = recipientHandoffRoot({ stateRoot, coordinatorStateDir, local }, recipient);
+    const recipientRoot = recipientHandoffRoot({ stateRoot }, recipient);
     const pendingDir = join(recipientRoot, "pending");
     try {
       await mkdir(pendingDir, { recursive: true, mode: 0o700 });
@@ -253,14 +236,12 @@ export async function enqueueJobHandoff({
 export async function cancelJobHandoff(options: {
   stateRoot: string;
   coordinatorStateDir: string;
-  local?: boolean;
   dispatchId: string;
   jobId: string;
   target: string;
 }): Promise<Record<string, "cancelled" | "completed" | "acknowledged" | "processing" | "failed">> {
   if (!/^[a-z0-9-]{1,64}$/.test(options.jobId) || !/^[a-z0-9-]{1,64}$/.test(options.target) ||
-      !new RegExp(`^${options.jobId}-[a-f0-9]{16}(?:[a-f0-9]{48})?$`).test(options.dispatchId) ||
-      (options.local && options.target !== "local")) {
+      !new RegExp(`^${options.jobId}-[a-f0-9]{16}(?:[a-f0-9]{48})?$`).test(options.dispatchId)) {
     throw new Error("Invalid cancellation identity");
   }
   const result: Record<string, "cancelled" | "completed" | "acknowledged" | "processing" | "failed"> = {};

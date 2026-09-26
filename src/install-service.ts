@@ -1,17 +1,11 @@
 import { execFile } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import {
-  hasConfiguredTelegramToken,
-  resolveBridgeConfig,
-} from "./config.js";
 import { prepareBridgeFleet } from "./fleet-config.js";
 import { writeBridgeFleetUnits } from "./fleet-installer.js";
-import { renderServiceUnit } from "./service-unit.js";
 
 const execFileAsync = promisify(execFile);
 const home = homedir();
@@ -23,46 +17,15 @@ function resolveFromHome(value: string | undefined, fallback: string): string {
   return isAbsolute(selected) ? resolve(selected) : resolve(home, selected);
 }
 
-async function installLegacyService(): Promise<void> {
-  const config = resolveBridgeConfig();
-  const telegramConfigPath = join(config.agentDir, "telegram.json");
-  if (!(await hasConfiguredTelegramToken(telegramConfigPath))) {
-    throw new Error(
-      "Telegram is not configured. Run `npm run telegram:setup` before installing the service.",
-    );
-  }
-
-  const unitName = "pi-telegram-bridge.service";
-  const unitPath = join(userUnitDir, unitName);
-  const environmentFilePath = join(
-    home,
-    ".config",
-    "pi-telegram-bridge",
-    "environment",
-  );
-  await mkdir(userUnitDir, { recursive: true, mode: 0o700 });
-  await writeFile(
-    unitPath,
-    renderServiceUnit({
-      config,
-      environmentFilePath,
-      nodePath: process.execPath,
-      projectDir,
-    }),
-    { mode: 0o600 },
-  );
-  await execFileAsync("systemctl", ["--user", "daemon-reload"]);
-  if (process.env.PI_TELEGRAM_BRIDGE_INSTALL_NO_START !== "1") {
-    await execFileAsync("systemctl", ["--user", "enable", "--now", unitName]);
-  }
-  console.log(`${process.env.PI_TELEGRAM_BRIDGE_INSTALL_NO_START === "1" ? "Installed" : "Installed and started"} ${unitPath}`);
-}
-
-async function installInstanceFleet(manifestPath: string): Promise<void> {
+async function installInstanceFleet(): Promise<void> {
   const releaseSha = process.env.PI_TELEGRAM_BRIDGE_RELEASE_SHA?.trim() ?? "";
   const configRoot = resolveFromHome(
     process.env.PI_TELEGRAM_BRIDGE_CONFIG_ROOT,
     join(home, ".config", "pi-telegram-bridge"),
+  );
+  const manifestPath = resolveFromHome(
+    process.env.PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST,
+    join(configRoot, "instances.json"),
   );
   const resourceRoot = resolveFromHome(
     process.env.PI_TELEGRAM_BRIDGE_RESOURCE_ROOT,
@@ -98,12 +61,7 @@ async function installInstanceFleet(manifestPath: string): Promise<void> {
   );
 }
 
-const configuredManifest = process.env.PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST?.trim();
-if (configuredManifest) {
-  await installInstanceFleet(resolveFromHome(configuredManifest, configuredManifest));
-} else {
-  await installLegacyService();
-}
+await installInstanceFleet();
 
 console.log("Status: systemctl --user status 'pi-telegram-bridge*.service'");
 console.log("Logs:   journalctl --user -u 'pi-telegram-bridge*.service' -f");

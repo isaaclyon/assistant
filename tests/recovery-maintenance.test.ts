@@ -48,10 +48,9 @@ describe("offline recovery maintenance entry point", () => {
     await writeFile(join(process.env.PATH!.split(":")[0]!, "systemctl"), '#!/usr/bin/env bash\ncase "$2" in list-unit*) echo "pi-telegram-bridge-isaac.service disabled";; show) case "$5" in MainPID) echo 0;; UnitFileState) echo disabled;; ActiveState) echo inactive;; FragmentPath) echo /outside/pi-telegram-bridge-isaac.service;; DropInPaths) echo;; esac;; esac\n');
     await expect(runRecoveryMaintenance(f.args)).rejects.toThrow(/captured unit directory/i);
   });
-  it("refuses a singleton state root different from its actual environment configuration", async () => {
+  it("refuses a coordinator that is not a configured instance", async () => {
     const f = await fixture();
-    await rm(join(f.state, "instances"), { recursive: true });
-    await expect(runRecoveryMaintenance([...f.args.slice(0, 5), "local"])).rejects.toThrow(/state root/i);
+    await expect(runRecoveryMaintenance([...f.args.slice(0, 5), "local"])).rejects.toThrow(/coordinator state/i);
   });
   it("refuses an additional scheduler's state instead of ignoring retired coordinator evidence", async () => {
     const f = await fixture(); f.args[5] = "isaac";

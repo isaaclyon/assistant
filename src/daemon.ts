@@ -1,4 +1,4 @@
-import { loadBridgeRuntimeConfig } from "./config.js";
+import { loadBridgeInstanceConfig } from "./config.js";
 import { startBridgeHost } from "./host.js";
 import {
   awaitShutdownDisposal,
@@ -16,7 +16,7 @@ import {
   writeRuntimeMetadata,
 } from "./runtime-metadata.js";
 
-const config = await loadBridgeRuntimeConfig();
+const config = await loadBridgeInstanceConfig();
 
 const latch = createShutdownLatch((reason) => {
   console.log(`Shutdown requested (${reason}).`);
@@ -29,7 +29,6 @@ const writeInstanceRuntimeStatus = async (
   status: BridgeRuntimeStatus,
   sessionFile?: string,
 ): Promise<void> => {
-  if (!("instanceId" in config)) return;
   const releaseSha = process.env.PI_TELEGRAM_BRIDGE_RELEASE_SHA?.trim() ?? "";
   await writeRuntimeMetadata(
     config.runtimeMetadataPath,
@@ -54,15 +53,10 @@ try {
     onShutdownRequest: () => latch.request("extension"),
     onRestartRequest: () => {
       try {
-        markRestartPending(
-          config.stateDir,
-          "instanceId" in config
-            ? {
-                instanceId: config.instanceId,
-                telegramProfile: config.telegramProfile,
-              }
-            : undefined,
-        );
+        markRestartPending(config.stateDir, {
+          instanceId: config.instanceId,
+          telegramProfile: config.telegramProfile,
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.error(`Could not persist restart confirmation: ${message}`);

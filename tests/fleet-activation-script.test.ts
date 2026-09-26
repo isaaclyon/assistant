@@ -11,4 +11,11 @@ describe("fleet activation script", () => {
     expect(source).not.toContain('systemctl --user restart "$unit_name"');
     expect(source).not.toContain('rm -rf "$BACKUP_DIR"');
   });
+
+  it("validates jobs with the new release before quiescing any service", async () => {
+    const source = await readFile("scripts/activate-fleet.sh", "utf8");
+    const preflight = source.indexOf('"$RELEASE_PATH/dist/src/jobs-check.js"');
+    expect(preflight).toBeGreaterThan(-1);
+    expect(preflight).toBeLessThan(source.indexOf('recovery_prepare "$COORDINATOR_ID"'));
+  });
 });

@@ -5,46 +5,9 @@ import { parseBridgeInstanceManifest } from "../src/instances.js";
 import {
   renderInstanceServiceUnits,
   renderInstanceServiceUnit,
-  renderServiceUnit,
 } from "../src/service-unit.js";
 
-describe("renderServiceUnit", () => {
-  it("pins the node executable, persistent paths, and restart policy", () => {
-    const unit = renderServiceUnit({
-      config: {
-        agentDir: "/home/test/.pi/agent",
-        codexConfigPath: "/home/test/.config/telegram-codex.json",
-        cwd: "/home/test",
-        sessionDir: "/home/test/.local/state/pi-telegram-bridge/sessions",
-        stateDir: "/home/test/.local/state/pi-telegram-bridge",
-        webhookHost: "127.0.0.1",
-        webhookPort: 8776,
-      },
-      nodePath: "/opt/node/bin/node",
-      projectDir: "/srv/pi bridge",
-      environmentFilePath: "/home/test/.config/pi-telegram-bridge/environment",
-    });
-
-    expect(unit).toContain(
-      'ExecStart="/opt/node/bin/node" "/srv/pi bridge/dist/src/daemon.js"',
-    );
-    expect(unit).toContain("WorkingDirectory=/home/test");
-    expect(unit).toContain('ExecCondition="/opt/node/bin/node" "/srv/pi bridge/dist/src/recovery-start-check.js" "/home/test/.local/state/pi-telegram-bridge"');
-    expect(unit).toContain("Restart=on-failure");
-    expect(unit).toContain('Environment="PI_TELEGRAM_BRIDGE_CWD=/home/test"');
-    expect(unit).toContain(
-      'Environment="PI_TELEGRAM_CODEX_CONFIG=/home/test/.config/telegram-codex.json"',
-    );
-    expect(unit).toContain(
-      "EnvironmentFile=-/home/test/.config/pi-telegram-bridge/environment",
-    );
-    expect(unit).not.toContain("PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT=");
-    expect(unit.indexOf("EnvironmentFile=")).toBeGreaterThan(
-      unit.indexOf("PI_TELEGRAM_CODEX_CONFIG="),
-    );
-    expect(unit).toContain("UMask=0077");
-  });
-
+describe("renderInstanceServiceUnit", () => {
   it("renders one identity-specific unit from the shared immutable release", () => {
     const manifest = parseBridgeInstanceManifest(
       JSON.stringify({
@@ -81,11 +44,17 @@ describe("renderServiceUnit", () => {
       config,
       manifestPath: "/home/test/.config/pi-telegram-bridge/instances.json",
       nodePath: "/opt/node/bin/node",
-      projectDir: "/srv/assistant/releases/abc123",
+      projectDir: "/srv/pi bridge/abc123",
       releaseSha: "1234567890abcdef1234567890abcdef12345678",
     });
 
     expect(rendered.unitName).toBe("pi-telegram-bridge-emma.service");
+    expect(rendered.contents).toContain(
+      'ExecStart="/opt/node/bin/node" "/srv/pi bridge/abc123/dist/src/daemon.js"',
+    );
+    expect(rendered.contents).toContain(
+      'ExecCondition="/opt/node/bin/node" "/srv/pi bridge/abc123/dist/src/recovery-start-check.js" "/var/lib/pi-telegram-bridge"',
+    );
     expect(rendered.contents).toContain(
       "Description=Persistent Pi Telegram bridge (Emma Bot / emma)",
     );

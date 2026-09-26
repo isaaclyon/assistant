@@ -5,62 +5,28 @@ set -Eeuo pipefail
 EXPECTED_SHA="${1:-}"
 DEPLOY_PATH="${DEPLOY_PATH:-$HOME/projects/assistant}"
 AGENT_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
-SERVICE="pi-telegram-bridge.service"
-UNIT_PATH="$HOME/.config/systemd/user/$SERVICE"
 RELEASE_ROOT="$HOME/.local/share/pi-telegram-bridge/releases"
 RELEASE_PATH="$RELEASE_ROOT/$EXPECTED_SHA"
 STAGING_PATH="$RELEASE_ROOT/.staging-$EXPECTED_SHA"
 LOCK_PATH="$HOME/.local/state/pi-telegram-bridge/deploy.lock"
-ACTIVATION_STARTED=false
+FLEET_MANIFEST="${PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST:-$HOME/.config/pi-telegram-bridge/instances.json}"
 CURRENT_SHA=""
 
 if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
   echo "Expected a full 40-character git commit SHA." >&2
   exit 2
 fi
-
-wait_for_service_ready() {
-  local since="$1"
-  local stable_seconds=0
-  local ready_pid=""
-  local state main_pid
-  for _ in {1..30}; do
-    state="$(systemctl --user is-active "$SERVICE" || true)"
-    main_pid="$(systemctl --user show "$SERVICE" --property MainPID --value)"
-    if [[ "$state" == "active" && "$main_pid" =~ ^[1-9][0-9]*$ ]]; then
-      if [[ "$main_pid" != "$ready_pid" ]]; then
-        ready_pid="$main_pid"
-        stable_seconds=0
-      fi
-      if journalctl --user -u "$SERVICE" "_PID=$main_pid" \
-        --since "$since" --no-pager -o cat \
-        | grep -F "Pi Telegram bridge ready" >/dev/null; then
-        ((stable_seconds += 1))
-        if (( stable_seconds >= 5 )); then
-          printf '%s\n' "$main_pid"
-          return 0
-        fi
-      else
-        stable_seconds=0
-      fi
-    else
-      ready_pid=""
-      stable_seconds=0
-    fi
-    sleep 1
-  done
-  return 1
-}
+if [[ ! -f "$FLEET_MANIFEST" ]]; then
+  echo "No bridge instance manifest at $FLEET_MANIFEST; deployment requires a configured fleet." >&2
+  exit 2
+fi
 
 show_failure_context() {
   local original_status=$?
   trap - ERR
   rm -rf "$STAGING_PATH"
-  if [[ "$ACTIVATION_STARTED" == true ]]; then
-    recovery_hold
-  fi
   echo "==> Deployment failed; service status follows" >&2
-  systemctl --user status "$SERVICE" --no-pager >&2 || true
+  systemctl --user status 'pi-telegram-bridge*.service' --no-pager >&2 || true
   exit "$original_status"
 }
 trap show_failure_context ERR
@@ -133,72 +99,24 @@ if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
   git reset --hard "$CURRENT_SHA"
 fi
 
-FLEET_MANIFEST="${PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST:-$HOME/.config/pi-telegram-bridge/instances.json}"
-if [[ -f "$FLEET_MANIFEST" ]]; then
-  echo "==> Activating configured bridge fleet"
-  PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST="$FLEET_MANIFEST" \
-    bash "$RELEASE_PATH/scripts/activate-fleet.sh" \
-      "$EXPECTED_SHA" "$RELEASE_PATH" "$NODE_BINARY"
+echo "==> Activating configured bridge fleet"
+PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST="$FLEET_MANIFEST" \
+  bash "$RELEASE_PATH/scripts/activate-fleet.sh" \
+    "$EXPECTED_SHA" "$RELEASE_PATH" "$NODE_BINARY"
 
-  # The canonical checkout may be updated after fleet readiness because every
-  # service loads code/resources from the immutable release. Builder worktrees
-  # are separate paths and are never reset or cleaned here.
-  git reset --hard "$EXPECTED_SHA"
-  git clean -ffdx -- \
-    .pi/extensions \
-    .pi/skills \
-    .pi/settings.json \
-    .agents/skills
-  bash "$RELEASE_PATH/scripts/activate-messages-link.sh" "$RELEASE_PATH"
-  "$NODE_BINARY" "$RELEASE_PATH/dist/src/deployment-notify.js" \
-    "$FLEET_MANIFEST" "$AGENT_DIR" "$EXPECTED_SHA"
-  echo "==> Fleet deployment complete at $(git rev-parse --short HEAD)"
-  find "$RELEASE_ROOT" -mindepth 1 -maxdepth 1 -type d \
-    ! -name "$EXPECTED_SHA" -printf '%T@ %p\n' \
-    | sort -nr | tail -n +4 | cut -d' ' -f2- | xargs -r rm -rf
-  trap - ERR
-  exit 0
-fi
-
-echo "==> Validating scheduled jobs against the new release"
-systemd-run --user --wait --pipe --quiet --collect \
-  --property="EnvironmentFile=-$HOME/.config/pi-telegram-bridge/environment" \
-  --setenv="PI_TELEGRAM_BRIDGE_CWD=$DEPLOY_PATH" \
-  "$NODE_BINARY" "$RELEASE_PATH/dist/src/jobs-check.js"
-
-STATE_ROOT="${PI_TELEGRAM_BRIDGE_STATE_DIR:-$HOME/.local/state/pi-telegram-bridge}"
-UNIT_DIR="$(dirname "$UNIT_PATH")"
-source "$RELEASE_PATH/scripts/recovery-maintenance.sh"
-
-echo "==> Activating $SERVICE"
-ACTIVATION_STARTED=true
-ACTIVATION_TIME="$(date --iso-8601=seconds)"
-recovery_prepare local
-RECOVERY_UNITS+=("$SERVICE")
+# The canonical checkout may be updated after fleet readiness because every
+# service loads code/resources from the immutable release. Builder worktrees
+# are separate paths and are never reset or cleaned here.
 git reset --hard "$EXPECTED_SHA"
 git clean -ffdx -- \
   .pi/extensions \
   .pi/skills \
   .pi/settings.json \
   .agents/skills
-PI_TELEGRAM_BRIDGE_CWD="$DEPLOY_PATH" \
-  PI_TELEGRAM_BRIDGE_INSTALL_NO_START=1 \
-  node "$RELEASE_PATH/dist/src/install-service.js"
-recovery_started
-systemctl --user restart "$SERVICE"
-
-if ! MAIN_PID="$(wait_for_service_ready "$ACTIVATION_TIME")"; then
-  echo "$SERVICE did not report readiness and remain active for five seconds." >&2
-  false
-fi
-
-recovery_revoke_startup
-systemctl --user enable "$SERVICE"
-recovery_complete
-ACTIVATION_STARTED=false
 bash "$RELEASE_PATH/scripts/activate-messages-link.sh" "$RELEASE_PATH"
-
-echo "==> Deployment complete at $(git rev-parse --short HEAD), PID $MAIN_PID"
+"$NODE_BINARY" "$RELEASE_PATH/dist/src/deployment-notify.js" \
+  "$FLEET_MANIFEST" "$AGENT_DIR" "$EXPECTED_SHA"
+echo "==> Fleet deployment complete at $(git rev-parse --short HEAD)"
 find "$RELEASE_ROOT" -mindepth 1 -maxdepth 1 -type d \
   ! -name "$EXPECTED_SHA" -printf '%T@ %p\n' \
   | sort -nr | tail -n +4 | cut -d' ' -f2- | xargs -r rm -rf

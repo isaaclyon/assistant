@@ -8,7 +8,7 @@
 - `tests/`: Vitest coverage for host behavior.
 - `ARCHITECTURE.md` and `docs/adr/`: runtime boundaries and durable decisions.
 
-The host deliberately rejects globally or ancestrally discovered skills and extensions. Add capabilities inside this repository; do not loosen that filter merely to reuse a global resource.
+The host deliberately rejects globally or ancestrally discovered skills and extensions and loads only the resources each instance's `.pi/capabilities.json` profile selects. Add capabilities inside this repository and register them there; do not loosen that filter merely to reuse a global resource.
 
 ## Core source
 

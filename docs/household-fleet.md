@@ -116,18 +116,9 @@ no migration or cleanup.
 
 ## State migration
 
-The compatibility singleton remains supported when no manifest exists. Before
-the first fleet activation, stop normal writes and copy its legacy state into
-the chosen continuity instance (normally `isaac`) with
-`migrateLegacyStateToInstance` from `src/state-migration.ts`. Migration is
-copy-only: it rejects unknown entries and symlinks, stages under
-`instances/.<id>.migrating`, hardens permissions, and atomically renames the
-result. It never deletes legacy state.
-
-After migration, inspect the copied entry list and session continuity before
-enabling the manifest. If migration fails, remove only the explicitly reported
-staging directory after inspection and retry; the source remains untouched.
-Legacy memory notes without a scope are conservatively Isaac-personal, never
+The bridge runs only as a manifest-defined fleet; the former compatibility
+singleton and its one-time state-migration tool were removed after production
+moved to the fleet (ADR-0031). Legacy memory notes without a scope are conservatively Isaac-personal, never
 household. Promote a note only through a confirmed, revision-checked update.
 
 Scheduled jobs version 3 require a stable `target` instance ID. Use
@@ -162,12 +153,12 @@ rollback. Workspaces and builder worktrees are not cleaned.
 Activation uses each unit's bounded graceful shutdown. Accepted turns already
 in the durable inbox replay after restart; a model response interrupted after
 Pi took ownership may need to be re-asked because outbound delivery is not
-durable. The singleton is disabled (not merely stopped) before fleet success so
-it cannot reappear on reboot. A retained maintenance marker also blocks new
+durable. Any leftover `pi-telegram-bridge.service` unit is still discovered and
+disabled (not merely stopped) so it cannot reappear on reboot. A retained maintenance marker also blocks new
 units on reboot until activation has fully committed.
 
-Normal merged deployment automatically chooses fleet activation when the
-private manifest exists. For diagnosis:
+Normal merged deployment requires the private manifest and refuses to run
+without it. For diagnosis:
 
 ```bash
 systemctl --user status 'pi-telegram-bridge-*.service'

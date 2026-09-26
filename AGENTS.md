@@ -10,16 +10,18 @@
 ## Extension & skill filtering (why the bridge can't see global Pi resources)
 
 `src/host.ts` disables normal extension/skill discovery and passes Pi only the
-pinned dependencies plus canonicalized resources under this repository. This
-happens before extension imports or factories execute; symlinks that escape the
-repository are rejected with an `Ignoring non-repo <thing>: ...` warning. This is
+pinned dependencies plus the resources selected by the instance's profile in
+`.pi/capabilities.json`, canonicalized inside the release. This happens before
+extension imports or factories execute; a selected resource whose symlink
+escapes the release fails startup (`src/capabilities.ts`). This is
 deliberate — the always-on bridge must not gain capabilities from `~/.pi/agent`,
 `~/.agents`, or ancestor `.agents` dirs without going through git.
 
 Consequence: global Pi extensions do **not** apply here. E.g. web access comes from
 the global `pi-web-access` extension (`~/.pi/agent/settings.json`), which the bridge
 drops. To give the bridge a capability, add the extension **repo-locally** (under
-`.pi/extensions/`) so it resolves inside cwd — don't loosen the filter.
+`.pi/extensions/`), register it in `.pi/capabilities.json`, and select it in each
+profile that should load it. Don't loosen the filter.
 
 ## CLAUDE.md / AGENTS.md
 

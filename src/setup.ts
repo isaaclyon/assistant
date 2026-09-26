@@ -1,20 +1,19 @@
 import { spawn } from "node:child_process";
 
-import { resolveBridgeConfig } from "./config.js";
 import { resolveTelegramExtensionPath } from "./package-paths.js";
 
-const config = resolveBridgeConfig();
+const cwd = process.cwd();
 const extensionPath = resolveTelegramExtensionPath();
 const piBinary = process.env.PI_BIN?.trim() || "pi";
 
-console.log(`Opening Pi in ${config.cwd}.`);
-console.log("Run /telegram-setup, pair the bot with /start, then exit Pi.");
+console.log(`Opening Pi in ${cwd}.`);
+console.log("Run /telegram-setup <profile> for each instance profile, pair each bot with /start, then exit Pi.");
 
 const child = spawn(
   piBinary,
   ["-e", extensionPath, "--name", "Telegram bridge setup"],
   {
-    cwd: config.cwd,
+    cwd,
     env: process.env,
     stdio: "inherit",
   },

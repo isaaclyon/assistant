@@ -48,12 +48,10 @@ export async function resolveCoordinatorStateDir(env: JobsCliEnvironment = proce
   if (env.PI_TELEGRAM_JOBS_DIR) return env.PI_TELEGRAM_JOBS_DIR;
   const stateRoot = env.PI_TELEGRAM_BRIDGE_STATE_ROOT || join(homedir(), ".local", "state", "pi-telegram-bridge");
   const instances = await manifestInstances(env);
-  if (instances) {
-    const coordinators = instances.filter((entry) => entry.jobsRole === "coordinator");
-    if (coordinators.length !== 1) throw new Error(`Expected exactly one jobs coordinator; found ${coordinators.length}`);
-    return join(stateRoot, "instances", requireId(coordinators[0]!.id, "coordinator ID"));
-  }
-  return env.PI_TELEGRAM_BRIDGE_STATE_DIR || stateRoot;
+  if (!instances) throw new Error("Bridge instance manifest is required to locate the jobs coordinator");
+  const coordinators = instances.filter((entry) => entry.jobsRole === "coordinator");
+  if (coordinators.length !== 1) throw new Error(`Expected exactly one jobs coordinator; found ${coordinators.length}`);
+  return join(stateRoot, "instances", requireId(coordinators[0]!.id, "coordinator ID"));
 }
 function relativeTimestamp(value: unknown, now: number): string {
   const match = typeof value === "string" ? /^(\d+)(s|m|h|d)$/.exec(value) : null;
@@ -103,11 +101,9 @@ export async function applyJobsRequest(input: Record<string, unknown>, options: 
     if (Object.keys(request).some((key) => !fields.has(key))) throw new Error("Unknown recovery request field");
     // Unlike definitions, recovery is bound to the active recipient, never a
     // chat-selected target or the fleet coordinator's directory.
-    const instanceId = env.PI_TELEGRAM_BRIDGE_INSTANCE_ID === undefined
-      ? "local" : requireId(env.PI_TELEGRAM_BRIDGE_INSTANCE_ID, "instance ID");
-    if (env.PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST && instanceId === "local") throw new Error("Recipient instance binding is required");
-    const stateDir = options.stateDir ?? env.PI_TELEGRAM_BRIDGE_STATE_DIR ??
-      (instanceId === "local" ? await resolveCoordinatorStateDir(env) : undefined);
+    if (env.PI_TELEGRAM_BRIDGE_INSTANCE_ID === undefined) throw new Error("Recipient instance binding is required");
+    const instanceId = requireId(env.PI_TELEGRAM_BRIDGE_INSTANCE_ID, "instance ID");
+    const stateDir = options.stateDir ?? env.PI_TELEGRAM_BRIDGE_STATE_DIR;
     if (!stateDir) throw new Error("Recipient state directory is required");
     if (inspect) return { ok: true, operation: request.operation, ...(await inspectUnresolvedJobHandoffs({ stateDir, instanceId })) };
     if (typeof request.dispatchId !== "string" || typeof request.revision !== "string" ||

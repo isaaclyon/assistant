@@ -1,16 +1,14 @@
 import { readFile } from "node:fs/promises";
 
-import { loadBridgeRuntimeConfig } from "./config.js";
+import { loadBridgeInstanceConfig } from "./config.js";
 import { loadValidatedJobs } from "./jobs-validation.js";
 
-const config = await loadBridgeRuntimeConfig();
-const fleetInstanceIds =
-  "configuredInstanceIds" in config ? config.configuredInstanceIds : undefined;
+const config = await loadBridgeInstanceConfig();
 
 try {
   const { jobsPath, statePath, jobs, exists } = await loadValidatedJobs({
     stateDir: config.stateDir,
-    ...(fleetInstanceIds ? { configuredInstanceIds: fleetInstanceIds } : {}),
+    configuredInstanceIds: config.configuredInstanceIds,
   });
   if (!exists) {
     process.stdout.write(

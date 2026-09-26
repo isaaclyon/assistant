@@ -9,8 +9,8 @@ Set `PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT=1` to create local commits after
 agent-mediated mutations. The vault must be the exact Git worktree root and its
 index must be clean before mutation. Commits contain only the affected managed
 note path, use a generic UUID-based message, skip hooks, and are never pushed.
-The bridge service loads persistent values from
-`~/.config/pi-telegram-bridge/environment`; this user-owned file survives
+Each bridge instance loads persistent values from its
+`<configRoot>/instances/<id>.env` file; this user-owned file survives
 deployment. Git execution ignores ambient `GIT_*` routing, hooks, and signing
 configuration and is time-bounded.
 
