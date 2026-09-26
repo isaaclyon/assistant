@@ -3,8 +3,8 @@ import type { TelegramSectionCallbackContext, TelegramSectionContext, TelegramSe
 import { PlacesServiceError } from "../../src/places-service.ts";
 import { PlacesApplication, type PlacesCommand } from "../../src/places-application.ts";
 import type { PlacesReply } from "./places-reply.ts";
+import type { AddDraft } from "./places-add-draft.ts";
 export const PLACE_RANKINGS_SECTION_ID = "assistant/place-rankings";
-type AddDraft = { name: string; categoryId?: string };
 export type DirectAction =
   | { kind: "answer"; insertionId: string; revision: number; existingPlaceId: string; winner: "candidate" | "existing" }
   | { kind: "back"; insertionId: string; revision: number }
@@ -17,8 +17,8 @@ export function createPlacesSection(deps: {
   getApplication: () => PlacesApplication | undefined;
   replies: PlacesReply;
   takePendingView: () => DirectPendingView | undefined;
-  getDraft: () => { name: string; categoryId?: string } | undefined;
-  setDraft: (draft: { name: string; categoryId?: string } | undefined) => void;
+  getDraft: () => AddDraft | undefined;
+  setDraft: (draft: AddDraft | undefined) => void;
 }) {
   const actions = new Map<string, { action: DirectAction; expiresAt: number }>();
   const registerAction = (action: DirectAction): string => {
@@ -57,6 +57,22 @@ export function createPlacesSection(deps: {
     } catch (error) { deps.replies.clear(); throw error; }
     await ctx.answerCallback();
   };
+  // Reopens the saved add step, so a reset or stale button keeps the place name.
+  const draftView = (current: PlacesApplication, ctx: TelegramSectionContext): TelegramSectionView | undefined => {
+    const draft = deps.getDraft();
+    if (!draft) return undefined;
+    const view = draft.categoryId ? sentimentView(ctx, registerAction, draft) : categoryPickerView(current, ctx, registerAction, draft);
+    return { ...view, text: `${view.text}\n\nAdding <b>${escapeHtml(draft.name)}</b>.` };
+  };
+  const recoverDraft = async (current: PlacesApplication, ctx: TelegramSectionCallbackContext, fallback: string) => {
+    const view = draftView(current, ctx);
+    if (!view) {
+      await ctx.answerCallback(fallback);
+      return;
+    }
+    await ctx.edit(view);
+    await ctx.answerCallback("That button expired. Pick up where you left off.");
+  };
   const requireApplication = (): PlacesApplication => {
     const current = deps.getApplication();
     if (!current) throw new Error("Places is unavailable.");
@@ -77,7 +93,7 @@ export function createPlacesSection(deps: {
       if (!(error instanceof PlacesServiceError) || error.code !== "NO_ACTIVE_INSERTION") {
         throw error;
       }
-      return placesMenuView(ctx);
+      return draftView(current, ctx) ?? placesMenuView(ctx);
     }
   };
 
@@ -134,17 +150,17 @@ export function createPlacesSection(deps: {
           return "handled" as const;
         case "category":
         case "sentiment":
-          await ctx.answerCallback("This button expired. Open /place_rankings again.");
+          await recoverDraft(current, ctx, "This button expired. Open /place_rankings again.");
           return "handled" as const;
         case "direct": {
           const action = takeAction(ctx.payload);
           if (!action) {
-            await ctx.answerCallback("This button expired. Open /place_rankings again.");
+            await recoverDraft(current, ctx, "This button expired. Open /place_rankings again.");
             return "handled" as const;
           }
           if (action.kind === "category" || action.kind === "sentiment") {
             if (deps.getDraft() !== action.draft) {
-              await ctx.answerCallback("This add flow expired. Start again.");
+              await recoverDraft(current, ctx, "This add flow expired. Start again.");
               return "handled" as const;
             }
             if (action.kind === "category") {
