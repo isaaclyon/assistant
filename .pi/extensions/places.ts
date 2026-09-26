@@ -124,9 +124,8 @@ export default function placesExtension(pi: ExtensionAPI): void {
     promptGuidelines: [
       "Use rank_places whenever the user asks to add, rank, compare, resume, cancel, or list restaurants, coffee shops, bars, or other saved places.",
       "When adding a place from Telegram, collect its name, then call rank_places with action categories and that name; the direct Telegram section owns category, sentiment, and comparison buttons.",
-      "After a rank_places result with kind=compare, ask exactly that comparison and preserve insertionId, revision, and existingPlace.id in the button prompts; never invent ranking state.",
-      "Render rank_places choices as telegram_button prompt actions when responding on Telegram, while keeping the visible response concise.",
-      "Before a destructive rank_places action, call rank_places request_confirmation and render its exact Confirm button; only that operation-bound token can authorize delete_place, delete_category, undo_addition, or cancel.",
+      "Render each returned buttonActions entry exactly as a telegram_button prompt action, keep the visible text short, and never invent ranking state.",
+      "Before delete_place, delete_category, undo_addition, or cancel, call request_confirmation and render its exact Confirm button; only that token authorizes the action.",
     ],
     parameters: Type.Object({
       action: ActionSchema,

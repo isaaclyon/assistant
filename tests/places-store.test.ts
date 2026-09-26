@@ -129,9 +129,27 @@ describe("places SQLite store", () => {
         state,
         now: 2,
       }),
-    ).toThrow(/stale insertion revision/i);
+    ).toThrowError(expect.objectContaining({ code: "STALE_ACTION" }));
     expect(store.getActiveInsertion("owner")?.revision).toBe(0);
     expect(store.listComparisons("insertion-1")).toEqual([]);
+  });
+
+  it("classifies duplicate names inside writes without changing published data", () => {
+    const category = store.createCategory("test", "Test", 1);
+    const other = store.createCategory("other", "Other", 1);
+    expect(() => store.createCategory("duplicate", " test ", 2)).toThrowError(
+      expect.objectContaining({ code: "DUPLICATE_CATEGORY" }),
+    );
+    expect(() => store.renameCategory(other.id, " TEST ", 2)).toThrowError(
+      expect.objectContaining({ code: "DUPLICATE_CATEGORY" }),
+    );
+    const input = { id: "first", categoryId: category.id, name: "First", sentiment: "liked" as const, index: 0, now: 2 };
+    store.insertPlace(input);
+    const snapshot = store.exportPublishedData();
+    expect(() => store.insertPlace({ ...input, id: "duplicate", name: " first " })).toThrowError(
+      expect.objectContaining({ code: "DUPLICATE_PLACE" }),
+    );
+    expect(store.exportPublishedData()).toEqual(snapshot);
   });
 
   it("publishes a completed insertion and session status in one transaction", () => {

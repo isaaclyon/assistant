@@ -4,7 +4,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const transport = await import(pathToFileURL(join(import.meta.dirname, "../.pi/lib/google-transport.ts")).href);
 const roots: string[] = [];
@@ -22,6 +22,60 @@ async function fixture() {
   await writeFile(passwordFile, "synthetic-password", { mode: 0o600 });
   return { binary: process.execPath, passwordFile, gogHome: root, args: ["-e", "process.stdout.write('{}')"] };
 }
+
+describe.each([
+  {
+    operation: "rich details",
+    request: (apiKeyFile: string, signal?: AbortSignal) => transport.fetchRichPlaceDetails({
+      apiKeyFile, placeId: "test", ...(signal ? { signal } : {}),
+    }),
+  },
+  {
+    operation: "candidate search",
+    request: (apiKeyFile: string, signal?: AbortSignal) => transport.fetchPlaceCandidates({
+      apiKeyFile, query: "coffee", maxResults: 15, ...(signal ? { signal } : {}),
+    }),
+  },
+])("Places HTTPS safeguards: $operation", ({ request }) => {
+  it("does not fetch for an already cancelled request or an unavailable key", async () => {
+    const options = await fixture();
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    await expect(request(options.passwordFile, AbortSignal.abort())).rejects.toThrow(/^Google Workspace command failed$/);
+    await expect(request(join(options.gogHome, "missing-secret"))).rejects.toThrow(/^Google Workspace command failed$/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["upstream failure", () => new Response("private upstream body", { status: 500 })],
+    ["malformed JSON", () => new Response("private malformed body")],
+    ["oversized content length", () => new Response("{}", { headers: { "content-length": "65537" } })],
+    ["oversized stream", () => new Response(new Uint8Array(65537))],
+    ["missing body", () => new Response(null)],
+  ] as const)("redacts %s", async (_name, response) => {
+    const options = await fixture();
+    vi.stubGlobal("fetch", vi.fn(async () => response()));
+    await expect(request(options.passwordFile)).rejects.toThrow(/^Google Workspace command failed$/);
+  });
+
+  it.each(["cancellation", "timeout"])("aborts an in-flight fetch on %s", async (reason) => {
+    const options = await fixture();
+    const caller = new AbortController();
+    const timeout = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeout.signal);
+    const fetch = vi.fn((_url: URL, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init.signal!.addEventListener("abort", () => reject(new Error("private fetch failure")), { once: true });
+    }));
+    vi.stubGlobal("fetch", fetch);
+    const pending = request(options.passwordFile, caller.signal);
+    const outcome = expect(pending).rejects.toThrow(/^Google Workspace command failed$/);
+    await expect.poll(() => fetch.mock.calls.length).toBe(1);
+    expect(timeoutSpy).toHaveBeenCalledWith(10_000);
+    (reason === "timeout" ? timeout : caller).abort();
+    await outcome;
+    expect(fetch.mock.calls[0]![1].signal!.aborted).toBe(true);
+  });
+});
 
 it("does not spawn a child for an already cancelled request", async () => {
   const options = await fixture();

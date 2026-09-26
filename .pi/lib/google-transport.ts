@@ -96,24 +96,24 @@ async function readBoundedResponse(response: Response, maxBytes: number): Promis
   return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }
 
-export async function fetchRichPlaceDetails(options: {
+async function fetchPlacesJson(options: {
   apiKeyFile: string;
-  placeId: string;
-  language?: string;
-  region?: string;
   signal?: AbortSignal;
-}): Promise<unknown> {
+}, prepare: () => { url: URL; fieldMask: string; body?: Record<string, unknown> }): Promise<unknown> {
   try {
     if (options.signal?.aborted) throw new Error(FAILURE_MESSAGE);
+    const request = prepare();
     const apiKey = await readPrivatePassword(options.apiKeyFile);
-    const url = new URL(`https://places.googleapis.com/v1/places/${encodeURIComponent(options.placeId)}`);
-    if (options.language) url.searchParams.set("languageCode", options.language);
-    if (options.region) url.searchParams.set("regionCode", options.region);
     const timeout = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
     const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
     if (signal.aborted) throw new Error(FAILURE_MESSAGE);
-    const response = await fetch(url, {
-      headers: { "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": RICH_PLACE_FIELDS },
+    const response = await fetch(request.url, {
+      ...(request.body ? { method: "POST", body: JSON.stringify(request.body) } : {}),
+      headers: {
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": request.fieldMask,
+        ...(request.body ? { "Content-Type": "application/json" } : {}),
+      },
       signal,
     });
     if (!response.ok) throw new Error(FAILURE_MESSAGE);
@@ -124,6 +124,21 @@ export async function fetchRichPlaceDetails(options: {
   }
 }
 
+export async function fetchRichPlaceDetails(options: {
+  apiKeyFile: string;
+  placeId: string;
+  language?: string;
+  region?: string;
+  signal?: AbortSignal;
+}): Promise<unknown> {
+  return fetchPlacesJson(options, () => {
+    const url = new URL(`https://places.googleapis.com/v1/places/${encodeURIComponent(options.placeId)}`);
+    if (options.language) url.searchParams.set("languageCode", options.language);
+    if (options.region) url.searchParams.set("regionCode", options.region);
+    return { url, fieldMask: RICH_PLACE_FIELDS };
+  });
+}
+
 export async function fetchPlaceCandidates(options: {
   apiKeyFile: string;
   query: string;
@@ -132,37 +147,21 @@ export async function fetchPlaceCandidates(options: {
   region?: string;
   signal?: AbortSignal;
 }): Promise<unknown> {
-  try {
-    if (options.signal?.aborted) throw new Error(FAILURE_MESSAGE);
+  return fetchPlacesJson(options, () => {
     if (!Number.isInteger(options.maxResults) || options.maxResults < 1 || options.maxResults > MAX_PLACE_CANDIDATES) {
       throw new Error(FAILURE_MESSAGE);
     }
-    const apiKey = await readPrivatePassword(options.apiKeyFile);
-    const url = new URL("https://places.googleapis.com/v1/places:searchText");
-    const timeout = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
-    const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
-    if (signal.aborted) throw new Error(FAILURE_MESSAGE);
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": apiKey,
-        "X-Goog-FieldMask": CANDIDATE_PLACE_FIELDS,
-      },
-      body: JSON.stringify({
+    return {
+      url: new URL("https://places.googleapis.com/v1/places:searchText"),
+      fieldMask: CANDIDATE_PLACE_FIELDS,
+      body: {
         textQuery: options.query,
         pageSize: options.maxResults,
         ...(options.language ? { languageCode: options.language } : {}),
         ...(options.region ? { regionCode: options.region } : {}),
-      }),
-      signal,
-    });
-    if (!response.ok) throw new Error(FAILURE_MESSAGE);
-    const body = await readBoundedResponse(response, DEFAULT_MAX_OUTPUT_BYTES);
-    return JSON.parse(body) as unknown;
-  } catch {
-    throw new Error(FAILURE_MESSAGE);
-  }
+      },
+    };
+  });
 }
 
 export async function runGogJson(options: {

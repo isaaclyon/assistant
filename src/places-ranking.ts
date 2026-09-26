@@ -1,3 +1,5 @@
+import { PlacesOperationError } from "./places-errors.js";
+
 export const PLACE_SENTIMENTS = ["liked", "alright", "disliked"] as const;
 
 export type Sentiment = (typeof PLACE_SENTIMENTS)[number];
@@ -83,7 +85,7 @@ function findBand(
   let high = ranking.length;
   for (let index = 0; index < ranking.length; index += 1) {
     const place = ranking[index];
-    if (!place) throw new Error("Ranking changed during insertion");
+    if (!place) throw new PlacesOperationError("STALE_ACTION", "Ranking changed during insertion");
     const order = SENTIMENT_ORDER.get(place.sentiment);
     if (order === undefined) throw new Error("Ranked place has an invalid sentiment");
     if (order >= targetOrder && low === ranking.length) low = index;
@@ -137,12 +139,12 @@ function assertState(
     currentSnapshot.length !== state.rankingSnapshot.length ||
     currentSnapshot.some((value, index) => value !== state.rankingSnapshot[index])
   ) {
-    throw new Error("Ranking changed while insertion was in progress");
+    throw new PlacesOperationError("STALE_ACTION", "Ranking changed while insertion was in progress");
   }
 
   const band = findBand(ranking, state.sentiment);
   if (state.bandStart !== band.low || state.bandEnd !== band.high) {
-    throw new Error("Ranking changed while insertion was in progress");
+    throw new PlacesOperationError("STALE_ACTION", "Ranking changed while insertion was in progress");
   }
 
   assertRange(state, state.bandStart, state.bandEnd);
@@ -218,7 +220,7 @@ export function answerPlaceComparison(
     throw new Error("Place insertion is already complete");
   }
   if (step.existingPlaceId !== expectedExistingPlaceId) {
-    throw new Error("Stale comparison target");
+    throw new PlacesOperationError("STALE_ACTION", "Stale comparison target");
   }
   if (winner !== "candidate" && winner !== "existing") {
     throw new Error("Invalid comparison winner");

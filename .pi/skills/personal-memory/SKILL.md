@@ -67,9 +67,8 @@ changed.
   person, pet, place, event, preference, or other saved fact, search memory
   first unless the conversation clearly establishes a public or general topic.
   Do not jump to web search or ask for clarification before this lookup.
-- Use the `assistant_memory_search` tool for retrieval. It is the preferred indexed path;
-  do not invoke the legacy `memory.mjs search` filesystem scan when the tool is
-  available. Use the CLI's `read` operation only for the relevant top result(s)
+- Use the `assistant_memory_search` tool for retrieval. Fall back to the CLI's
+  `search` scan only if that tool fails. Use the CLI's `read` operation only for the relevant top result(s)
   when the bounded search metadata and snippet are insufficient.
 - Use `assistant_session_search` instead when the user asks what was discussed, decided,
   attempted, or observed in an earlier conversation. Session evidence is

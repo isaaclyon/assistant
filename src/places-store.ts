@@ -3,6 +3,7 @@ import { chmod, link, mkdir, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { backup as backupDatabase, DatabaseSync } from "node:sqlite";
+import { PlacesOperationError } from "./places-errors.js";
 
 import {
   answerPlaceComparison,
@@ -447,6 +448,9 @@ export function openPlacesStore(dbPath: string): PlacesStore {
   const insertPlaceInternal = (input: InsertPlaceInput): StoredPlace => {
     const parsed = requireName(input.name, "Place name");
     const ranking = listPlaces(input.categoryId);
+    if (ranking.some((place) => place.normalizedName === parsed.normalized)) {
+      throw new PlacesOperationError("DUPLICATE_PLACE", "A place with that name already exists in this category.");
+    }
     if (!Number.isInteger(input.index) || input.index < 0 || input.index > ranking.length) {
       throw new Error("Place insertion index is outside the category ranking");
     }
@@ -476,6 +480,9 @@ export function openPlacesStore(dbPath: string): PlacesStore {
     createCategory(id, name, now) {
       const parsed = requireName(name, "Category name");
       return transaction(db, () => {
+        if (db.prepare("SELECT 1 FROM category WHERE normalized_name = ?").get(parsed.normalized)) {
+          throw new PlacesOperationError("DUPLICATE_CATEGORY", "That category already exists.");
+        }
         const next = db.prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 AS value FROM category").get() as unknown as { value: number };
         db.prepare("INSERT INTO category (id, name, normalized_name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
           .run(id, parsed.name, parsed.normalized, next.value, now, now);
@@ -486,6 +493,9 @@ export function openPlacesStore(dbPath: string): PlacesStore {
     renameCategory(id, name, now) {
       const parsed = requireName(name, "Category name");
       return transaction(db, () => {
+        if (db.prepare("SELECT 1 FROM category WHERE normalized_name = ? AND id != ?").get(parsed.normalized, id)) {
+          throw new PlacesOperationError("DUPLICATE_CATEGORY", "That category already exists.");
+        }
         const result = db.prepare("UPDATE category SET name = ?, normalized_name = ?, updated_at = ?, mutation_revision = mutation_revision + 1 WHERE id = ?")
           .run(parsed.name, parsed.normalized, now, id);
         if (result.changes !== 1) throw new Error("Category not found");
@@ -502,9 +512,9 @@ export function openPlacesStore(dbPath: string): PlacesStore {
     },
     deleteCategory(id, expected) {
       transaction(db, () => {
-        if (expected && (id !== expected.categoryId || getCategoryRevision(id) !== expected.revision)) throw new Error("Stale deletion confirmation: category changed");
+        if (expected && (id !== expected.categoryId || getCategoryRevision(id) !== expected.revision)) throw new PlacesOperationError("STALE_ACTION", "Stale deletion confirmation: category changed");
         const count = db.prepare("SELECT COUNT(*) AS value FROM place WHERE category_id = ?").get(id) as unknown as { value: number };
-        if (count.value > 0) throw new Error("Only an empty category can be deleted");
+        if (count.value > 0) throw new PlacesOperationError("INVALID_ACTION", "Only an empty category can be deleted");
         const result = db.prepare("DELETE FROM category WHERE id = ?").run(id);
         if (result.changes !== 1) throw new Error("Category not found");
       });
@@ -518,6 +528,10 @@ export function openPlacesStore(dbPath: string): PlacesStore {
         const parsed = changes.name === undefined
           ? undefined
           : requireName(changes.name, "Place name");
+        if (parsed && db.prepare("SELECT 1 FROM place WHERE category_id = ? AND normalized_name = ? AND id != ?")
+          .get(existing.categoryId, parsed.normalized, id)) {
+          throw new PlacesOperationError("DUPLICATE_PLACE", "A place with that name already exists in this category.");
+        }
         db.prepare("UPDATE place SET name = ?, normalized_name = ?, notes = ?, updated_at = ? WHERE id = ?")
           .run(
             parsed?.name ?? existing.name,
@@ -538,7 +552,7 @@ export function openPlacesStore(dbPath: string): PlacesStore {
     },
     deletePlace(id, expected) {
       transaction(db, () => {
-        if (expected && (getPlace(id)?.categoryId !== expected.categoryId || getCategoryRevision(expected.categoryId) !== expected.revision)) throw new Error("Stale deletion confirmation: place changed");
+        if (expected && (getPlace(id)?.categoryId !== expected.categoryId || getCategoryRevision(expected.categoryId) !== expected.revision)) throw new PlacesOperationError("STALE_ACTION", "Stale deletion confirmation: place changed");
         deletePlaceInternal(id);
         invalidateSourceInsertions(id, Date.now());
       });
@@ -553,7 +567,7 @@ export function openPlacesStore(dbPath: string): PlacesStore {
         if (input.sourcePlaceId) {
           const source = getPlace(input.sourcePlaceId);
           if (!source || source.id !== input.candidateId || source.name !== parsed.name || source.notes !== (input.notes ?? null)) {
-            throw new Error("Source place changed before repositioning");
+            throw new PlacesOperationError("STALE_ACTION", "Source place changed before repositioning");
           }
         }
         db.prepare(`INSERT INTO insertion_session
@@ -580,7 +594,7 @@ export function openPlacesStore(dbPath: string): PlacesStore {
         }
         const row = getInsertionRow(input.insertionId);
         if (!row || row.status !== "active") throw new Error("Active insertion not found");
-        if (row.revision !== input.expectedRevision) throw new Error("Stale insertion revision");
+        if (row.revision !== input.expectedRevision) throw new PlacesOperationError("STALE_ACTION", "Stale insertion revision");
         const current = insertionFromRow(row);
         const ranking = insertionRanking(row.category_id, current.sourcePlaceId);
         const expectedState = answerPlaceComparison(
@@ -612,7 +626,7 @@ export function openPlacesStore(dbPath: string): PlacesStore {
         }
         const row = getInsertionRow(input.insertionId);
         if (!row || row.status !== "active") throw new Error("Active insertion not found");
-        if (row.revision !== input.expectedRevision) throw new Error("Stale insertion revision");
+        if (row.revision !== input.expectedRevision) throw new PlacesOperationError("STALE_ACTION", "Stale insertion revision");
         const current = insertionFromRow(row);
         const previousState = undoPlaceComparison(current.state);
         const comparison = db.prepare("SELECT sequence FROM comparison WHERE insertion_id = ? AND undone_at IS NULL ORDER BY sequence DESC LIMIT 1").get(input.insertionId) as unknown as { sequence: number } | undefined;
@@ -643,7 +657,7 @@ export function openPlacesStore(dbPath: string): PlacesStore {
           return repeated;
         }
         if (row.status !== "active") throw new Error("Active insertion not found");
-        if (row.revision !== input.expectedRevision) throw new Error("Stale insertion revision");
+        if (row.revision !== input.expectedRevision) throw new PlacesOperationError("STALE_ACTION", "Stale insertion revision");
         const insertion = insertionFromRow(row);
         const ranking = insertionRanking(row.category_id, insertion.sourcePlaceId);
         const result = applyPlaceInsertion(ranking, insertion.state, { id: row.candidate_id, sentiment: insertion.sentiment });
@@ -651,7 +665,7 @@ export function openPlacesStore(dbPath: string): PlacesStore {
         if (actualIndex !== input.index) throw new Error("Completion index does not match insertion state");
         const source = insertion.sourcePlaceId ? getPlace(insertion.sourcePlaceId) : undefined;
         if (insertion.sourcePlaceId && (!source || source.name !== row.name || source.notes !== row.notes)) {
-          throw new Error("Source place changed during repositioning");
+          throw new PlacesOperationError("STALE_ACTION", "Source place changed during repositioning");
         }
         if (source) {
           deletePlaceInternal(source.id);
@@ -670,10 +684,10 @@ export function openPlacesStore(dbPath: string): PlacesStore {
         if (!row || row.status !== "completed" || row.source_place_id !== null) {
           throw new Error("Completed addition not found");
         }
-        if (row.undone_at !== null) throw new Error("Undo is no longer available");
+        if (row.undone_at !== null) throw new PlacesOperationError("INVALID_ACTION", "Undo is no longer available");
         const place = getPlace(row.candidate_id);
         if (!place || row.completion_category_revision === null || getCategoryRevision(row.category_id) !== row.completion_category_revision) {
-          throw new Error("Undo is no longer available because the category changed");
+          throw new PlacesOperationError("INVALID_ACTION", "Undo is no longer available because the category changed");
         }
         deletePlaceInternal(place.id);
         db.prepare("UPDATE insertion_session SET undone_at = ?, updated_at = ? WHERE id = ?")
@@ -684,7 +698,7 @@ export function openPlacesStore(dbPath: string): PlacesStore {
       transaction(db, () => {
         const result = db.prepare("UPDATE insertion_session SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'active' AND revision = ?")
           .run(now, insertionId, expectedRevision);
-        if (result.changes !== 1) throw new Error("Active insertion not found or revision is stale");
+        if (result.changes !== 1) throw new PlacesOperationError("STALE_ACTION", "Active insertion not found or revision is stale");
       });
     },
     exportPublishedData() {
