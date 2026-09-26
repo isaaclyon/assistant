@@ -15,9 +15,9 @@ interface Service {
 }
 interface TelegramTargetScope { getActiveTarget(): Target | undefined }
 const MODELS = [
-  "openai-codex/gpt-5.6-luna",
-  "openai-codex/gpt-5.6-sol",
-  "openai-codex/gpt-5.6-terra",
+  "openai-codex/gpt-6-luna",
+  "openai-codex/gpt-6-sol",
+  "openai-codex/gpt-6-astra",
 ] as const;
 const DEFAULT_MODEL: Model = MODELS[0];
 const SERVICE_KEY = Symbol.for("pi-telegram-bridge.subagent-registry");
