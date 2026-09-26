@@ -7,10 +7,12 @@ import { isDeepStrictEqual } from "node:util";
 
 import {
   createHeartbeatRunner,
+  type HeartbeatCheckerArgs,
   parseHeartbeatFields,
   runCompiledHeartbeatChecker,
   type StatefulHeartbeatDefinition,
 } from "./heartbeat.js";
+import { createTypeSafeJudge, type SemanticJudge } from "./semantic-judge.js";
 import { type WebhookServer, startWebhookServer } from "./webhook.js";
 import { openJobOccurrenceLedger, type JobOccurrence } from "./job-occurrences.js";
 
@@ -338,7 +340,12 @@ export interface JobSchedulerOptions {
   nowMs?: () => number;
   tickIntervalMs?: number;
   checkTimeoutMs?: number;
-  runCheck?: (checkerId: string, timeoutMs: number) => Promise<CheckResult>;
+  runCheck?: (
+    checkerId: string,
+    timeoutMs: number,
+    args?: HeartbeatCheckerArgs,
+  ) => Promise<CheckResult>;
+  judge?: SemanticJudge;
 }
 
 export interface JobDispatch {
@@ -372,6 +379,7 @@ export async function startJobScheduler({
   tickIntervalMs = 30_000,
   checkTimeoutMs = 60_000,
   runCheck = runCompiledHeartbeatChecker,
+  judge = createTypeSafeJudge(),
 }: JobSchedulerOptions): Promise<JobScheduler> {
   const jobsPath = join(stateDir, "jobs.json");
   const statePath = join(stateDir, "jobs-state.json");
@@ -424,6 +432,7 @@ export async function startJobScheduler({
     logger,
     nowMs,
     checkTimeoutMs,
+    judge,
   });
 
   const persistState = async (): Promise<void> => {

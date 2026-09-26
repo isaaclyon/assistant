@@ -75,7 +75,10 @@ capability profiles.
    `PI_CREDENTIAL_HOUSEHOLD_*`; shared files only
    `PI_CREDENTIAL_HOUSEHOLD_*`; builder files only
    `PI_CREDENTIAL_ENGINEERING_*`. Optional operational keys are the webhook
-   host/port, memory path/auto-commit settings, and human-idle session timeout.
+   host/port, memory path/auto-commit settings, human-idle session timeout, and
+   `PI_TELEGRAM_TYPESAFE_API_KEY_FILE` (an absolute path to a mode-`0600`
+   TypeSafe API key file, needed only on the jobs coordinator for
+   `semantic-match` heartbeats; see ADR-0031).
    Validation reports key names, never values.
 
    Port `0` requests an ephemeral listener and may be reused. Any fixed

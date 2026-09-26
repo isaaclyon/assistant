@@ -71,7 +71,15 @@ host-evaluated rule, and agent-prompt reaction. Checkers emit bounded structured
 observations and never own mutable state. The host resolves checker IDs inside its
 immutable release and executes them directly with Node, while atomically retaining
 only the latest observation and temporal markers. See
-[ADR-0019](docs/adr/0019-stateful-heartbeat-observations.md).
+[ADR-0019](docs/adr/0019-stateful-heartbeat-observations.md). A `semantic-match`
+rule sends only newly observed checker items to TypeSafe's Jev model, one pinned
+yes/no question per item, and wakes the agent only for items at or above the
+job's threshold. A judge failure keeps the previous observation so the same items
+are judged again; see
+[ADR-0031](docs/adr/0031-judge-heartbeat-items-with-jev.md). Jobs may pass
+bounded `checker.args` to a checker as one JSON argument, which lets the reusable
+`web-page-items` checker watch any public HTTPS page; see
+[ADR-0032](docs/adr/0032-pass-bounded-arguments-to-heartbeat-checkers.md).
 
 The places extension presents its deterministic Telegram UI through a
 pi-telegram registered section. Slash commands and active-turn tool handoffs
