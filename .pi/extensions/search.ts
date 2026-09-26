@@ -59,8 +59,10 @@ function resolveContext(): SearchContext {
     process.env.PI_TELEGRAM_BRIDGE_SESSION_DIR?.trim();
   const resourceRoot =
     process.env.PI_TELEGRAM_BRIDGE_RESOURCE_ROOT?.trim() ?? process.cwd();
+  const instanceId = process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID?.trim();
   if (
     !stateDir ||
+    !instanceId ||
     !isAbsolute(stateDir) ||
     !principalId ||
     !vaultRoot ||
@@ -74,9 +76,7 @@ function resolveContext(): SearchContext {
   }
   return {
     stateDir: resolve(stateDir),
-    instanceId:
-      process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID?.trim() ??
-      "compatibility-singleton",
+    instanceId,
     principalId,
     memoryView: memoryView as SearchContext["memoryView"],
     vaultRoot: resolve(vaultRoot),

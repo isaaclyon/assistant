@@ -23,9 +23,8 @@ place's position within that sentiment band.
 - The host binds that profile to Isaac's configured private Telegram surface
   and actor before the extension loads. Active insertion ownership is keyed by
   the trusted instance ID and principal, never by model- or user-supplied IDs.
-  Emma, household, builder, and unrelated chat contexts do not load the tool.
-  The legacy compatibility singleton uses a fixed local owner key only when the
-  host has already bound the `isaac` principal and private Telegram surface.
+  Emma, household, builder, and unrelated chat contexts do not load the tool,
+  and neither does a process without a host-bound instance ID.
 - Place data remains in that instance's local state tree. It is not sent to a
   discovery, maps, or restaurant API.
 - Data remains until the user deletes it or removes the local database. Backup

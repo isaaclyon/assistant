@@ -8,83 +8,34 @@ import {
   ensureCodexConfig,
   isProcessAlive,
   loadBridgeInstanceConfig,
-  loadBridgeRuntimeConfig,
   readDefaultTelegramLock,
   readTelegramLock,
-  resolveBridgeConfig,
   resolveBridgeInstanceConfig,
   shouldRecoverTelegramOwnership,
 } from "../src/config.js";
 import { parseBridgeInstanceManifest } from "../src/instances.js";
 
-describe("resolveBridgeConfig", () => {
-  it("uses a dedicated state directory and the home directory as the agent cwd", () => {
-    const config = resolveBridgeConfig({}, "/home/tester", "/srv/assistant");
-
-    expect(config.cwd).toBe("/srv/assistant");
-    expect(config.agentDir).toBe("/home/tester/.pi/agent");
-    expect(config.stateDir).toBe(
-      "/home/tester/.local/state/pi-telegram-bridge",
-    );
-    expect(config.sessionDir).toBe(
-      "/home/tester/.local/state/pi-telegram-bridge/sessions",
-    );
-    expect(config.sessionIdleMs).toBe(0);
-    expect(config.codexConfigPath).toBe(
-      "/home/tester/.local/state/pi-telegram-bridge/pi-codex-conversion.json",
-    );
-  });
-
-  it("honors explicit runtime paths", () => {
-    const config = resolveBridgeConfig(
+const singleInstanceManifest = () => parseBridgeInstanceManifest(
+  JSON.stringify({
+    version: 1,
+    instances: [
       {
-        PI_CODING_AGENT_DIR: "/agent",
-        PI_TELEGRAM_BRIDGE_CWD: "/workspace",
-        PI_TELEGRAM_BRIDGE_STATE_DIR: "/state",
-        PI_TELEGRAM_CODEX_CONFIG: "/config/codex.json",
+        id: "isaac",
+        displayName: "Isaac Bot",
+        principal: "isaac",
+        telegramProfile: "isaac",
+        telegramSurface: { type: "private" },
+        workspaceCwd: "/worktrees/isaac",
+        capabilityProfile: "personal-isaac",
+        credentialScope: "isaac-personal",
+        memoryView: "owner-and-household",
+        jobsRole: "coordinator",
       },
-      "/home/tester",
-    );
-
-    expect(config).toEqual({
-      agentDir: "/agent",
-      codexConfigPath: "/config/codex.json",
-      cwd: "/workspace",
-      sessionDir: "/state/sessions",
-      stateDir: "/state",
-      sessionIdleMs: 0,
-      webhookHost: "127.0.0.1",
-      webhookPort: 8776,
-    });
-  });
-
-  it("parses an opt-in bounded session idle timeout", () => {
-    expect(
-      resolveBridgeConfig({ PI_TELEGRAM_SESSION_IDLE_HOURS: "8" }, "/home/tester")
-        .sessionIdleMs,
-    ).toBe(8 * 60 * 60 * 1_000);
-    for (const value of ["nope", "-1", "Infinity", "8761"]) {
-      expect(() =>
-        resolveBridgeConfig({ PI_TELEGRAM_SESSION_IDLE_HOURS: value }, "/home/tester"),
-      ).toThrow(/PI_TELEGRAM_SESSION_IDLE_HOURS.*0.*8760/i);
-    }
-  });
-
-  it("honors webhook listener overrides and rejects invalid ports", () => {
-    const config = resolveBridgeConfig(
-      {
-        PI_TELEGRAM_BRIDGE_WEBHOOK_HOST: "0.0.0.0",
-        PI_TELEGRAM_BRIDGE_WEBHOOK_PORT: "9000",
-      },
-      "/home/tester",
-    );
-    expect(config.webhookHost).toBe("0.0.0.0");
-    expect(config.webhookPort).toBe(9000);
-    expect(() =>
-      resolveBridgeConfig({ PI_TELEGRAM_BRIDGE_WEBHOOK_PORT: "not-a-port" }, "/home/tester"),
-    ).toThrow(/port number/);
-  });
-});
+    ],
+  }),
+);
+const resolveIsaac = (env: Record<string, string>) =>
+  resolveBridgeInstanceConfig(singleInstanceManifest(), "isaac", env, "/home/tester", "/release");
 
 describe("resolveBridgeInstanceConfig", () => {
   it("selects one stable instance and derives its resource, workspace, and private state boundaries", () => {
@@ -196,26 +147,24 @@ describe("resolveBridgeInstanceConfig", () => {
     });
   });
 
-  it("keeps the current singleton paths only when no instance migration is configured", async () => {
-    await expect(
-      loadBridgeRuntimeConfig(
-        {
-          PI_TELEGRAM_BRIDGE_CWD: "/srv/current-assistant",
-          PI_TELEGRAM_BRIDGE_STATE_DIR: "/state/current-assistant",
-        },
-        "/home/tester",
-        "/opt/assistant/releases/abc123",
-      ),
-    ).resolves.toEqual({
-      agentDir: "/home/tester/.pi/agent",
-      codexConfigPath: "/state/current-assistant/pi-codex-conversion.json",
-      cwd: "/srv/current-assistant",
-      sessionDir: "/state/current-assistant/sessions",
-      stateDir: "/state/current-assistant",
-      sessionIdleMs: 0,
-      webhookHost: "127.0.0.1",
-      webhookPort: 8776,
-    });
+  it("requires an explicit instance ID", async () => {
+    await expect(loadBridgeInstanceConfig({}, "/home/tester", "/release"))
+      .rejects.toThrow(/PI_TELEGRAM_BRIDGE_INSTANCE_ID must select one bridge instance/);
+  });
+
+  it("parses an opt-in bounded session idle timeout", () => {
+    expect(resolveIsaac({ PI_TELEGRAM_SESSION_IDLE_HOURS: "8" }).sessionIdleMs).toBe(8 * 60 * 60 * 1_000);
+    for (const value of ["nope", "-1", "Infinity", "8761"]) {
+      expect(() => resolveIsaac({ PI_TELEGRAM_SESSION_IDLE_HOURS: value }))
+        .toThrow(/PI_TELEGRAM_SESSION_IDLE_HOURS.*0.*8760/i);
+    }
+  });
+
+  it("honors webhook listener overrides and rejects invalid ports", () => {
+    expect(resolveIsaac({})).toMatchObject({ webhookHost: "127.0.0.1", webhookPort: 8776 });
+    const config = resolveIsaac({ PI_TELEGRAM_BRIDGE_WEBHOOK_HOST: "0.0.0.0", PI_TELEGRAM_BRIDGE_WEBHOOK_PORT: "9000" });
+    expect(config).toMatchObject({ webhookHost: "0.0.0.0", webhookPort: 9000 });
+    expect(() => resolveIsaac({ PI_TELEGRAM_BRIDGE_WEBHOOK_PORT: "not-a-port" })).toThrow(/port number/);
   });
 });
 

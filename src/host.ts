@@ -2,9 +2,7 @@ import {
   type AgentSession,
   type AgentSessionRuntime,
   type CreateAgentSessionRuntimeFactory,
-  DefaultPackageManager,
   SessionManager,
-  SettingsManager,
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
@@ -20,7 +18,6 @@ import {
   type ConversationSessionTrigger,
 } from "./conversation-session-policy.js";
 import {
-  type BridgeConfig,
   type BridgeInstanceConfig,
   type TelegramLockView,
   ensureCodexConfig,
@@ -70,7 +67,7 @@ export interface BridgeLogger {
 }
 
 export interface BridgeHostOptions {
-  config: BridgeConfig | BridgeInstanceConfig;
+  config: BridgeInstanceConfig;
   logger?: BridgeLogger;
   onShutdownRequest?: () => void;
   onRestartRequest?: () => void;
@@ -94,9 +91,9 @@ export interface BridgeHost {
 }
 
 export function shouldStartJobScheduler(
-  config: BridgeConfig | BridgeInstanceConfig | { jobsRole?: BridgeInstanceConfig["jobsRole"] },
+  config: Pick<BridgeInstanceConfig, "jobsRole">,
 ): boolean {
-  return !("jobsRole" in config) || config.jobsRole === "coordinator";
+  return config.jobsRole === "coordinator";
 }
 
 export function resolveTelegramHostHouseholdGroup(
@@ -137,47 +134,29 @@ export async function startBridgeHost({
   bindInbox = bindTelegramInboundInbox,
   bindHouseholdGroup = bindTelegramHostHouseholdGroup,
 }: BridgeHostOptions): Promise<BridgeHost> {
-  const resourceRoot =
-    "resourceRoot" in config ? config.resourceRoot : config.cwd;
-  const workspaceCwd =
-    "workspaceCwd" in config ? config.workspaceCwd : config.cwd;
-  const inboxPath =
-    "inboxPath" in config ? config.inboxPath : join(config.stateDir, "inbox.db");
-  const telegramProfile =
-    "telegramProfile" in config ? config.telegramProfile : "default";
+  const { resourceRoot, workspaceCwd, inboxPath, telegramProfile, capabilityProfile } = config;
   const codexExtensionPath = resolveCodexExtensionPath();
   const retryExtensionPath = resolveRetryExtensionPath();
   process.env.PI_CODING_AGENT_DIR = config.agentDir;
   process.env.PI_CODEX_CONVERSION_CONFIG_PATH = config.codexConfigPath;
   process.env.PI_TELEGRAM_BRIDGE_STATE_DIR = config.stateDir;
   process.env.PI_TELEGRAM_BRIDGE_SESSION_DIR = config.sessionDir;
-  if ("instanceId" in config) {
-    // Extensions and skill scripts read these; publish them from the resolved
-    // config instead of relying on the launcher to have set them. The singleton
-    // leaves the instance ID unset: its presence selects fleet config loading.
-    process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID = config.instanceId;
-    process.env.PI_TELEGRAM_BRIDGE_RESOURCE_ROOT = config.resourceRoot;
-    process.env.PI_TELEGRAM_PRINCIPAL = config.principal;
-    process.env.PI_TELEGRAM_MEMORY_VIEW = config.memoryView;
-    process.env.PI_TELEGRAM_BRIDGE_SESSION_ROOTS = JSON.stringify(
-      config.configuredInstanceIds.map((instanceId) =>
-        join(config.stateRoot, "instances", instanceId, "sessions"),
-      ),
-    );
-  } else {
-    delete process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID;
-    process.env.PI_TELEGRAM_BRIDGE_RESOURCE_ROOT = resourceRoot;
-    process.env.PI_TELEGRAM_PRINCIPAL = "isaac";
-    process.env.PI_TELEGRAM_MEMORY_VIEW = "owner-and-household";
-    process.env.PI_TELEGRAM_BRIDGE_SESSION_ROOTS = JSON.stringify([
-      config.sessionDir,
-    ]);
-  }
+  // Extensions and skill scripts read these; publish them from the resolved
+  // config instead of relying on the launcher to have set them.
+  process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID = config.instanceId;
+  process.env.PI_TELEGRAM_BRIDGE_RESOURCE_ROOT = resourceRoot;
+  process.env.PI_TELEGRAM_PRINCIPAL = config.principal;
+  process.env.PI_TELEGRAM_MEMORY_VIEW = config.memoryView;
+  process.env.PI_TELEGRAM_BRIDGE_SESSION_ROOTS = JSON.stringify(
+    config.configuredInstanceIds.map((instanceId) =>
+      join(config.stateRoot, "instances", instanceId, "sessions"),
+    ),
+  );
   initTheme();
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   await mkdir(config.sessionDir, { recursive: true, mode: 0o700 });
   await ensureCodexConfig(config.codexConfigPath);
-  const instanceLabel = "instanceId" in config ? config.instanceId : "singleton";
+  const instanceLabel = config.instanceId;
   const sessionIdleMs = config.sessionIdleMs ?? 0;
   const conversationSessionPolicy = sessionIdleMs > 0
     ? await ConversationSessionPolicy.open({
@@ -194,8 +173,6 @@ export async function startBridgeHost({
       : `Idle session rotation disabled for ${instanceLabel}.`,
   );
 
-  const capabilityProfile =
-    "capabilityProfile" in config ? config.capabilityProfile : undefined;
   let telegramAgentsPath = join(resourceRoot, ".pi", "telegram", "AGENTS.md");
   const bridgeRealPath = await realpath(resourceRoot);
   const bridgeRealPrefix = bridgeRealPath + sep;
@@ -222,48 +199,6 @@ export async function startBridgeHost({
     }
   };
 
-  const resourceManager = new DefaultPackageManager({
-    cwd: resourceRoot,
-    agentDir: config.agentDir,
-    settingsManager: SettingsManager.create(workspaceCwd, config.agentDir),
-  });
-  const discoverRepoResources = async (): Promise<{
-    extensions: string[];
-    skills: string[];
-  }> => {
-    const resolved = await resourceManager.resolveExtensionSources(
-      [join(resourceRoot, ".pi")],
-      { temporary: true },
-    );
-    const keepInsideBridge = async (
-      path: string,
-      kind: "extension" | "skill",
-    ): Promise<boolean> => {
-      try {
-        const target = await realpath(path);
-        if (isInsideBridge(target)) {
-          return true;
-        }
-      } catch {
-        // Missing or unreadable resources are excluded before Pi can load them.
-      }
-      logger.warn(`Ignoring non-repo ${kind}: ${path}`);
-      return false;
-    };
-    const extensions: string[] = [];
-    for (const resource of resolved.extensions) {
-      if (resource.enabled && (await keepInsideBridge(resource.path, "extension"))) {
-        extensions.push(resource.path);
-      }
-    }
-    const skills: string[] = [];
-    for (const resource of resolved.skills) {
-      if (resource.enabled && (await keepInsideBridge(resource.path, "skill"))) {
-        skills.push(resource.path);
-      }
-    }
-    return { extensions, skills };
-  };
   let refreshRuntimeResources: () => Promise<void> = async () => {};
 
   // Every process-local binding registers its release here as it succeeds.
@@ -314,23 +249,14 @@ export async function startBridgeHost({
     ];
     const additionalSkillPaths: string[] = [];
     const refreshRepoResources = async (): Promise<void> => {
-      const discovered = capabilityProfile
-        ? await loadCapabilityProfile(resourceRoot, capabilityProfile).then(
-            (selection) => {
-              telegramAgentsPath = selection.instructionsPath;
-              return {
-                extensions: selection.extensionPaths,
-                skills: selection.skillPaths,
-              };
-            },
-          )
-        : await discoverRepoResources();
+      const selection = await loadCapabilityProfile(resourceRoot, capabilityProfile);
+      telegramAgentsPath = selection.instructionsPath;
       additionalExtensionPaths.splice(
         3,
         additionalExtensionPaths.length - 3,
-        ...discovered.extensions,
+        ...selection.extensionPaths,
       );
-      additionalSkillPaths.splice(0, additionalSkillPaths.length, ...discovered.skills);
+      additionalSkillPaths.splice(0, additionalSkillPaths.length, ...selection.skillPaths);
     };
     await refreshRepoResources();
     const services = await createAgentSessionServices({
@@ -680,7 +606,7 @@ export async function startBridgeHost({
         prompt: (text, options) => runtime.session.prompt(text, options),
       }, prompt, preflightResult, jobPromptAbort.signal);
     };
-    const jobRecipientId = "instanceId" in config ? config.instanceId : "local";
+    const jobRecipientId = config.instanceId;
     const drainInstanceJobHandoffs = (): Promise<void> => {
       if (stopping) return Promise.resolve();
       if (jobHandoffDrainPromise) return jobHandoffDrainPromise;
@@ -795,12 +721,8 @@ export async function startBridgeHost({
           });
         },
         logger,
-        ...("instanceId" in config
-          ? {
-              validTargets: new Set(config.configuredInstanceIds),
-              requireTargets: true,
-            }
-          : {}),
+        validTargets: new Set(config.configuredInstanceIds),
+        requireTargets: true,
       });
     } else {
       logger.info("Scheduled-work evaluation is disabled in this instance process.");

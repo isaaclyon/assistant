@@ -12,23 +12,27 @@ import { drainJobHandoffs, enqueueJobHandoff } from "../src/job-handoff.js";
 
 describe("schedule-reminders-and-jobs helper", () => {
   it("inspects and recovers only the host-bound recipient with exact evidence", async () => {
-    const stateDir = await mkdtemp(join(tmpdir(), "jobs-cli-recovery-"));
+    const stateRoot = await mkdtemp(join(tmpdir(), "jobs-cli-recovery-"));
+    const stateDir = join(stateRoot, "instances", "isaac");
+    const env = { PI_TELEGRAM_BRIDGE_INSTANCE_ID: "isaac" };
     await enqueueJobHandoff({
-      stateRoot: stateDir, coordinatorStateDir: stateDir, local: true, target: "local",
+      stateRoot, coordinatorStateDir: stateDir, target: "isaac",
       jobId: "synthetic", eventId: "synthetic", prompt: "Private fixture",
     });
-    await drainJobHandoffs({ stateDir, instanceId: "local", inject: async () => {} });
-    const inspected = await applyJobsRequest({ operation: "inspect_handoffs" }, { stateDir, env: {} });
+    await drainJobHandoffs({ stateDir, instanceId: "isaac", inject: async () => {} });
+    await expect(applyJobsRequest({ operation: "inspect_handoffs" }, { stateDir, env: {} }))
+      .rejects.toThrow(/Recipient instance binding is required/);
+    const inspected = await applyJobsRequest({ operation: "inspect_handoffs" }, { stateDir, env });
     expect(JSON.stringify(inspected)).not.toContain("Private fixture");
     const entry = (inspected.entries as Array<Record<string, unknown>>)[0]!;
     await expect(applyJobsRequest({
       operation: "recover_handoff", dispatchId: entry.dispatchId, state: entry.state,
       revision: entry.revision, action: "retry", target: "emma",
-    }, { stateDir, env: {} })).rejects.toThrow(/field/);
+    }, { stateDir, env })).rejects.toThrow(/field/);
     expect(await applyJobsRequest({
       operation: "recover_handoff", dispatchId: entry.dispatchId, state: entry.state,
       revision: entry.revision, action: "acknowledge",
-    }, { stateDir, env: {} })).toMatchObject({ ok: true, boundary: "operator_acknowledged" });
+    }, { stateDir, env })).toMatchObject({ ok: true, boundary: "operator_acknowledged" });
   });
 
   it("does not acknowledge a republished definition with a previous rejection", async () => {
@@ -92,6 +96,8 @@ describe("schedule-reminders-and-jobs helper", () => {
       PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST: manifestPath,
       PI_TELEGRAM_BRIDGE_STATE_ROOT: root,
     })).resolves.toBe(join(root, "instances", "isaac"));
+    await expect(resolveCoordinatorStateDir({ PI_TELEGRAM_BRIDGE_STATE_ROOT: root }))
+      .rejects.toThrow(/manifest is required/);
   });
 
   it("adds relative reminders, prunes fired reminders, and writes schema 3 atomically", async () => {

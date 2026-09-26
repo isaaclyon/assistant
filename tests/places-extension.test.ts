@@ -261,8 +261,8 @@ describe("places extension", () => {
     process.env.PI_TELEGRAM_PRINCIPAL = "isaac";
     delete process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID;
     handlers.get("session_start")?.();
-    const singleton = await tool?.execute("call-5", { action: "menu" });
-    expect(singleton?.details).toMatchObject({ ok: true });
+    const unbound = await tool?.execute("call-5", { action: "menu" });
+    expect(unbound?.details).toMatchObject({ ok: false, error: { code: "UNAVAILABLE" } });
     await rm(stateDir, { recursive: true, force: true });
     unbindPresenter();
     sectionRegistry.clear();

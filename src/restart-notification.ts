@@ -23,19 +23,17 @@ export interface RestartMarkerOwner {
 export interface NotifyPendingRestartOptions {
   stateDir: string;
   agentDir: string;
-  instanceId?: string;
-  telegramProfile?: string;
+  instanceId: string;
+  telegramProfile: string;
   telegramSurface?: BridgeTelegramSurface;
   fetchImpl?: typeof fetch;
 }
 
 export function markRestartPending(
   stateDir: string,
-  owner?: RestartMarkerOwner,
+  owner: RestartMarkerOwner,
 ): void {
-  const content = owner
-    ? `${JSON.stringify({ version: 1, ...owner }, null, 2)}\n`
-    : "";
+  const content = `${JSON.stringify({ version: 1, ...owner }, null, 2)}\n`;
   writeFileSync(join(stateDir, RESTART_PENDING_FILE), content, {
     encoding: "utf8",
     mode: 0o600,
@@ -46,7 +44,7 @@ export async function notifyPendingRestart({
   stateDir,
   agentDir,
   instanceId,
-  telegramProfile = "default",
+  telegramProfile,
   telegramSurface = { type: "private" },
   fetchImpl = fetch,
 }: NotifyPendingRestartOptions): Promise<boolean> {
@@ -60,36 +58,29 @@ export async function notifyPendingRestart({
       cause: error,
     });
   }
-  const serializedMarker = markerContent.trim();
-  if (serializedMarker) {
-    let marker: RestartMarker;
-    try {
-      marker = JSON.parse(serializedMarker) as RestartMarker;
-    } catch (error) {
-      throw new Error("Restart notification marker is not valid JSON.", {
-        cause: error,
-      });
-    }
-    if (
-      marker.version !== 1 ||
-      typeof marker.instanceId !== "string" ||
-      typeof marker.telegramProfile !== "string"
-    ) {
-      throw new Error("Restart notification marker has an unsupported format.");
-    }
-    if (instanceId && marker.instanceId !== instanceId) {
-      throw new Error(
-        `Restart notification marker belongs to instance ${marker.instanceId}, not ${instanceId}.`,
-      );
-    }
-    if (marker.telegramProfile !== telegramProfile) {
-      throw new Error(
-        `Restart notification marker belongs to Telegram profile ${marker.telegramProfile}, not ${telegramProfile}.`,
-      );
-    }
-  } else if (instanceId && instanceId !== "isaac") {
+  let marker: RestartMarker;
+  try {
+    marker = JSON.parse(markerContent) as RestartMarker;
+  } catch (error) {
+    throw new Error("Restart notification marker is not valid JSON.", {
+      cause: error,
+    });
+  }
+  if (
+    marker.version !== 1 ||
+    typeof marker.instanceId !== "string" ||
+    typeof marker.telegramProfile !== "string"
+  ) {
+    throw new Error("Restart notification marker has an unsupported format.");
+  }
+  if (marker.instanceId !== instanceId) {
     throw new Error(
-      "A legacy restart notification marker may be claimed only by the Isaac migration instance.",
+      `Restart notification marker belongs to instance ${marker.instanceId}, not ${instanceId}.`,
+    );
+  }
+  if (marker.telegramProfile !== telegramProfile) {
+    throw new Error(
+      `Restart notification marker belongs to Telegram profile ${marker.telegramProfile}, not ${telegramProfile}.`,
     );
   }
   await sendTelegramNotification({

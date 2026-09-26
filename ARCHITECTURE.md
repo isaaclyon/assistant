@@ -9,7 +9,7 @@
 - **GitHub Actions:** owns post-merge validation and serialized production deployment through the server's repository-scoped runner.
 - **Tailscale Serve:** owns tailnet-only HTTPS and static delivery for editable Messages links.
 
-The host loads a full-commit-pinned `isaaclyon/pi-telegram` fork through Pi's `DefaultResourceLoader` and binds extensions in RPC mode. A version- and source-checked postinstall patch replaces raw tool-call status labels with deterministic, privacy-safe activity descriptions; see [ADR-0007](docs/adr/0007-patch-telegram-tool-activity-labels.md). The RPC binding includes Pi's official command-context session actions (`waitForIdle`, `newSession`, `fork`, tree navigation, session switching, and reload). The fork's narrow process-local host capability delegates Telegram `/new` to `AgentSessionRuntime.newSession()` without exposing the runtime or retaining stale extension contexts. In fleet mode, the host separates mutable `workspaceCwd` from immutable `resourceRoot`, disables hierarchical discovery, and supplies only the selected profile from `.pi/capabilities.json`; see [ADR-0009](docs/adr/0009-isolate-telegram-agent-instructions.md) and [ADR-0020](docs/adr/0020-run-a-household-bot-fleet-from-one-release.md). Canonicalized resources must remain inside the release, and symlink escapes are rejected. Global Pi/Agents directories and workspace-local capabilities never execute in the bridge. Filesystem tool access itself is not restricted to the cwd.
+The host loads a full-commit-pinned `isaaclyon/pi-telegram` fork through Pi's `DefaultResourceLoader` and binds extensions in RPC mode. A version- and source-checked postinstall patch replaces raw tool-call status labels with deterministic, privacy-safe activity descriptions; see [ADR-0007](docs/adr/0007-patch-telegram-tool-activity-labels.md). The RPC binding includes Pi's official command-context session actions (`waitForIdle`, `newSession`, `fork`, tree navigation, session switching, and reload). The fork's narrow process-local host capability delegates Telegram `/new` to `AgentSessionRuntime.newSession()` without exposing the runtime or retaining stale extension contexts. The host separates each instance's mutable `workspaceCwd` from the immutable `resourceRoot`, disables hierarchical discovery, and supplies only the selected profile from `.pi/capabilities.json`; see [ADR-0009](docs/adr/0009-isolate-telegram-agent-instructions.md) and [ADR-0020](docs/adr/0020-run-a-household-bot-fleet-from-one-release.md). Canonicalized resources must remain inside the release, and symlink escapes are rejected. Global Pi/Agents directories and workspace-local capabilities never execute in the bridge. Filesystem tool access itself is not restricted to the cwd.
 
 The host explicitly loads the pinned, repo-installed Codex conversion and retry dependencies; ordinary Pi sessions opened in this repo do not auto-discover them. The retry extension classifies transient Codex websocket/backend failures and stalled streams for Pi's built-in retry policy. A version-checked install patch makes `pi-telegram` finalize the active turn on Pi's `agent_settled` event so retries keep their Telegram destination. Another patch gives the Codex extension a bridge-only settings path while preserving the shared Pi agent directory required by credentials and Telegram ownership. See ADR-0002, ADR-0004, and ADR-0013.
 
@@ -17,12 +17,12 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 
 | State | Location | Owner |
 | --- | --- | --- |
-| Pi session | `~/.local/state/pi-telegram-bridge/sessions` | Pi `SessionManager` |
+| Pi session | `<stateDir>/sessions` | Pi `SessionManager` |
 | Pi credentials/settings | `~/.pi/agent` | Pi |
-| Telegram Codex settings | `~/.local/state/pi-telegram-bridge/pi-codex-conversion.json` | Codex conversion extension |
+| Telegram Codex settings | `<stateDir>/pi-codex-conversion.json` | Codex conversion extension |
 | Telegram token/pairing/offset | `~/.pi/agent/telegram.json` | pi-telegram |
 | Telegram polling ownership | `~/.pi/agent/locks.json` | pi-telegram |
-| Bridge environment overrides | `~/.config/pi-telegram-bridge/environment` | User/systemd |
+| Bridge environment overrides | `<configRoot>/instances/<id>.env` | User/systemd |
 | 1Password agent vault token/config | `<configRoot>/onepassword/<credential-scope>.{token,json}` | User / credential provider |
 | Temporary browser handoff | `<browserRuntime>/handoff.{json,log}` and `handoff-password` | Browser handoff supervisor |
 | Scheduled job definitions | `<stateDir>/jobs.json` | Agent/user |
@@ -41,12 +41,11 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 | Google keyring password | External mode-`0600` file selected by instance environment | User / Google extension |
 | Process logs | user journal | systemd |
 
-Fleet mode replaces singleton state rows with per-instance paths under
-`<stateRoot>/instances/<id>` for sessions, SQLite inbox, Codex settings,
-restart marker, checkers, job handoffs, and `runtime.json`. Telegram bot tokens,
+Each instance's `<stateDir>` is `<stateRoot>/instances/<id>`; it holds the
+sessions, SQLite inbox, Codex settings, restart marker, checkers, job handoffs,
+and `runtime.json`. Telegram bot tokens,
 pairing, offsets, and locks remain in named profiles in the private Pi agent
-directory. Per-instance mode-`0600` environment files live under
-`<configRoot>/instances/<id>.env`; the strict mode-`0600` instance manifest is
+directory. The strict mode-`0600` instance manifest is
 `<configRoot>/instances.json` by default.
 
 The stock-Chrome helper registers a repo-owned 1Password credential provider.
@@ -129,7 +128,7 @@ queued Telegram work, active/pending turns, compaction, or Pi pending messages;
 background-subagent completions bypass the policy. See
 [ADR-0022](docs/adr/0022-rotate-sessions-after-human-inactivity.md).
 
-In fleet mode, exactly one `jobsRole: coordinator` process owns cron, at,
+Exactly one `jobsRole: coordinator` process owns cron, at,
 heartbeat, and webhook trigger evaluation plus mutable run state. Version-3 jobs
 name a stable target instance or `both-personal`. Before execution, the
 coordinator writes an idempotent dispatch record and mode-`0600` handoff into
@@ -184,7 +183,7 @@ memory/session evidence boundary are defined by
 
 ## Startup
 
-1. Load the private instance manifest (or compatibility singleton), validate its invariants, and resolve separate release, workspace, config, and state paths.
+1. Load the private instance manifest, select the instance named by `PI_TELEGRAM_BRIDGE_INSTANCE_ID`, validate its invariants, and resolve separate release, workspace, config, and state paths.
 2. Continue the most recent session in the bridge-only session directory.
 3. Point Codex conversion at its bridge-only settings file.
 4. Resolve the instance's default-deny capability profile from the immutable release and build an `AgentSessionRuntime` with the pinned dependencies.
@@ -208,7 +207,7 @@ without a repeated-rotation loop after a post-replacement state-write failure.
 
 ## Deployment
 
-Pushes to `main` run checks on a GitHub-hosted runner. After they pass, the `assistant-production` self-hosted runner builds one immutable release for the exact merged SHA. If the external instance manifest exists, it preflights every instance and the job graph, disables and stops all bridge units, and captures matching state, units, and previous immutable application releases before offline job migration. It then installs all units and activates instances sequentially. Readiness requires exact instance ID, full release SHA, and stable systemd PID from private runtime metadata. Failures hold the fleet disabled; they never restart an old binary over changed recovery state. A durable pre-start barrier forbids state rewind after a candidate may have accepted work. Unit `ExecCondition` checks enforce the surviving maintenance hold on reboot. Workspaces and separate builder worktrees are preserved. The singleton uses the same recovery barrier. See ADR-0005, ADR-0030, and [the fleet runbook](docs/household-fleet.md).
+Pushes to `main` run checks on a GitHub-hosted runner. After they pass, the `assistant-production` self-hosted runner builds one immutable release for the exact merged SHA. Deployment requires the external instance manifest. It preflights every instance and the job graph, disables and stops all bridge units, and captures matching state, units, and previous immutable application releases before offline job migration. It then installs all units and activates instances sequentially. Readiness requires exact instance ID, full release SHA, and stable systemd PID from private runtime metadata. Failures hold the fleet disabled; they never restart an old binary over changed recovery state. A durable pre-start barrier forbids state rewind after a candidate may have accepted work. Unit `ExecCondition` checks enforce the surviving maintenance hold on reboot. Workspaces and separate builder worktrees are preserved. See ADR-0005, ADR-0030, ADR-0031, and [the fleet runbook](docs/household-fleet.md).
 
 After every fleet instance is ready and the canonical checkout advances, the
 deployment runner sends one fixed completion message through the engineering

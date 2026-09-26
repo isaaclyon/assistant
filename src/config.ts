@@ -14,17 +14,6 @@ import {
 } from "./instances.js";
 import { validateCredentialEnvironmentFile } from "./credential-environment.js";
 
-export interface BridgeConfig {
-  agentDir: string;
-  codexConfigPath: string;
-  cwd: string;
-  sessionDir: string;
-  sessionIdleMs?: number;
-  stateDir: string;
-  webhookHost: string;
-  webhookPort: number;
-}
-
 export interface BridgeInstanceConfig {
   instanceId: string;
   displayName: string;
@@ -74,48 +63,6 @@ function resolveSessionIdleMs(value: string | undefined): number {
 function resolveFromHome(value: string | undefined, fallback: string, home: string): string {
   const selected = value?.trim() || fallback;
   return isAbsolute(selected) ? resolve(selected) : resolve(home, selected);
-}
-
-export function resolveBridgeConfig(
-  env: BridgeEnvironment = process.env,
-  home = homedir(),
-  defaultCwd = process.cwd(),
-): BridgeConfig {
-  const cwd = resolveFromHome(env.PI_TELEGRAM_BRIDGE_CWD, defaultCwd, home);
-  const agentDir = resolveFromHome(
-    env.PI_CODING_AGENT_DIR,
-    join(home, ".pi", "agent"),
-    home,
-  );
-  const stateDir = resolveFromHome(
-    env.PI_TELEGRAM_BRIDGE_STATE_DIR,
-    join(home, ".local", "state", "pi-telegram-bridge"),
-    home,
-  );
-  const codexConfigPath = resolveFromHome(
-    env.PI_TELEGRAM_CODEX_CONFIG,
-    join(stateDir, "pi-codex-conversion.json"),
-    home,
-  );
-
-  const webhookPortRaw = env.PI_TELEGRAM_BRIDGE_WEBHOOK_PORT?.trim();
-  const webhookPort = webhookPortRaw ? Number.parseInt(webhookPortRaw, 10) : 8776;
-  if (!Number.isInteger(webhookPort) || webhookPort < 0 || webhookPort > 65_535) {
-    throw new Error(
-      `PI_TELEGRAM_BRIDGE_WEBHOOK_PORT must be a port number: ${webhookPortRaw}`,
-    );
-  }
-
-  return {
-    agentDir,
-    codexConfigPath,
-    cwd,
-    sessionDir: join(stateDir, "sessions"),
-    sessionIdleMs: resolveSessionIdleMs(env.PI_TELEGRAM_SESSION_IDLE_HOURS),
-    stateDir,
-    webhookHost: env.PI_TELEGRAM_BRIDGE_WEBHOOK_HOST?.trim() || "127.0.0.1",
-    webhookPort,
-  };
 }
 
 export function resolveBridgeInstanceConfig(
@@ -217,21 +164,6 @@ export async function loadBridgeInstanceConfig(
     config.credentialScope,
   );
   return config;
-}
-
-export async function loadBridgeRuntimeConfig(
-  env: BridgeEnvironment = process.env,
-  home = homedir(),
-  defaultRuntimeRoot = process.cwd(),
-): Promise<BridgeConfig | BridgeInstanceConfig> {
-  const instanceMigrationConfigured = Boolean(
-    env.PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST?.trim() ||
-      env.PI_TELEGRAM_BRIDGE_INSTANCE_ID?.trim(),
-  );
-  if (instanceMigrationConfigured) {
-    return loadBridgeInstanceConfig(env, home, defaultRuntimeRoot);
-  }
-  return resolveBridgeConfig(env, home, defaultRuntimeRoot);
 }
 
 export async function ensureCodexConfig(path: string): Promise<void> {

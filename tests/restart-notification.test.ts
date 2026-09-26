@@ -8,14 +8,16 @@ import {
   notifyPendingRestart,
 } from "../src/restart-notification.js";
 
+const owner = { instanceId: "isaac", telegramProfile: "default" };
+
 describe("restart notification", () => {
   it("persists a pending notification before the bridge exits", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "pi-telegram-restart-"));
 
-    markRestartPending(stateDir);
+    markRestartPending(stateDir, owner);
 
-    await expect(readFile(join(stateDir, "restart-pending.json"), "utf8")).resolves
-      .toBe("");
+    await expect(readFile(join(stateDir, "restart-pending.json"), "utf8").then(JSON.parse)).resolves
+      .toEqual({ version: 1, ...owner });
   });
 
   it("notifies the paired Telegram user and clears the marker after success", async () => {
@@ -28,13 +30,13 @@ describe("restart notification", () => {
       join(agentDir, "telegram.json"),
       JSON.stringify({ botToken: "test-token", allowedUserId: 42 }),
     );
-    markRestartPending(stateDir);
+    markRestartPending(stateDir, owner);
     const fetchImpl = vi.fn(async () =>
       new Response(JSON.stringify({ ok: true }), { status: 200 }),
     );
 
     await expect(
-      notifyPendingRestart({ stateDir, agentDir, fetchImpl }),
+      notifyPendingRestart({ stateDir, agentDir, ...owner, fetchImpl }),
     ).resolves.toBe(true);
     expect(fetchImpl).toHaveBeenCalledWith(
       "https://api.telegram.org/bottest-token/sendMessage",
@@ -60,19 +62,20 @@ describe("restart notification", () => {
       join(agentDir, "telegram.json"),
       JSON.stringify({ botToken: "test-token", allowedUserId: 42 }),
     );
-    markRestartPending(stateDir);
+    markRestartPending(stateDir, owner);
 
     await expect(
       notifyPendingRestart({
         stateDir,
         agentDir,
+        ...owner,
         fetchImpl: vi.fn(async () =>
           new Response(JSON.stringify({ ok: false }), { status: 200 }),
         ),
       }),
     ).rejects.toThrow(/Telegram restart confirmation failed/);
-    await expect(readFile(join(stateDir, "restart-pending.json"), "utf8")).resolves
-      .toBe("");
+    await expect(readFile(join(stateDir, "restart-pending.json"), "utf8").then(JSON.parse)).resolves
+      .toEqual({ version: 1, ...owner });
   });
 
   it("routes a private instance restart through only its named Telegram profile", async () => {

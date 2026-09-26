@@ -12,10 +12,6 @@ describe("bridge host instance policy", () => {
     expect(shouldStartJobScheduler({ jobsRole: "disabled" })).toBe(false);
   });
 
-  it("keeps scheduler ownership in the bounded singleton compatibility host", () => {
-    expect(shouldStartJobScheduler({})).toBe(true);
-  });
-
   it("maps the strict household manifest surface to stable fork actor labels", () => {
     expect(
       resolveTelegramHostHouseholdGroup({

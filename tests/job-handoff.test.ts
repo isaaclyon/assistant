@@ -21,13 +21,10 @@ import {
 import { definitionFingerprint } from "../src/job-occurrences.js";
 
 describe("durable instance job handoff", () => {
-  it("resolves singleton and fleet handoff locations from the host config", () => {
-    expect(jobHandoffLocation({ stateDir: "/state" }, "isaac")).toEqual({
-      stateRoot: "/state", coordinatorStateDir: "/state", local: true, target: "local",
-    });
-    const fleet = { stateDir: "/root/instances/isaac", stateRoot: "/root", instanceId: "isaac" };
+  it("resolves fleet handoff locations from the host config", () => {
+    const fleet = { stateDir: "/root/instances/isaac", stateRoot: "/root" };
     expect(jobHandoffLocation(fleet, "both-personal")).toEqual({
-      stateRoot: "/root", coordinatorStateDir: "/root/instances/isaac", local: false, target: "both-personal",
+      stateRoot: "/root", coordinatorStateDir: "/root/instances/isaac", target: "both-personal",
     });
     expect(() => jobHandoffLocation(fleet, undefined)).toThrow("Fleet job target is required");
   });
@@ -101,16 +98,6 @@ describe("durable instance job handoff", () => {
     await enqueueJobHandoff({ ...base, prompt: "First",
       definitionFingerprint: definitionFingerprint({ id: "test", type: "webhook", prompt: "First" }) });
     expect(await readdir(join(stateDir, "job-handoffs", "pending"))).toHaveLength(0);
-  });
-
-  it("uses the same durable recipient protocol for a singleton host", async () => {
-    const stateDir = await mkdtemp(join(tmpdir(), "bridge-job-local-"));
-    await enqueueJobHandoff({
-      stateRoot: stateDir, coordinatorStateDir: stateDir, eventId: "synthetic", jobId: "test",
-      target: "local", local: true, prompt: "Singleton prompt",
-    });
-    const inject = vi.fn(async (_prompt: string, _type: unknown, preflight: (accepted: boolean) => void) => { preflight(true); });
-    expect(await drainJobHandoffs({ stateDir, instanceId: "local", inject })).toEqual({ processed: 1, failed: 0, uncertain: 0 });
   });
 
   it("reconciles terminal recipient evidence when the coordinator acknowledgement lags", async () => {

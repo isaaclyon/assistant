@@ -1,6 +1,6 @@
 # Pi Telegram Bridge Host
 
-A systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](https://github.com/isaaclyon/pi-telegram/commit/d9877050370219d69b56bcc3a510d45905101c03). It supports a compatibility singleton or a manifest-defined household fleet whose bots share one immutable capability release while keeping conversations, workspaces, credentials, and memory views distinct.
+A systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](https://github.com/isaaclyon/pi-telegram/commit/d9877050370219d69b56bcc3a510d45905101c03). It runs a manifest-defined household fleet whose bots share one immutable capability release while keeping conversations, workspaces, credentials, and memory views distinct.
 
 ## Runtime shape
 
@@ -12,7 +12,7 @@ one systemd user service per instance
               └── @howaboua/pi-codex-conversion (Codex tools/prompt adapter)
 ```
 
-The compatibility runtime uses this repository as its working directory. Fleet instances use separate mutable workspaces, but all extension, skill, and instruction code is selected from the shared immutable release through `.pi/capabilities.json`. The host disables hierarchical discovery; the root `AGENTS.md` remains developer guidance. Fleet conversations and inboxes live under `~/.local/state/pi-telegram-bridge/instances/<id>`.
+Instances use separate mutable workspaces, but all extension, skill, and instruction code is selected from the shared immutable release through `.pi/capabilities.json`. The host disables hierarchical discovery; the root `AGENTS.md` remains developer guidance. Fleet conversations and inboxes live under `~/.local/state/pi-telegram-bridge/instances/<id>`.
 
 ## Initial setup
 
@@ -28,23 +28,25 @@ npm ci
 npm run check
 ```
 
-Open the one-time interactive setup session:
+Create the private instance manifest at
+`~/.config/pi-telegram-bridge/instances.json` (mode `0600`), starting from the
+tracked [example](docs/examples/instances.example.json). Then open the one-time
+interactive setup session:
 
 ```bash
 npm run telegram:setup
 ```
 
-Inside Pi:
+Inside Pi, run `/telegram-setup <profile>` for each instance's Telegram
+profile, send `/start` to each bot to pair it, confirm it responds, then exit.
 
-1. Run `/telegram-setup` and enter the bot token.
-2. Send `/start` to the bot from your Telegram account to pair it.
-3. Confirm the bot responds, then exit Pi.
-
-Install and start the systemd user service:
+Install and start one systemd user service per instance:
 
 ```bash
 npm run service:install
 ```
+
+The complete production setup is in [docs/household-fleet.md](docs/household-fleet.md).
 
 User lingering is required for the service to run without an active login. It is already enabled on this server; verify with:
 
@@ -55,14 +57,13 @@ loginctl show-user "$USER" -p Linger
 ## Operations
 
 ```bash
-systemctl --user status pi-telegram-bridge.service
-systemctl --user restart pi-telegram-bridge.service
-systemctl --user stop pi-telegram-bridge.service
-journalctl --user -u pi-telegram-bridge.service -f
+systemctl --user status 'pi-telegram-bridge-*.service'
+systemctl --user restart pi-telegram-bridge-<id>.service
+systemctl --user stop pi-telegram-bridge-<id>.service
+journalctl --user -u pi-telegram-bridge-<id>.service -f
 ```
 
-For a configured fleet, use `pi-telegram-bridge-<id>.service` or the glob
-`pi-telegram-bridge-*.service`. The complete production setup, credential
+The complete production setup, credential
 namespaces, migration procedure, rollback behavior, and smoke matrix are in
 [docs/household-fleet.md](docs/household-fleet.md). Production identity values
 belong in a mode-`0600` external manifest; start from the tracked
@@ -87,7 +88,7 @@ an HTTP request. Setup, health, and lifecycle details are in
 
 ## Deploying updates
 
-Pull requests run `.github/workflows/deploy.yml` checks on GitHub-hosted CI. Merges to `main` rerun those checks, then the `assistant-production` self-hosted runner on `lyon-server` deploys the green commit and verifies the systemd user service. The single runner and a shared deployment lock serialize activation; superseded queued revisions exit successfully instead of rolling production backward. A failed check prevents deployment. The runner itself is managed by `github-actions-assistant.service`; check it with `systemctl --user status github-actions-assistant.service` on the server.
+Pull requests run `.github/workflows/deploy.yml` checks on GitHub-hosted CI. Merges to `main` rerun those checks, then the `assistant-production` self-hosted runner on `lyon-server` deploys the green commit and verifies every instance's systemd user service. Deployment refuses to run without the instance manifest. The single runner and a shared deployment lock serialize activation; superseded queued revisions exit successfully instead of rolling production backward. A failed check prevents deployment. The runner itself is managed by `github-actions-assistant.service`; check it with `systemctl --user status github-actions-assistant.service` on the server.
 
 ### Manual fallback
 
@@ -112,22 +113,19 @@ Optional environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `PI_TELEGRAM_BRIDGE_CWD` | process working directory (this repo under systemd) | Pi home base and context root |
-| `PI_TELEGRAM_BRIDGE_STATE_DIR` | `~/.local/state/pi-telegram-bridge` | Dedicated session state |
-| `PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST` | unset | Enables fleet mode using a private manifest |
-| `PI_TELEGRAM_BRIDGE_INSTANCE_ID` | unset | Stable instance selected by a fleet unit |
+| `PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST` | `<configRoot>/instances.json` | Private instance manifest |
+| `PI_TELEGRAM_BRIDGE_INSTANCE_ID` | required | Stable instance selected by its systemd unit |
 | `PI_TELEGRAM_BRIDGE_RESOURCE_ROOT` | release directory | Shared immutable capability/code root |
 | `PI_TELEGRAM_BRIDGE_STATE_ROOT` | `~/.local/state/pi-telegram-bridge` | Parent for per-instance state |
 | `PI_TELEGRAM_BRIDGE_CONFIG_ROOT` | `~/.config/pi-telegram-bridge` | Private manifest and credential environment root |
 | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi credentials, settings, and Telegram config |
-| `PI_TELEGRAM_CODEX_CONFIG` | `<stateDir>/pi-codex-conversion.json` | Telegram-only Codex conversion settings |
 | `PI_BIN` | `pi` | Pi executable used only by `telegram:setup` |
 | `PI_TELEGRAM_MEMORY_DIR` | `~/.local/share/pi-telegram-bridge/memory` | Personal memory vault (absolute, or relative to the user home) |
 | `PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT` | `0` | Set to `1` to commit agent-mediated memory mutations locally |
 
-The service reads an optional durable environment file at
-`~/.config/pi-telegram-bridge/environment`. Put persistent memory overrides
-there so deployments retain them:
+Each instance's service reads its optional durable environment file at
+`<configRoot>/instances/<id>.env`. Put persistent memory overrides there so
+deployments retain them:
 
 ```text
 PI_TELEGRAM_MEMORY_DIR=/home/isaaclyon/.local/share/pi-telegram-bridge/memory

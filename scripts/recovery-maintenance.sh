@@ -48,19 +48,9 @@ recovery_prepare() {
       return 1
     fi
   done
-  if [[ "$coordinator_id" == local && "$#" == 0 ]]; then
-    # Match the singleton's actual EnvironmentFile, never snapshot a guessed root.
-    systemd-run --user --wait --pipe --quiet --collect \
-      --property="EnvironmentFile=-$HOME/.config/pi-telegram-bridge/environment" \
-      --setenv="PI_TELEGRAM_BRIDGE_STATE_DIR=$STATE_ROOT" \
-      "$NODE_BINARY" "$RELEASE_PATH/dist/src/recovery-maintenance.js" prepare \
-      "$BACKUP_DIR" "$STATE_ROOT" "$UNIT_DIR" \
-      "$HOME/.local/share/pi-telegram-bridge/releases" local
-  else
-    "$NODE_BINARY" "$RELEASE_PATH/dist/src/recovery-maintenance.js" prepare \
-      "$BACKUP_DIR" "$STATE_ROOT" "$UNIT_DIR" \
-      "$HOME/.local/share/pi-telegram-bridge/releases" "$coordinator_id" "$@"
-  fi
+  "$NODE_BINARY" "$RELEASE_PATH/dist/src/recovery-maintenance.js" prepare \
+    "$BACKUP_DIR" "$STATE_ROOT" "$UNIT_DIR" \
+    "$HOME/.local/share/pi-telegram-bridge/releases" "$coordinator_id" "$@"
 }
 
 recovery_started() {

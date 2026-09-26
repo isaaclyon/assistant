@@ -13,6 +13,8 @@ You are explicitly allowed to improve this agent from inside its own repository.
 - **Extension** (`.pi/extensions/<name>.ts`): executable Pi behavior such as a custom tool, command, event hook, or UI integration. Start from [the single-file extension scaffold](templates/extension.ts).
 - **Core source** (`src/`): host lifetime, persistence, Telegram capability boundaries, resource loading, setup, or service behavior. Read [the project map](references/project-map.md) first.
 
+A new skill or extension loads only after it is listed under `resources` in `.pi/capabilities.json` and selected by each profile (instance) that should have it; unlisted files never run.
+
 Prefer a skill over code when guidance is sufficient. Prefer one extension file until the implementation genuinely needs multiple modules. Prefer a custom tool over shell instructions when a command-backed capability should be reliable and reusable.
 
 ## Telegram-visible slash commands

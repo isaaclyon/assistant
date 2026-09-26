@@ -7,7 +7,6 @@ import { withMutationLock } from "../.pi/lib/mutation-lock.mjs";
 import { initializeLegacyJobLedger, readMigrationJson } from "./jobs-migration.js";
 import { loadValidatedJobs } from "./jobs-validation.js";
 import { openJobOccurrenceLedger } from "./job-occurrences.js";
-import { resolveBridgeConfig } from "./config.js";
 import { captureRecoverySnapshot, markRecoveryStarted, restoreRecoverySnapshot } from "./recovery-snapshot.js";
 
 async function exists(path: string): Promise<boolean> {
@@ -62,32 +61,22 @@ const snapshotDir = resolve(snapshotArg);
     process.stdout.write("Paired pre-start state and binaries restored; services remain stopped.\n");
   } else if (action === "prepare" && stateArg && unitArg && releaseArg && coordinatorId) {
     const stateRoot = resolve(stateArg); const unitDir = resolve(unitArg); const releaseRoot = resolve(releaseArg);
-    const singleton = coordinatorId === "local" && configuredIds.length === 0;
     if (!/^[a-z0-9-]{1,64}$/.test(coordinatorId) || configuredIds.some((id) => !/^[a-z0-9-]{1,64}$/.test(id))) {
       throw new Error("Invalid recovery instance identity");
     }
     const roots: Record<string, string> = {};
-    if (singleton) {
-      if (resolveBridgeConfig().stateDir !== stateRoot) throw new Error("Singleton state root differs from its environment configuration");
-      if (await exists(join(stateRoot, "instances")) && (await readdir(join(stateRoot, "instances"))).length) {
-        throw new Error("Fleet state requires explicit reconciliation before singleton migration");
-      }
-      roots.local = stateRoot;
+    // Retired and unexpected recipient roots must not disappear from inventory.
+    const instances = join(stateRoot, "instances");
+    for (const id of await readdir(instances)) {
+      if (!/^[a-z0-9-]{1,64}$/.test(id)) throw new Error("Unknown instance state blocks recovery migration");
+      roots[id] = join(instances, id);
     }
-    else {
-      // Retired and unexpected recipient roots must not disappear from inventory.
-      const instances = join(stateRoot, "instances");
-      for (const id of await readdir(instances)) {
-        if (!/^[a-z0-9-]{1,64}$/.test(id)) throw new Error("Unknown instance state blocks recovery migration");
-        roots[id] = join(instances, id);
-      }
-      for (const id of configuredIds) if (!Object.hasOwn(roots, id)) throw new Error("Missing configured instance state");
-      for (const name of ["jobs.json", "jobs-state.json", "job-handoffs", "job-dispatches", "job-occurrences.db"]) {
-        if (await exists(join(stateRoot, name))) throw new Error("Singleton recovery state requires explicit reconciliation before fleet migration");
-      }
+    for (const id of configuredIds) if (!Object.hasOwn(roots, id)) throw new Error("Missing configured instance state");
+    for (const name of ["jobs.json", "jobs-state.json", "job-handoffs", "job-dispatches", "job-occurrences.db"]) {
+      if (await exists(join(stateRoot, name))) throw new Error("Singleton recovery state requires explicit reconciliation before fleet migration");
     }
     const coordinatorStateDir = roots[coordinatorId];
-    if (!coordinatorStateDir || (!singleton && !configuredIds.includes(coordinatorId))) throw new Error("Missing recovery coordinator state");
+    if (!coordinatorStateDir || !configuredIds.includes(coordinatorId)) throw new Error("Missing recovery coordinator state");
     const lockPaths: string[] = [];
     for (const [id, root] of Object.entries(roots).sort()) {
       const info = await lstat(root);
@@ -112,8 +101,7 @@ const snapshotDir = resolve(snapshotArg);
       // Validate exact source JSON before the normal scheduler parser sees it.
       const jobsPath = join(coordinatorStateDir!, "jobs.json");
       if (await exists(jobsPath)) await readMigrationJson(jobsPath);
-      const { jobs } = await loadValidatedJobs({ stateDir: coordinatorStateDir!,
-        ...(singleton ? {} : { configuredInstanceIds: configuredIds }) });
+      const { jobs } = await loadValidatedJobs({ stateDir: coordinatorStateDir!, configuredInstanceIds: configuredIds });
       if (await exists(join(coordinatorStateDir!, "job-occurrences.db"))) {
         const ledger = openJobOccurrenceLedger(coordinatorStateDir!); ledger.close();
         process.stdout.write("Recovery snapshot verified; occurrence ledger already initialized.\n");

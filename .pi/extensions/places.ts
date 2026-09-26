@@ -78,8 +78,8 @@ export default function placesExtension(pi: ExtensionAPI): void {
     draftPath = undefined;
     const stateDir = process.env.PI_TELEGRAM_BRIDGE_STATE_DIR;
     const principal = process.env.PI_TELEGRAM_PRINCIPAL;
-    const instanceId = process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID ?? "compatibility-singleton";
-    if (!stateDir || principal !== "isaac") return;
+    const instanceId = process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID;
+    if (!stateDir || !instanceId || principal !== "isaac") return;
     draftPath = join(stateDir, ADD_DRAFT_FILE);
     draftAdd = readAddDraft(draftPath);
     store = openPlacesStore(join(stateDir, "places.db"));
