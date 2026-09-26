@@ -9,6 +9,7 @@ import {
 import { join } from "node:path";
 import { registerTelegramUpdateHandler } from "@llblab/pi-telegram/updates";
 import { PlacesReply } from "../lib/places-reply.ts";
+import { ADD_DRAFT_FILE, persistAddDraft, readAddDraft, type AddDraft } from "../lib/places-add-draft.ts";
 import { Type } from "typebox";
 
 import {
@@ -54,8 +55,13 @@ export default function placesExtension(pi: ExtensionAPI): void {
   let unregisterReplies: (() => void) | undefined;
   const replies = new PlacesReply();
   let pendingDirectView: DirectPendingView | undefined;
-  let draftAdd: { name: string; categoryId?: string } | undefined;
+  let draftAdd: AddDraft | undefined;
+  let draftPath: string | undefined;
   let application: PlacesApplication | undefined;
+  const setDraft = (draft: AddDraft | undefined): void => {
+    if (draftPath) persistAddDraft(draftPath, draft);
+    draftAdd = draft;
+  };
 
   pi.on("session_start", () => {
     unregisterSection?.();
@@ -69,10 +75,13 @@ export default function placesExtension(pi: ExtensionAPI): void {
     application = undefined;
     pendingDirectView = undefined;
     draftAdd = undefined;
+    draftPath = undefined;
     const stateDir = process.env.PI_TELEGRAM_BRIDGE_STATE_DIR;
     const principal = process.env.PI_TELEGRAM_PRINCIPAL;
     const instanceId = process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID ?? "compatibility-singleton";
     if (!stateDir || principal !== "isaac") return;
+    draftPath = join(stateDir, ADD_DRAFT_FILE);
+    draftAdd = readAddDraft(draftPath);
     store = openPlacesStore(join(stateDir, "places.db"));
     service = new PlacesService(store, { ownerKey: `instance:${instanceId}:principal:${principal}` });
     application = new PlacesApplication(service);
@@ -85,9 +94,7 @@ export default function placesExtension(pi: ExtensionAPI): void {
         return pending;
       },
       getDraft: () => draftAdd,
-      setDraft: (draft) => {
-        draftAdd = draft;
-      },
+      setDraft,
     }));
     unregisterReplies = registerTelegramUpdateHandler((update) => replies.handle(update));
   });
@@ -103,6 +110,7 @@ export default function placesExtension(pi: ExtensionAPI): void {
     application = undefined;
     pendingDirectView = undefined;
     draftAdd = undefined;
+    draftPath = undefined;
   });
 
   registerReloadSafeTelegramCommand({
@@ -157,10 +165,11 @@ export default function placesExtension(pi: ExtensionAPI): void {
         const result = application!.execute(params);
         let presented = false;
         if (params.action === "categories" && params.name) {
-          draftAdd = { name: params.name };
+          setDraft({ name: params.name });
           pendingDirectView = { kind: "categories" };
           presented = await tryPresentPlacesSection();
         } else if (params.action === "start") {
+          setDraft(undefined);
           pendingDirectView = { kind: "result", value: result };
           presented = await tryPresentPlacesSection();
         }

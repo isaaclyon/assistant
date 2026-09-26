@@ -149,6 +149,11 @@ conversation rather than guessing a mutation.
 The place is provisional while insertion is active: it does not appear in the
 published ranking until the insertion completes. Its draft and comparison
 state are durable so a process restart cannot expose a partially ranked place.
+Before an insertion exists, the direct add name and selected category are
+stored as a small private recovery draft in `<stateDir>/places-add-draft.json`.
+After a reset, `/place_rankings` and any stale add-flow button reopen the
+category or sentiment step with the place name. The draft is cleared when the
+insertion starts and expires after 24 hours.
 
 ### Happy-path transcript
 

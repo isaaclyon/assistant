@@ -33,6 +33,7 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 | Heartbeat observations | `<stateDir>/checkers/*.json` | Host |
 | Background subagent batches and temporary sessions | `<stateDir>/subagents/` | Host |
 | Private place rankings and active comparisons | `<stateDir>/places.db` | Places extension/store |
+| Pending direct place-add draft | `<stateDir>/places-add-draft.json` | Places extension |
 | Personal memory vault | `~/.local/share/pi-telegram-bridge/memory` (override: `PI_TELEGRAM_MEMORY_DIR`) | `personal-memory` skill CLI |
 | Derived memory/session search index | `<stateDir>/search-index.db` | Search extension/coordinator |
 | Google Places cache and monthly attempt accounting | `<stateDir>/google-places.db` | Google extension/gateway |

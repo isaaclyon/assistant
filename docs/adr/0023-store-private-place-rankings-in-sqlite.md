@@ -62,7 +62,18 @@ the handler requires the already-authorized section's exact private actor/chat,
 an exact fresh bot-prompt body, and a newer reply-target message ID. Failed result
 delivery cannot forward a possibly saved input to Pi for another execution.
 
+Persist the short-lived direct add draft used before an insertion exists in
+`<stateDir>/places-add-draft.json`. Write it atomically with mode `0600` and
+keep only the place name plus optional category ID. Restore it at session start
+so `/place_rankings` and stale category or sentiment buttons reopen the saved
+step with the place name instead of losing it. Clear it when an insertion starts,
+and ignore it after 24 hours or when malformed. The draft is recovery state, not
+canonical ranking data, so it stays outside the ranking database.
+
 ## Consequences
+
+- A direct add flow that has not started ranking survives a session reset
+  without showing an unrelated ranking view.
 
 - Rankings and unfinished comparisons survive process restarts, session
   rotation, extension reload, and immutable-release deployment.
