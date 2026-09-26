@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const transport = await import(pathToFileURL(join(import.meta.dirname, "../.pi/lib/google-transport.ts")).href);
+const places = await import(pathToFileURL(join(import.meta.dirname, "../.pi/lib/google-places.ts")).href);
 const roots: string[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -26,13 +27,13 @@ async function fixture() {
 describe.each([
   {
     operation: "rich details",
-    request: (apiKeyFile: string, signal?: AbortSignal) => transport.fetchPlaceDetails({
+    request: (apiKeyFile: string, signal?: AbortSignal) => places.fetchPlaceDetails({
       apiKeyFile, fields: "rich", placeId: "test", ...(signal ? { signal } : {}),
     }),
   },
   {
     operation: "candidate search",
-    request: (apiKeyFile: string, signal?: AbortSignal) => transport.fetchPlaceSearch({
+    request: (apiKeyFile: string, signal?: AbortSignal) => places.fetchPlaceSearch({
       apiKeyFile, fields: "candidates", query: "coffee", maxResults: 15, ...(signal ? { signal } : {}),
     }),
   },
@@ -91,10 +92,10 @@ it("redacts setup paths and malformed HTTPS response bodies at the transport bou
   for (const change of [{ binary: join(options.gogHome, "missing-binary") }, { passwordFile: join(options.gogHome, "missing-secret") }]) {
     await expect(transport.runGogJson({ ...options, ...change })).rejects.toThrow(/^Google Workspace command failed$/);
   }
-  await expect(transport.fetchPlaceDetails({ apiKeyFile: join(options.gogHome, "missing-secret"), fields: "rich", placeId: "test" }))
+  await expect(places.fetchPlaceDetails({ apiKeyFile: join(options.gogHome, "missing-secret"), fields: "rich", placeId: "test" }))
     .rejects.toThrow(/^Google Workspace command failed$/);
   vi.stubGlobal("fetch", vi.fn(async () => new Response("private-response-body", { status: 200 })));
-  await expect(transport.fetchPlaceDetails({ apiKeyFile: options.passwordFile, fields: "rich", placeId: "test" }))
+  await expect(places.fetchPlaceDetails({ apiKeyFile: options.passwordFile, fields: "rich", placeId: "test" }))
     .rejects.toThrow(/^Google Workspace command failed$/);
 });
 
@@ -122,5 +123,21 @@ it.skipIf(process.platform === "win32").each(["cancellation", "timeout"])("kills
     abort.abort();
     await outcome;
     if (pid) { try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ } }
+  }
+});
+
+it("resolves Places configuration without requiring gog", async () => {
+  vi.stubEnv("PI_TELEGRAM_GOG_BINARY", "");
+  vi.stubEnv("PI_TELEGRAM_BRIDGE_STATE_DIR", "/private/state");
+  vi.stubEnv("PI_TELEGRAM_GOOGLE_PLACES_API_KEY_FILE", "/private/places-key");
+  vi.stubEnv("PI_TELEGRAM_GOOGLE_PLACES_SEARCH_MONTHLY_LIMIT", "10");
+  try {
+    const runtime = await transport.resolveGoogleRuntime();
+    expect(runtime).toMatchObject({ stateDir: "/private/state", placesApiKeyFile: "/private/places-key", placesSearchMonthlyLimit: 10 });
+    expect(runtime).not.toHaveProperty("binary");
+    expect(transport.hasGogRuntime(runtime)).toBe(false);
+    expect(transport.hasGogRuntime({ binary: "/b", passwordFile: "/p", gogHome: "/h" })).toBe(true);
+  } finally {
+    vi.unstubAllEnvs();
   }
 });

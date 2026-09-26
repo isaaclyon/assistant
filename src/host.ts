@@ -152,6 +152,11 @@ export async function startBridgeHost({
   process.env.PI_TELEGRAM_BRIDGE_STATE_DIR = config.stateDir;
   process.env.PI_TELEGRAM_BRIDGE_SESSION_DIR = config.sessionDir;
   if ("instanceId" in config) {
+    // Extensions and skill scripts read these; publish them from the resolved
+    // config instead of relying on the launcher to have set them. The singleton
+    // leaves the instance ID unset: its presence selects fleet config loading.
+    process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID = config.instanceId;
+    process.env.PI_TELEGRAM_BRIDGE_RESOURCE_ROOT = config.resourceRoot;
     process.env.PI_TELEGRAM_PRINCIPAL = config.principal;
     process.env.PI_TELEGRAM_MEMORY_VIEW = config.memoryView;
     process.env.PI_TELEGRAM_BRIDGE_SESSION_ROOTS = JSON.stringify(
@@ -160,6 +165,8 @@ export async function startBridgeHost({
       ),
     );
   } else {
+    delete process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID;
+    process.env.PI_TELEGRAM_BRIDGE_RESOURCE_ROOT = resourceRoot;
     process.env.PI_TELEGRAM_PRINCIPAL = "isaac";
     process.env.PI_TELEGRAM_MEMORY_VIEW = "owner-and-household";
     process.env.PI_TELEGRAM_BRIDGE_SESSION_ROOTS = JSON.stringify([
@@ -259,26 +266,33 @@ export async function startBridgeHost({
   };
   let refreshRuntimeResources: () => Promise<void> = async () => {};
 
+  // Every process-local binding registers its release here as it succeeds.
+  // Startup failure and disposal both release them in reverse order, always
+  // after the runtime is disposed so session_shutdown still sees them live.
+  const bindings: Array<() => void> = [];
+  const releaseBindings = (): void => {
+    let failure: unknown;
+    for (const release of bindings.splice(0).reverse()) {
+      try {
+        release();
+      } catch (error) {
+        failure ??= error;
+      }
+    }
+    if (failure !== undefined) throw failure;
+  };
+
   // Open and register the durable inbox before the runtime starts its session:
   // the fork replays pending turns on session start, so the capability must be
   // live first. A registration failure must still release the database handle.
   const inbox = openInboxStore(inboxPath);
-  let unregisterInbox: () => void;
+  bindings.push(() => inbox.close());
   try {
-    unregisterInbox = bindInbox(inbox);
+    bindings.push(bindInbox(inbox));
+    const householdGroup = resolveTelegramHostHouseholdGroup(config);
+    if (householdGroup) bindings.push(bindHouseholdGroup(householdGroup));
   } catch (error) {
-    inbox.close();
-    throw error;
-  }
-  const householdGroup = resolveTelegramHostHouseholdGroup(config);
-  let unbindHouseholdGroup: () => void = () => {};
-  try {
-    if (householdGroup) {
-      unbindHouseholdGroup = bindHouseholdGroup(householdGroup);
-    }
-  } catch (error) {
-    unregisterInbox();
-    inbox.close();
+    releaseBindings();
     throw error;
   }
 
@@ -392,39 +406,16 @@ export async function startBridgeHost({
       sessionManager: SessionManager.continueRecent(workspaceCwd, config.sessionDir),
     });
   } catch (error) {
-    unbindHouseholdGroup();
-    unregisterInbox();
-    inbox.close();
+    releaseBindings();
     throw error;
   }
-
-  let unbindRuntimeMarker: () => void;
-  try {
-    unbindRuntimeMarker = bindBridgeRuntimeMarker();
-  } catch (error) {
-    await runtime.dispose();
-    unbindHouseholdGroup();
-    unregisterInbox();
-    inbox.close();
-    throw error;
-  }
-
-  // Publish the restart trigger for the repo-local /restart command. Deferring
-  // to waitForIdle mirrors the shutdownHandler below so disposal never races an
-  // in-flight turn; the daemon exits non-zero on this reason so systemd restarts.
-  let unbindRestart: () => void;
-  try {
-    unbindRestart = bindBridgeRestart(() => {
-      void runtime.session.waitForIdle().then(onRestartRequest);
-    });
-  } catch (error) {
-    await runtime.dispose();
-    unbindRuntimeMarker();
-    unbindHouseholdGroup();
-    unregisterInbox();
-    inbox.close();
-    throw error;
-  }
+  const releaseAll = async (): Promise<void> => {
+    try {
+      await runtime.dispose();
+    } finally {
+      releaseBindings();
+    }
+  };
 
   let sessionReplacementInFlight = false;
   const replaceSession = async (
@@ -449,9 +440,15 @@ export async function startBridgeHost({
       sessionReplacementInFlight = false;
     }
   };
-  let unregisterTelegramHost: () => void;
   try {
-    unregisterTelegramHost = bindTelegramHostNewSession(async () => {
+    bindings.push(bindBridgeRuntimeMarker());
+    // Publish the restart trigger for the repo-local /restart command. Deferring
+    // to waitForIdle mirrors the shutdownHandler below so disposal never races an
+    // in-flight turn; the daemon exits non-zero on this reason so systemd restarts.
+    bindings.push(bindBridgeRestart(() => {
+      void runtime.session.waitForIdle().then(onRestartRequest);
+    }));
+    bindings.push(bindTelegramHostNewSession(async () => {
       if (conversationSessionPolicy) {
         const result = await conversationSessionPolicy.manualNew(
           runtime.session.sessionId,
@@ -461,36 +458,19 @@ export async function startBridgeHost({
       }
       const result = await replaceSession("manual");
       return { cancelled: result.cancelled };
-    });
-  } catch (error) {
-    await runtime.dispose();
-    unbindRestart();
-    unbindRuntimeMarker();
-    unbindHouseholdGroup();
-    unregisterInbox();
-    inbox.close();
-    throw error;
-  }
-  let unregisterPromptPreparation: () => void = () => {};
-  try {
+    }));
     if (conversationSessionPolicy) {
-      unregisterPromptPreparation = bindTelegramHostPromptPreparation(
+      bindings.push(bindTelegramHostPromptPreparation(
         async () =>
           conversationSessionPolicy.prepare(
             "telegram",
             runtime.session.sessionId,
             () => replaceSession("telegram"),
           ),
-      );
+      ));
     }
   } catch (error) {
-    await runtime.dispose();
-    unregisterTelegramHost();
-    unbindRestart();
-    unbindRuntimeMarker();
-    unbindHouseholdGroup();
-    unregisterInbox();
-    inbox.close();
+    await releaseAll();
     throw error;
   }
 
@@ -498,7 +478,6 @@ export async function startBridgeHost({
   let ownershipRecoveryPromise: Promise<void> | undefined;
   let jobScheduler: JobScheduler | undefined;
   let subagentService: SubagentService | undefined;
-  let unbindSubagents: (() => void) | undefined;
   let jobHandoffMonitor: ReturnType<typeof setInterval> | undefined;
   let jobHandoffDrainPromise: Promise<void> | undefined;
   const jobPromptAbort = new AbortController();
@@ -534,18 +513,7 @@ export async function startBridgeHost({
         // A handoff failure is logged by its caller. Disposal still owns all
         // remaining runtime and inbox cleanup.
       }
-      try {
-        await runtime.dispose();
-      } finally {
-        unbindSubagents?.();
-        unregisterPromptPreparation();
-        unregisterTelegramHost();
-        unbindRestart();
-        unbindRuntimeMarker();
-        unbindHouseholdGroup();
-        unregisterInbox();
-        inbox.close();
-      }
+      await releaseAll();
     })();
     return disposePromise;
   };
@@ -789,7 +757,7 @@ export async function startBridgeHost({
       injectCompletion: injectSubagentCompletion,
     });
     try {
-      unbindSubagents = bindBridgeSubagents(subagentService);
+      bindings.push(bindBridgeSubagents(subagentService));
     } catch (error) {
       await subagentService.stop();
       subagentService = undefined;

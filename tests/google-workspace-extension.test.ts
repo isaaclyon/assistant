@@ -1491,6 +1491,33 @@ describe("google workspace extension", () => {
     expect(JSON.stringify(failed)).not.toContain("token");
   });
 
+  it("keeps Places usable and fails Workspace operations closed without gog setup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "google-no-gog-"));
+    roots.push(root);
+    const keyFile = join(root, "places-key");
+    await writeFile(keyFile, "synthetic-key", { mode: 0o600 });
+    for (const name of ["PI_TELEGRAM_GOG_BINARY", "PI_TELEGRAM_GOG_KEYRING_PASSWORD_FILE", "PI_TELEGRAM_GOG_HOME"]) vi.stubEnv(name, "");
+    vi.stubEnv("PI_TELEGRAM_GOOGLE_ACCOUNT", "personal");
+    vi.stubEnv("PI_TELEGRAM_BRIDGE_STATE_DIR", root);
+    vi.stubEnv("PI_TELEGRAM_GOOGLE_PLACES_API_KEY_FILE", keyFile);
+    vi.stubEnv("PI_TELEGRAM_GOOGLE_PLACES_SEARCH_MONTHLY_LIMIT", "5");
+    vi.stubEnv("PI_TELEGRAM_GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT", "5");
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ places: [{ id: "ChIJ1", displayName: { text: "Cafe" } }] })));
+    try {
+      const module = await import(`${extensionUrl}?no-gog=${Date.now()}`) as { default(pi: { registerTool(tool: ToolDefinition): void }): void };
+      let tool: ToolDefinition | undefined;
+      module.default({ registerTool: (value) => { tool = value; } });
+
+      const place = await tool!.execute("p", { operation: "places_search", field_profile: "identity", query: "cafe" });
+      expect(place.details).toMatchObject({ ok: true, result: { place: { id: "ChIJ1" } } });
+
+      const status = await tool!.execute("s", { operation: "account_status" });
+      expect(status.details).toMatchObject({ ok: false, error: { code: "GOOGLE_WORKSPACE_UNAVAILABLE" } });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("runs JSON commands with a minimal environment and bounded output", async () => {
     const root = await mkdtemp(join(tmpdir(), "gog-runner-"));
     roots.push(root);

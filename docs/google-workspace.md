@@ -115,7 +115,9 @@ workflow after changing environment configuration.
 `PI_TELEGRAM_GOOGLE_ACCOUNT` is optional. Without it, every tool call must name
 an account explicitly.
 
-The Google Places entries are optional as a group. Store the API key in a
+The Google Places entries are optional as a group and independent of the gog
+entries: an instance can enable Places without configuring gog, in which case
+only the Workspace operations report `GOOGLE_WORKSPACE_UNAVAILABLE`. Store the API key in a
 separate regular file owned by the service user with mode `0600`; never put the
 key itself in the instance environment. Both monthly limits are required to
 enable identity Places operations; the candidate limit is additionally required

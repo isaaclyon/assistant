@@ -7,9 +7,7 @@ const MAX_GMAIL_MESSAGES = 50;
 const MAX_GMAIL_MESSAGE_BODY_LENGTH = 8_000;
 const MAX_GMAIL_THREAD_BODY_LENGTH = 32_000;
 export const MAX_CONTACT_RESULTS = 10;
-export const MAX_PLACE_CANDIDATES = 15;
 const MAX_CONTACT_VALUES = 20;
-const MAX_PLACE_REVIEWS = 3;
 const FAILURE_MESSAGE = "Google Workspace command failed";
 
 export function parseAccountStatus(payload: unknown, account: string, resolvedAccount = account): {
@@ -45,7 +43,7 @@ export function parseAccountAlias(payload: unknown, alias: string): string | und
   return requiredSafeString((aliases as Record<string, unknown>)[alias], 254);
 }
 
-function boundedString(value: unknown, maxLength: number): string | undefined {
+export function boundedString(value: unknown, maxLength: number): string | undefined {
   if (typeof value !== "string" || value.length === 0) return undefined;
   return value.slice(0, maxLength);
 }
@@ -468,177 +466,6 @@ export function parseContact(payload: unknown, expectedResource: string): {
   const displayName = primaryContactName(item.names);
   if (displayName) contact.displayName = displayName;
   return { contact, truncated: emails.truncated || phones.truncated };
-}
-
-function parseGooglePlaceCandidate(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const item = value as Record<string, unknown>;
-  const id = requiredSafeString(item.id, 256);
-  if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) return undefined;
-  const place: Record<string, unknown> = { id, source: "Google Maps", untrusted: true };
-  const displayName = localizedText(item.displayName, 500);
-  if (displayName) place.displayName = displayName.text;
-  const formattedAddress = boundedString(item.formattedAddress, 1_000);
-  if (formattedAddress) place.formattedAddress = formattedAddress;
-  const googleMapsUri = safeHttpsUrl(item.googleMapsUri);
-  if (googleMapsUri) place.googleMapsUri = googleMapsUri;
-  if (typeof item.rating === "number" && Number.isFinite(item.rating) && item.rating >= 0 && item.rating <= 5) {
-    place.rating = item.rating;
-  }
-  if (Number.isSafeInteger(item.userRatingCount) && (item.userRatingCount as number) >= 0) {
-    place.userRatingCount = item.userRatingCount;
-  }
-  return place;
-}
-
-export function parseGooglePlaceCandidates(payload: unknown, limit: number): {
-  places: Array<Record<string, unknown>>;
-  truncated: boolean;
-} {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error(FAILURE_MESSAGE);
-  const item = payload as Record<string, unknown>;
-  if (item.places === undefined) {
-    return {
-      places: [],
-      truncated: Boolean(requiredSafeString(item.nextPageToken, 2_048)),
-    };
-  }
-  if (!Array.isArray(item.places)) throw new Error(FAILURE_MESSAGE);
-  const places: Array<Record<string, unknown>> = [];
-  const seen = new Set<string>();
-  for (const value of item.places) {
-    if (places.length >= limit) break;
-    const place = parseGooglePlaceCandidate(value);
-    const id = typeof place?.id === "string" ? place.id : undefined;
-    if (!place || !id || seen.has(id)) continue;
-    seen.add(id);
-    places.push(place);
-  }
-  return {
-    places,
-    truncated: item.places.length > limit || Boolean(requiredSafeString(item.nextPageToken, 2_048)),
-  };
-}
-
-export function parseGooglePlace(payload: unknown, expectedPlaceId: string): Record<string, unknown> {
-  const place = parseGooglePlaceCandidate(payload);
-  if (!place || place.id !== expectedPlaceId) throw new Error(FAILURE_MESSAGE);
-  return place;
-}
-
-export function parseFirstGooglePlace(payload: unknown): Record<string, unknown> {
-  const [place] = parseGooglePlaceCandidates(payload, 1).places;
-  if (!place) throw new Error(FAILURE_MESSAGE);
-  return place;
-}
-
-function safeHttpsUrl(value: unknown): string | undefined {
-  const candidate = requiredSafeString(value, 2_048);
-  if (!candidate) return undefined;
-  try {
-    const parsed = new URL(candidate);
-    return parsed.protocol === "https:" && !parsed.username && !parsed.password ? candidate : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function localizedText(value: unknown, maxLength: number): { text: string; languageCode?: string } | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const item = value as Record<string, unknown>;
-  const text = boundedString(item.text, maxLength);
-  if (!text) return undefined;
-  const languageCode = requiredSafeString(item.languageCode, 35);
-  return { text, ...(languageCode ? { languageCode } : {}) };
-}
-
-export function parseRichGooglePlace(payload: unknown, expectedPlaceId: string): Record<string, unknown> {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error(FAILURE_MESSAGE);
-  const item = payload as Record<string, unknown>;
-  const id = requiredSafeString(item.id, 256);
-  if (!id || id !== expectedPlaceId) throw new Error(FAILURE_MESSAGE);
-  const place: Record<string, unknown> = { id, untrusted: true, source: "Google Maps" };
-  const displayName = localizedText(item.displayName, 500);
-  if (displayName) place.displayName = displayName.text;
-  const formattedAddress = boundedString(item.formattedAddress, 1_000);
-  if (formattedAddress) place.formattedAddress = formattedAddress;
-  const googleMapsUri = safeHttpsUrl(item.googleMapsUri);
-  if (googleMapsUri) place.googleMapsUri = googleMapsUri;
-  if (typeof item.rating === "number" && item.rating >= 0 && item.rating <= 5) place.rating = item.rating;
-  if (Number.isSafeInteger(item.userRatingCount) && (item.userRatingCount as number) >= 0) {
-    place.userRatingCount = item.userRatingCount;
-  }
-  const phone = boundedString(item.nationalPhoneNumber, 100);
-  if (phone) place.nationalPhoneNumber = phone;
-  const websiteUri = safeHttpsUrl(item.websiteUri);
-  if (websiteUri) place.websiteUri = websiteUri;
-  const priceLevel = requiredSafeString(item.priceLevel, 64);
-  if (priceLevel && /^PRICE_LEVEL_[A-Z_]+$/.test(priceLevel)) place.priceLevel = priceLevel;
-  const hours = item.regularOpeningHours;
-  if (hours && typeof hours === "object" && !Array.isArray(hours)) {
-    const descriptions = (hours as Record<string, unknown>).weekdayDescriptions;
-    if (Array.isArray(descriptions)) {
-      place.weekdayDescriptions = descriptions
-        .slice(0, 7)
-        .map((value) => boundedString(value, 200))
-        .filter((value): value is string => Boolean(value));
-    }
-  }
-  if (Array.isArray(item.reviews)) {
-    place.reviews = item.reviews.slice(0, MAX_PLACE_REVIEWS).flatMap((value) => {
-      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-      const review = value as Record<string, unknown>;
-      const normalized: Record<string, unknown> = { untrusted: true };
-      if (typeof review.rating === "number" && review.rating >= 0 && review.rating <= 5) normalized.rating = review.rating;
-      const text = localizedText(review.text, 1_500);
-      if (text) normalized.text = text;
-      const originalText = localizedText(review.originalText, 1_500);
-      if (originalText) normalized.originalText = originalText;
-      const published = requiredSafeString(review.publishTime, 64);
-      if (published) normalized.publishTime = published;
-      const relative = boundedString(review.relativePublishTimeDescription, 100);
-      if (relative) normalized.relativePublishTimeDescription = relative;
-      const reviewUri = safeHttpsUrl(review.googleMapsUri);
-      const author = review.authorAttribution;
-      if (author && typeof author === "object" && !Array.isArray(author)) {
-        const authorItem = author as Record<string, unknown>;
-        const displayName = boundedString(authorItem.displayName, 200);
-        const uri = safeHttpsUrl(authorItem.uri);
-        if (displayName && uri && reviewUri) {
-          normalized.authorAttribution = { displayName, uri };
-          normalized.googleMapsUri = reviewUri;
-        }
-      }
-      const visitDate = review.visitDate;
-      if (visitDate && typeof visitDate === "object" && !Array.isArray(visitDate)) {
-        const date = visitDate as Record<string, unknown>;
-        if (Number.isInteger(date.year) && (date.year as number) >= 1 && (date.year as number) <= 9999 &&
-            Number.isInteger(date.month) && (date.month as number) >= 1 && (date.month as number) <= 12) {
-          normalized.visitDate = { year: date.year, month: date.month };
-        }
-      }
-      return normalized.authorAttribution && normalized.googleMapsUri ? [normalized] : [];
-    });
-  }
-  return place;
-}
-
-export function normalizedPlacesLocale(input: Record<string, unknown>): {
-  language?: string;
-  region?: string;
-} | undefined {
-  const rawLanguage = input.language === undefined ? undefined : requiredSafeString(input.language, 35);
-  const rawRegion = input.region === undefined ? undefined : requiredSafeString(input.region, 2);
-  if (
-    (input.language !== undefined && (!rawLanguage || !/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(rawLanguage))) ||
-    (input.region !== undefined && (!rawRegion || !/^[A-Za-z]{2}$/.test(rawRegion)))
-  ) {
-    return undefined;
-  }
-  return {
-    ...(rawLanguage ? { language: rawLanguage.toLowerCase() } : {}),
-    ...(rawRegion ? { region: rawRegion.toUpperCase() } : {}),
-  };
 }
 
 interface BusyInterval {
