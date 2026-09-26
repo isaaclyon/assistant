@@ -10,6 +10,7 @@ export interface GooglePlacesGatewayRequest {
   monthlyLimit: number;
   ttlMs: number;
   now: number;
+  cache?: boolean;
 }
 
 export type GooglePlacesGatewayResult<T> =
@@ -111,7 +112,9 @@ export function openGooglePlacesGateway(databasePath: string): GooglePlacesGatew
       const key = cacheKey(request);
       const month = billingMonth(request.now);
       const reservation = transaction(db, () => {
-        const row = cached.get(key, request.now) as unknown as CacheRow | undefined;
+        const row = request.cache === false
+          ? undefined
+          : cached.get(key, request.now) as unknown as CacheRow | undefined;
         if (row) {
           try {
             return { status: "cached" as const, value: JSON.parse(row.response_json) as T };
@@ -133,7 +136,9 @@ export function openGooglePlacesGateway(databasePath: string): GooglePlacesGatew
         return { status: "blocked", sku: request.sku, month };
       }
       const value = await fetch();
-      save.run(key, JSON.stringify(value), request.now + request.ttlMs);
+      if (request.cache !== false) {
+        save.run(key, JSON.stringify(value), request.now + request.ttlMs);
+      }
       return { status: "ok", cached: false, value };
     },
     close() {

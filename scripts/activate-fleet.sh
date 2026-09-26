@@ -11,9 +11,8 @@ STATE_ROOT="${PI_TELEGRAM_BRIDGE_STATE_ROOT:-$HOME/.local/state/pi-telegram-brid
 AGENT_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 MANIFEST_PATH="${PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST:-$CONFIG_ROOT/instances.json}"
 UNIT_DIR="$HOME/.config/systemd/user"
-LEGACY_UNIT="pi-telegram-bridge.service"
-BACKUP_DIR="$(mktemp -d)"
 ACTIVATION_STARTED=false
+source "$RELEASE_PATH/scripts/recovery-maintenance.sh"
 
 if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
   echo "Fleet activation requires a full release SHA." >&2
@@ -80,49 +79,8 @@ rollback_fleet() {
   local original_status=$?
   trap - ERR
   if [[ "$ACTIVATION_STARTED" == true ]]; then
-    echo "==> Rolling every changed bridge instance back" >&2
-    for instance_id in "${INSTANCE_IDS[@]}"; do
-      systemctl --user stop "pi-telegram-bridge-$instance_id.service" || true
-      unit_path="$UNIT_DIR/pi-telegram-bridge-$instance_id.service"
-      backup_path="$BACKUP_DIR/pi-telegram-bridge-$instance_id.service"
-      if [[ -f "$backup_path" ]]; then
-        cp "$backup_path" "$unit_path"
-      else
-        systemctl --user disable "pi-telegram-bridge-$instance_id.service" || true
-        rm -f "$unit_path"
-      fi
-    done
-    if [[ -f "$BACKUP_DIR/$LEGACY_UNIT" ]]; then
-      cp "$BACKUP_DIR/$LEGACY_UNIT" "$UNIT_DIR/$LEGACY_UNIT"
-    fi
-    systemctl --user daemon-reload || true
-    rollback_ok=true
-    for previous_unit in "$BACKUP_DIR"/pi-telegram-bridge*.service; do
-      [[ -f "$previous_unit" ]] || continue
-      unit_name="$(basename "$previous_unit")"
-      if [[ "$unit_name" == "$LEGACY_UNIT" ]]; then
-        systemctl --user enable "$LEGACY_UNIT" || rollback_ok=false
-      fi
-      if ! systemctl --user restart "$unit_name"; then
-        rollback_ok=false
-        continue
-      fi
-      if [[ "$unit_name" == "$LEGACY_UNIT" ]]; then
-        [[ "$(systemctl --user is-active "$unit_name" || true)" == "active" ]] || rollback_ok=false
-        continue
-      fi
-      previous_id="${unit_name#pi-telegram-bridge-}"
-      previous_id="${previous_id%.service}"
-      previous_sha="$(grep -o 'PI_TELEGRAM_BRIDGE_RELEASE_SHA=[0-9a-f]\{40\}' "$previous_unit" | head -1 | cut -d= -f2 || true)"
-      if [[ -z "$previous_sha" ]] || ! wait_for_instance_ready "$previous_id" "$previous_sha" >/dev/null; then
-        rollback_ok=false
-      fi
-    done
-    if [[ "$rollback_ok" != true ]]; then
-      echo "CRITICAL: the previous fleet did not fully recover." >&2
-    fi
+    recovery_hold
   fi
-  rm -rf "$BACKUP_DIR"
   exit "$original_status"
 }
 trap rollback_fleet ERR
@@ -142,27 +100,18 @@ if [[ -n "$COORDINATOR_ID" ]]; then
     "$NODE_BINARY" "$RELEASE_PATH/dist/src/jobs-check.js"
 fi
 
-mkdir -p "$UNIT_DIR"
-for instance_id in "${INSTANCE_IDS[@]}"; do
-  unit_path="$UNIT_DIR/pi-telegram-bridge-$instance_id.service"
-  [[ ! -f "$unit_path" ]] || cp "$unit_path" "$BACKUP_DIR/$(basename "$unit_path")"
-done
-[[ ! -f "$UNIT_DIR/$LEGACY_UNIT" ]] || cp "$UNIT_DIR/$LEGACY_UNIT" "$BACKUP_DIR/$LEGACY_UNIT"
-
 ACTIVATION_STARTED=true
+recovery_prepare "$COORDINATOR_ID" "${INSTANCE_IDS[@]}"
+for instance_id in "${INSTANCE_IDS[@]}"; do
+  RECOVERY_UNITS+=("pi-telegram-bridge-$instance_id.service")
+done
 PI_TELEGRAM_BRIDGE_INSTALL_NO_START=1 \
   "$NODE_BINARY" "$RELEASE_PATH/dist/src/install-service.js"
 
-if systemctl --user is-enabled "$LEGACY_UNIT" >/dev/null 2>&1 || \
-  systemctl --user is-active "$LEGACY_UNIT" >/dev/null 2>&1; then
-  echo "==> Disabling compatibility singleton before fleet activation"
-  systemctl --user disable --now "$LEGACY_UNIT"
-fi
-
+recovery_started
 for instance_id in "${INSTANCE_IDS[@]}"; do
   service="pi-telegram-bridge-$instance_id.service"
   echo "==> Activating $service at $EXPECTED_SHA"
-  systemctl --user enable "$service"
   systemctl --user restart "$service"
   if ! ready_pid="$(wait_for_instance_ready "$instance_id" "$EXPECTED_SHA")"; then
     echo "$service did not become stable and ready on $EXPECTED_SHA." >&2
@@ -171,7 +120,11 @@ for instance_id in "${INSTANCE_IDS[@]}"; do
   echo "==> $service ready at PID $ready_pid"
 done
 
+recovery_revoke_startup
+for instance_id in "${INSTANCE_IDS[@]}"; do
+  systemctl --user enable "pi-telegram-bridge-$instance_id.service"
+done
+recovery_complete
 ACTIVATION_STARTED=false
 trap - ERR
-rm -rf "$BACKUP_DIR"
 echo "==> Fleet activation complete: ${INSTANCE_IDS[*]}"

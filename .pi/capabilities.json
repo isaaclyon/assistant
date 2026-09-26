@@ -85,6 +85,11 @@
         "enabled": true
       },
       {
+        "id": "find-places",
+        "path": ".pi/skills/find-places/SKILL.md",
+        "enabled": true
+      },
+      {
         "id": "extend-this-agent",
         "path": ".pi/skills/extend-this-agent/SKILL.md",
         "enabled": true
@@ -144,6 +149,7 @@
         "gmail-read",
         "google-contacts",
         "manage-tasks",
+        "find-places",
         "message-link",
         "schedule-reminders-and-jobs",
         "manage-ynab",

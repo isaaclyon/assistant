@@ -6,6 +6,23 @@ import {
 } from "../.pi/skills/manage-ynab/scripts/ynab-read.mjs";
 
 describe("YNAB read helpers", () => {
+  it.each([
+    { amount: { unexpected: "payload" } }, { approved: ["not", "boolean"] },
+    { date: { nested: true } }, { memo: "x".repeat(4001) }, { amount: Infinity },
+    { category_name: ["Dining"] }, { account_name: {} },
+  ])("rejects malformed transaction scalar fields: %j", (fields) => {
+    expect(() => summarizeTransactionContext({ id: "current", payee_name: "Merchant", ...fields }, []))
+      .toThrow(/invalid transaction context/i);
+  });
+
+  it("rejects malformed matching history and oversized active category names", () => {
+    expect(() => summarizeTransactionContext({ id: "current", payee_name: "Merchant" }, [
+      { id: "old", payee_name: "Merchant", date: { nested: true }, amount: [1], category_name: "Dining" },
+    ])).toThrow(/invalid transaction context/i);
+    expect(() => flattenActiveCategories([{ name: "x".repeat(501), categories: [{ id: "id", name: "Dining" }] }]))
+      .toThrow(/invalid categories/i);
+  });
+
   it("flattens active categories with their group names", () => {
     expect(
       flattenActiveCategories([

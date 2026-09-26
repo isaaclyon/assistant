@@ -46,7 +46,34 @@ instance, and insertion ownership uses the trusted runtime instance ID and
 principal—not user-selected chat input. Shared or collaborative rankings
 require a later identity and product decision.
 
+The tool and Telegram section share one `PlacesApplication.execute` command
+boundary, including read queries and operation-bound confirmations. The service
+and store retain ranking and persistence invariants; Telegram views, provisional
+name/category drafts, and reply capture remain transport concerns. This is the
+application-boundary reconciliation for issue #96, not a second UI framework.
+
+Delete confirmations snapshot the existing category mutation revision and
+compare it inside the deletion transaction. Cancel confirmations bind the exact
+insertion revision. Section callback capabilities are one-use, expire after ten
+minutes, and bind category/sentiment selection to its specific draft. Text entry
+uses fresh standalone prompts with unique references and only one pending input
+per private chat. Because raw update handlers run before default authorization,
+the handler requires the already-authorized section's exact private actor/chat,
+an exact fresh bot-prompt body, and a newer reply-target message ID. Failed result
+delivery cannot forward a possibly saved input to Pi for another execution.
+
+Persist the short-lived direct add draft used before an insertion exists in
+`<stateDir>/places-add-draft.json`. Write it atomically with mode `0600` and
+keep only the place name plus optional category ID. Restore it at session start
+so `/place_rankings` and stale category or sentiment buttons reopen the saved
+step with the place name instead of losing it. Clear it when an insertion starts,
+and ignore it after 24 hours or when malformed. The draft is recovery state, not
+canonical ranking data, so it stays outside the ranking database.
+
 ## Consequences
+
+- A direct add flow that has not started ranking survives a session reset
+  without showing an unrelated ranking view.
 
 - Rankings and unfinished comparisons survive process restarts, session
   rotation, extension reload, and immutable-release deployment.

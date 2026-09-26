@@ -1,4 +1,4 @@
-import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -33,6 +33,61 @@ function message(id: string, role: string, content: unknown, timestamp = "2026-0
 }
 
 describe("parseSessionJsonlFile", () => {
+  it("rejects a source that changes while its entries are being read", async () => {
+    const path = await sessionFile([header, message("one", "user", "original evidence")]);
+    const bytes = await readFile(path);
+    let changed = false;
+    await expect(parseSessionJsonlFile({
+      path, instanceId: "i", principal: "p",
+      readChunk: async (position, length) => {
+        if (position > 0 && !changed) {
+          changed = true;
+          await appendFile(path, "\n");
+        }
+        return bytes.subarray(position, position + length);
+      },
+    })).rejects.toThrow(/changed/);
+  });
+
+  it("rejects a symlinked source rather than reading another principal's file", async () => {
+    const path = await sessionFile([header, message("private", "user", "foreign evidence")]);
+    await symlink(path, `${path}-link`);
+    await expect(parseSessionJsonlFile({ path: `${path}-link`, instanceId: "i", principal: "p" })).rejects.toThrow();
+  });
+
+  it("makes bounded progress past a line larger than the per-pass file budget", async () => {
+    const path = await sessionFile([header,
+      message("oversized", "user", "oversized line ".repeat(100)),
+      message("after", "user", "safe later evidence"),
+    ]);
+    let offset: number | undefined;
+    let discardingLine = false;
+    let complete = false;
+    const ids: string[] = [];
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const result = await parseSessionJsonlFile({
+        path, instanceId: "i", principal: "p", limits: { maxFileBytes: 300 },
+        ...(offset === undefined ? {} : { offset }), discardingLine,
+      });
+      ids.push(...result.documents.map((document) => document.entryId));
+      expect(result.nextOffset).toBeGreaterThan(offset ?? 0);
+      offset = result.nextOffset;
+      discardingLine = result.discardingLine ?? false;
+      if (result.completion === "clean-eof") { complete = true; break; }
+    }
+    expect(complete).toBe(true);
+    expect(ids).toEqual(["after"]);
+  });
+
+  it("truncates an individually unfit entry instead of retrying it forever", async () => {
+    const path = await sessionFile([header, message("unfit", "user", "abcdef")]);
+    const result = await parseSessionJsonlFile({
+      path, instanceId: "i", principal: "p", limits: { maxEntryBytes: 10, maxOutputBytes: 5 },
+    });
+    expect(result.completion).toBe("clean-eof");
+    expect(result.documents).toEqual([expect.objectContaining({ text: "abcde", truncated: true })]);
+  });
+
   it("normalizes user and assistant text with stable provenance and opt-in cwd", async () => {
     const path = await sessionFile([
       header,
@@ -209,9 +264,14 @@ describe("parseSessionJsonlFile", () => {
       "ENTRY_TRUNCATED",
       "BLOCK_TRUNCATED",
       "TOTAL_OUTPUT_LIMIT",
-      "FILE_LIMIT",
     ]);
-    expect(result.nextOffset).toBe(thirdLineEnd);
+    expect(result.completion).toBe("budget-exhausted");
+    expect(result.nextOffset).toBe(content.indexOf(10, content.indexOf(10) + 1) + 1);
+    const resumed = await parseSessionJsonlFile({
+      path, instanceId: "i", principal: "p", offset: result.nextOffset,
+      previousFile: result.file,
+    });
+    expect(resumed.documents.map((document) => document.entryId)).toEqual(["not-output", "beyond-file"]);
   });
 
   it("resumes at a safe byte offset and returns only appended documents", async () => {
@@ -275,7 +335,7 @@ describe("parseSessionJsonlFile", () => {
       limits: { maxFileBytes: headerBytes + 12 },
     });
 
-    expect(result.completion).toBe("clean-eof");
+    expect(result.completion).toBe("budget-exhausted");
     expect(result.documents).toEqual([]);
     expect(result.findings.map((finding) => finding.code)).toEqual(["FILE_LIMIT"]);
     expect(result.nextOffset).toBe(headerBytes);

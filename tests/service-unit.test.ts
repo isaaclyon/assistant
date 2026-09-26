@@ -29,6 +29,7 @@ describe("renderServiceUnit", () => {
       'ExecStart="/opt/node/bin/node" "/srv/pi bridge/dist/src/daemon.js"',
     );
     expect(unit).toContain("WorkingDirectory=/home/test");
+    expect(unit).toContain('ExecCondition="/opt/node/bin/node" "/srv/pi bridge/dist/src/recovery-start-check.js" "/home/test/.local/state/pi-telegram-bridge"');
     expect(unit).toContain("Restart=on-failure");
     expect(unit).toContain('Environment="PI_TELEGRAM_BRIDGE_CWD=/home/test"');
     expect(unit).toContain(

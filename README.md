@@ -97,7 +97,7 @@ To ship a new commit to the box running the service, push to `origin/main`, then
 npm run deploy
 ```
 
-`scripts/deploy.sh` connects over SSH and invokes the same exact-SHA, immutable-release, locked deployment path used by Actions. It deploys only commits on `origin/main`, preserves tracked live edits by refusing to overwrite them, and applies the same rollback and readiness checks. The target is overridable:
+`scripts/deploy.sh` connects over SSH and invokes the same exact-SHA, immutable-release, locked deployment path used by Actions. It deploys only commits on `origin/main`, preserves tracked live edits by refusing to overwrite them, and applies the same recovery barrier and readiness checks. Activation failures hold services disabled with a paired state/application-binary checkpoint; see the [recovery runbook](docs/household-fleet.md#recovery-checkpoints-and-failure-holds). The target is overridable:
 
 | Variable | Default |
 | --- | --- |
@@ -165,8 +165,8 @@ push. Other unstaged Obsidian edits are left alone. A post-write Git failure is
 reported separately because the canonical note has already changed. Deleting a
 note does not erase it from Git history.
 
-The always-on assistant uses separate indexed `memory_search` and
-`session_search` tools for retrieval. Their private per-instance SQLite/FTS5
+The always-on assistant uses separate indexed `assistant_memory_search` and
+`assistant_session_search` tools for retrieval. Their private per-instance SQLite/FTS5
 database is disposable and rebuildable from canonical Markdown and session
 JSONL. The tracked skill-local CLI continues to own full-note reads, mutations,
 list/happenings, lint, and core operations; it takes one JSON request line on

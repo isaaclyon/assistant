@@ -27,11 +27,14 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 | Temporary browser handoff | `<browserRuntime>/handoff.{json,log}` and `handoff-password` | Browser handoff supervisor |
 | Scheduled job definitions | `<stateDir>/jobs.json` | Agent/user |
 | Scheduled job run state | `<stateDir>/jobs-state.json` | Host |
+| Materialized job occurrences and terminal identities | `<coordinatorStateDir>/job-occurrences.db` | Scheduler |
+| Recipient job claims, acceptance, and recovery evidence | `<stateDir>/job-handoffs/` | Host / explicit operator recovery |
 | Human-idle session epoch | `<stateDir>/conversation-session-state.json` | Host |
 | Heartbeat observations | `<stateDir>/checkers/*.json` | Host |
 | Background subagent batches and temporary sessions | `<stateDir>/subagents/` | Host |
 | Private place rankings and active comparisons | `<stateDir>/places.db` | Places extension/store |
 | Personal tasks | `<stateDir>/tasks.db` | Tasks extension/service |
+| Pending direct place-add draft | `<stateDir>/places-add-draft.json` | Places extension |
 | Personal memory vault | `~/.local/share/pi-telegram-bridge/memory` (override: `PI_TELEGRAM_MEMORY_DIR`) | `personal-memory` skill CLI |
 | Derived memory/session search index | `<stateDir>/search-index.db` | Search extension/coordinator |
 | Google Places cache and monthly attempt accounting | `<stateDir>/google-places.db` | Google extension/gateway |
@@ -87,9 +90,14 @@ command or raw API method. Each child is non-interactive, bounded, receives a
 minimal environment plus a just-in-time keyring password, and returns only a
 normalized operation-specific result. Per-instance private configuration owns
 the binary path, default account, and credential-file path; see ADR-0027.
-Google Places requests additionally pass through a per-instance SQLite cache
-and conservative monthly attempt reservation before gog receives a just-in-time
-API key; see ADR-0029.
+Google Places requests additionally pass through conservative per-instance
+monthly attempt reservation. Places requests bypass gog: identity lookups,
+bounded multi-place candidate searches, and opt-in rich details all use one
+repo-owned fixed-field Places API (New) HTTPS transport that reads the API key
+just in time. Identity and candidate results use the SQLite cache; rich details
+are never cached. Candidate
+search and rich details have separate accounting keys and limits; see
+ADR-0029.
 
 Background read-only delegation runs isolated Pi child processes with discovery
 and built-in tools disabled. A child-only extension exposes canonicalized
@@ -141,8 +149,8 @@ in this repository do not receive it. Compilation errors are logged by Pi and
 the turn continues without core memory. There is no generated core file or
 memory daemon. A per-instance private SQLite/FTS5 database is a disposable
 search projection over canonical Markdown and configured Pi session JSONL.
-The repo-local search extension exposes separate `memory_search` and
-`session_search` tools plus explicit index maintenance; assistant guidance
+The repo-local search extension exposes separate `assistant_memory_search` and
+`assistant_session_search` tools plus explicit index maintenance; assistant guidance
 prefers indexed memory retrieval while the scan backend remains a compatibility
 fallback. Every note has a `personal` scope with a
 trusted owner or a `household` scope without an owner. Host-bound principal/view
@@ -197,7 +205,7 @@ without a repeated-rotation loop after a post-replacement state-write failure.
 
 ## Deployment
 
-Pushes to `main` run checks on a GitHub-hosted runner. After they pass, the `assistant-production` self-hosted runner builds one immutable release for the exact merged SHA. If the external instance manifest exists, it preflights every instance and the job graph, installs all units, stops the compatibility singleton, and activates instances sequentially. Readiness requires exact instance ID, full release SHA, and stable systemd PID from private runtime metadata. Any failure restores every changed unit. Mutable state/workspaces and separate builder worktrees are preserved. Without a manifest, the compatibility singleton deployment remains available. See ADR-0005 and [the fleet runbook](docs/household-fleet.md).
+Pushes to `main` run checks on a GitHub-hosted runner. After they pass, the `assistant-production` self-hosted runner builds one immutable release for the exact merged SHA. If the external instance manifest exists, it preflights every instance and the job graph, disables and stops all bridge units, and captures matching state, units, and previous immutable application releases before offline job migration. It then installs all units and activates instances sequentially. Readiness requires exact instance ID, full release SHA, and stable systemd PID from private runtime metadata. Failures hold the fleet disabled; they never restart an old binary over changed recovery state. A durable pre-start barrier forbids state rewind after a candidate may have accepted work. Unit `ExecCondition` checks enforce the surviving maintenance hold on reboot. Workspaces and separate builder worktrees are preserved. The singleton uses the same recovery barrier. See ADR-0005, ADR-0030, and [the fleet runbook](docs/household-fleet.md).
 
 After every fleet instance is ready and the canonical checkout advances, the
 deployment runner sends one fixed completion message through the engineering

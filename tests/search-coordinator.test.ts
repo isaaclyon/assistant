@@ -1,11 +1,12 @@
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   rebuildMemoryIndex,
+  readSessionContext,
   rebuildSessionIndex,
   refreshSessionIndex,
   searchIndexedMemories,
@@ -22,6 +23,143 @@ afterEach(async () => {
 });
 
 describe("search coordinator", () => {
+  it("keeps identical session and entry IDs independent across principals", async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), "search-principals-"));
+    roots.push(sandbox);
+    const sessionRoot = join(sandbox, "sessions");
+    await mkdir(sessionRoot);
+    await writeFile(join(sessionRoot, "same.jsonl"), [
+      JSON.stringify({ type: "session", id: "same", timestamp: "2026-07-25T12:00:00.000Z" }),
+      JSON.stringify({ type: "message", id: "same", timestamp: "2026-07-25T12:01:00.000Z", message: { role: "user", content: "independent evidence" } }), "",
+    ].join("\n"));
+    const index = openSearchIndex({ stateDir: join(sandbox, "state") });
+    indexes.push(index);
+    for (const principalId of ["isaac", "emma"]) {
+      expect(await refreshSessionIndex({ index, roots: [sessionRoot], instanceId: "shared", principalId }))
+        .toMatchObject({ complete: true, indexed: 1 });
+      expect(searchIndexedSessions(index, { query: "independent", instanceId: "shared", principalId }).results).toHaveLength(1);
+    }
+    expect(index.status().sessionDocuments).toBe(2);
+  });
+
+  it("counts only committed documents when a source conflicts with another source", async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), "search-conflict-"));
+    roots.push(sandbox);
+    const sessionRoot = join(sandbox, "sessions");
+    await mkdir(sessionRoot);
+    const content = [
+      JSON.stringify({ type: "session", id: "same", timestamp: "2026-07-25T12:00:00.000Z" }),
+      JSON.stringify({ type: "message", id: "same", timestamp: "2026-07-25T12:01:00.000Z", message: { role: "user", content: "Synthetic" } }), "",
+    ].join("\n");
+    await writeFile(join(sessionRoot, "a.jsonl"), content);
+    await writeFile(join(sessionRoot, "b.jsonl"), content);
+    const index = openSearchIndex({ stateDir: join(sandbox, "state") });
+    indexes.push(index);
+    const result = await refreshSessionIndex({ index, roots: [sessionRoot], instanceId: "i", principalId: "p" });
+    expect(result).toMatchObject({ complete: false, indexed: 1, skipped: 1 });
+    expect(index.status().sessionDocuments).toBe(1);
+  });
+
+  it("retains excluded entry identities across append refreshes and context windows", async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), "search-duplicate-"));
+    roots.push(sandbox);
+    const sessionRoot = join(sandbox, "sessions");
+    await mkdir(sessionRoot);
+    const path = join(sessionRoot, "session.jsonl");
+    const message = (id: string, content: unknown) => JSON.stringify({
+      type: "message", id, timestamp: "2026-07-25T12:01:00.000Z",
+      message: { role: "assistant", content },
+    });
+    await writeFile(path, [
+      JSON.stringify({ type: "session", id: "session", timestamp: "2026-07-25T12:00:00.000Z" }),
+      message("excluded", [{ type: "thinking", thinking: "excluded content" }]),
+      "",
+    ].join("\n"));
+    const stateDir = join(sandbox, "state");
+    const initial = openSearchIndex({ stateDir });
+    const options = { roots: [sessionRoot], instanceId: "i", principalId: "p" };
+    await refreshSessionIndex({ ...options, index: initial });
+    initial.close();
+    const index = openSearchIndex({ stateDir });
+    indexes.push(index);
+    await appendFile(path, [message("anchor", "original evidence"), message("excluded", "duplicate evidence"), ""].join("\n"));
+    await refreshSessionIndex({ ...options, index });
+    expect(searchIndexedSessions(index, { query: "duplicate", instanceId: "i", principalId: "p" }).results).toEqual([]);
+    const context = await readSessionContext(index, { ...options, sessionId: "session", entryId: "anchor", before: 0, after: 2 });
+    expect(context.entries.map((entry) => entry.entryId)).toEqual(["anchor"]);
+  });
+
+  it("resumes an unchanged budget-limited source after reopening the index", async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), "search-continuation-"));
+    roots.push(sandbox);
+    const sessionRoot = join(sandbox, "sessions");
+    await mkdir(sessionRoot);
+    const path = join(sessionRoot, "large.jsonl");
+    await writeFile(path, [
+      JSON.stringify({ type: "session", id: "large", timestamp: "2026-07-25T12:00:00.000Z" }),
+      "{broken-json",
+      ...Array.from({ length: 145 }, (_, n) => JSON.stringify({
+        type: "message", id: `entry-${n}`, timestamp: "2026-07-25T12:01:00.000Z",
+        message: { role: "user", content: "retained evidence ".repeat(3500) },
+      })),
+      "",
+    ].join("\n"));
+    const stateDir = join(sandbox, "state");
+    const firstIndex = openSearchIndex({ stateDir });
+    const options = { roots: [sessionRoot], instanceId: "i", principalId: "p" };
+    try {
+      const first = await refreshSessionIndex({ ...options, index: firstIndex });
+      expect(first.indexed).toBeLessThan(145);
+      expect(first.warnings.some((warning) => warning.code === "TOTAL_OUTPUT_LIMIT")).toBe(true);
+    } finally {
+      firstIndex.close();
+    }
+    const index = openSearchIndex({ stateDir });
+    indexes.push(index);
+    const second = await refreshSessionIndex({ ...options, index });
+    expect(second.appendedFiles).toBe(1);
+    expect(index.status().sessionDocuments).toBe(145);
+    const third = await refreshSessionIndex({ ...options, index });
+    expect(third.unchangedFiles).toBe(1);
+    expect(third.warnings.some((warning) => warning.code === "MALFORMED_JSON")).toBe(true);
+    expect(third.warnings.some((warning) => warning.code === "TOTAL_OUTPUT_LIMIT")).toBe(false);
+    const context = await readSessionContext(index, {
+      ...options, sessionId: "large", entryId: "entry-144", before: 2, after: 2,
+    });
+    expect(context.entries.map((entry) => entry.entryId)).toEqual(["entry-142", "entry-143", "entry-144"]);
+    expect(context).toMatchObject({ hasMoreBefore: true, hasMoreAfter: false });
+  });
+
+  it.each([refreshSessionIndex, rebuildSessionIndex])(
+    "preserves undiscovered session sources during %s",
+    async (refresh) => {
+      const sandbox = await mkdtemp(join(tmpdir(), "search-coverage-"));
+      roots.push(sandbox);
+      const sessionRoot = join(sandbox, "sessions");
+      await mkdir(sessionRoot);
+      for (const id of ["a", "b"]) {
+        await writeFile(join(sessionRoot, `${id}.jsonl`), [
+          JSON.stringify({ type: "session", id, timestamp: "2026-07-25T12:00:00.000Z" }),
+          JSON.stringify({ type: "message", id, timestamp: "2026-07-25T12:01:00.000Z",
+            message: { role: "user", content: "retained evidence" } }),
+          "",
+        ].join("\n"));
+      }
+      const index = openSearchIndex({ stateDir: join(sandbox, "state") });
+      indexes.push(index);
+      const options = { index, roots: [sessionRoot], instanceId: "i", principalId: "p" };
+      await refreshSessionIndex(options);
+      const bounded = await refresh({ ...options, maxFiles: 1 });
+      expect(bounded.filesTruncated).toBe(true);
+      expect(index.status().sessionDocuments).toBe(2);
+      await rename(sessionRoot, `${sessionRoot}-offline`);
+      const offline = await refresh(options);
+      expect(offline.warnings).toContainEqual({ code: "IO_ERROR", sourcePath: sessionRoot });
+      expect(offline.deletedFiles).toBe(0);
+      expect(index.status().sessionDocuments).toBe(2);
+    },
+  );
+
   it("rebuilds canonical Markdown and returns privacy-filtered indexed results", async () => {
     const sandbox = await mkdtemp(join(tmpdir(), "search-coordinator-"));
     roots.push(sandbox);
@@ -156,7 +294,7 @@ describe("search coordinator", () => {
     expect(index.status().memoryDocuments).toBe(0);
   });
 
-  it("caps deterministic memory rebuild candidates and reports scan truncation", async () => {
+  it("resumes staged memory coverage across restart and publishes only a complete snapshot", async () => {
     const sandbox = await mkdtemp(join(tmpdir(), "search-coordinator-"));
     roots.push(sandbox);
     const vault = join(sandbox, "vault");
@@ -194,8 +332,21 @@ describe("search coordinator", () => {
       maxNotes: 1,
     });
 
-    expect(rebuilt).toMatchObject({ indexed: 1, scanTruncated: true });
-    expect(index.status().memoryDocuments).toBe(1);
+    expect(rebuilt).toMatchObject({ indexed: 0, complete: false, scanTruncated: true });
+    expect(index.status().memoryDocuments).toBe(0);
+    index.close();
+    indexes.splice(indexes.indexOf(index), 1);
+    const reopened = openSearchIndex({ stateDir: join(sandbox, "state") });
+    indexes.push(reopened);
+    expect(await rebuildMemoryIndex({ index: reopened, vaultRoot: vault, resourceRoot, maxNotes: 1 }))
+      .toMatchObject({ complete: true, indexed: 2 });
+    expect(reopened.status().memoryDocuments).toBe(2);
+    // A visibility edit to an already staged source cannot survive as stale public data.
+    const firstPath = join(vault, "references", `${ids[0]}.md`);
+    await writeFile(firstPath, "not a managed note");
+    expect(await rebuildMemoryIndex({ index: reopened, vaultRoot: vault, resourceRoot, maxNotes: 1 }))
+      .toMatchObject({ complete: true, indexed: 1 });
+    expect(reopened.status().memoryDocuments).toBe(1);
   });
 
   it("refreshes an explicit session root and returns source-aware results", async () => {
@@ -301,7 +452,12 @@ describe("search coordinator", () => {
       principalId: "isaac",
     };
 
-    const first = await refreshSessionIndex(options);
+    const replace = vi.spyOn(index, "replaceSessionSource");
+    const [first, overlapping] = await Promise.all([
+      refreshSessionIndex(options), refreshSessionIndex(options),
+    ]);
+    expect(overlapping).toEqual(first);
+    expect(replace).toHaveBeenCalledTimes(1);
     const unchanged = await refreshSessionIndex(options);
     await appendFile(path, `${JSON.stringify(message("entry-2", "index beta"))}\n`);
     const appended = await refreshSessionIndex(options);
@@ -408,6 +564,23 @@ describe("search coordinator", () => {
       instanceId: "isaac",
       principalId: "isaac",
     }).results.map((result) => result.sessionId)).toEqual(["a"]);
+    index.close();
+    indexes.splice(indexes.indexOf(index), 1);
+    const reopened = openSearchIndex({ stateDir: join(sandbox, "state") });
+    indexes.push(reopened);
+    const converged = await refreshSessionIndex({
+      index: reopened, roots: [sessionRoot], instanceId: "isaac", principalId: "isaac", maxFiles: 1,
+    });
+    expect(converged.complete).toBe(true);
+    expect(searchIndexedSessions(reopened, {
+      query: "bounded", instanceId: "isaac", principalId: "isaac",
+    }).results.map((result) => result.sessionId).sort()).toEqual(["a", "b"]);
+    // Discovery of a new source invalidates coverage until that source is processed.
+    await writeFile(join(sessionRoot, "c.jsonl"), content("c", "c-entry"));
+    await writeFile(join(sessionRoot, "d.jsonl"), content("d", "d-entry"));
+    expect(await refreshSessionIndex({
+      index: reopened, roots: [sessionRoot], instanceId: "isaac", principalId: "isaac", maxFiles: 1,
+    })).toMatchObject({ complete: false });
   });
 
   it("atomically rebuilds the active session corpus and converges on repeated runs", async () => {

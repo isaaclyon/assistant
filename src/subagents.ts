@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-export const DEFAULT_SUBAGENT_MODEL = "openai-codex/gpt-5.6-luna";
+export const DEFAULT_SUBAGENT_MODEL = "openai-codex/gpt-6-luna";
 export const DEFAULT_SUBAGENT_THINKING = "high";
 export const DEFAULT_SUBAGENT_TIMEOUT_MS = 30 * 60 * 1_000;
 export const DEFAULT_SUBAGENT_OUTPUT_LIMIT_BYTES = 64 * 1024;

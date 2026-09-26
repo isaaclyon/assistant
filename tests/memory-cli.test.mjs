@@ -89,6 +89,18 @@ async function addNote(overrides = {}) {
 }
 
 describe("personal memory CLI", () => {
+  it("serializes Git preflight, mutation, and commit across concurrent commands", async () => {
+    await initializeGit();
+    const results = await Promise.all(Array.from({ length: 4 }, (_, index) => run("add", {
+      type: "reference", title: `Concurrent ${index}`, tags: [], body: "Synthetic",
+    }, { gitAutocommit: true })));
+    for (const result of results) {
+      expect(result.exitCode, result.stderr).toBe(0);
+      expect(parseLine(result.stdout).data.git).toEqual({ committed: true });
+    }
+    expect(await gitLog()).toHaveLength(4);
+  });
+
   it("rejects a missing or unknown command with exit 2", async () => {
     for (const command of [undefined, "wipe"]) {
       const { exitCode, stdout, stderr } = await run(command, {});
@@ -225,7 +237,7 @@ describe("personal memory CLI", () => {
       "initial",
     ]);
     const { stdout: status } = await execFileAsync("git", ["status", "--short"], { cwd: vault });
-    expect(status).toBe(" M tracked-draft.md\n?? private-draft.md\n");
+    expect(status).toBe(" M tracked-draft.md\n?? .mutation-lock.sqlite\n?? private-draft.md\n");
     await expect(readdir(vault)).resolves.not.toContain("post-commit-ran");
     await expect(readdir(vault)).resolves.not.toContain("prepare-commit-msg-ran");
   });
@@ -281,7 +293,8 @@ describe("personal memory CLI", () => {
         code: "GIT_AUTOCOMMIT_UNAVAILABLE",
         message: "Memory Git auto-commit is unavailable",
       });
-      expect(await readdir(nestedVault)).toEqual([]);
+      // Lock metadata is not a canonical mutation and contains no note data.
+      expect(await readdir(nestedVault)).toEqual([".mutation-lock.sqlite"]);
     } finally {
       await rm(parent, { recursive: true, force: true });
     }

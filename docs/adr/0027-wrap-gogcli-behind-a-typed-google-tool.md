@@ -26,6 +26,14 @@ operation-owned safety flags. Parse JSON and return only operation-specific
 normalized fields. Child failures, stderr, malformed output, and configuration
 details collapse to bounded generic errors.
 
+Keep registration and the exact public schema in the extension, pure operation
+parsing in `.pi/lib/google-operations.ts`, and credential/configuration plus
+process/HTTPS execution in `.pi/lib/google-transport.ts`. The transport also
+sanitizes its own errors. Already-cancelled requests never spawn a child; on
+POSIX systems a dedicated process group lets timeout, cancellation, and cleanup
+terminate descendants as well as the direct child. Windows retains direct-child
+cleanup and is not the production deployment target.
+
 Per-instance mode-`0600` environment files provide the absolute binary path,
 an isolated `GOG_HOME`, optional default account, and path to a separate
 mode-`0600` keyring-password file. OAuth clients, refresh tokens, API keys, and

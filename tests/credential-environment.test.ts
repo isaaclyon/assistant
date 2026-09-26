@@ -78,6 +78,7 @@ describe("credential environment scopes", () => {
         "PI_TELEGRAM_GOOGLE_PLACES_API_KEY_FILE=/private/google-places-api-key",
         "PI_TELEGRAM_GOOGLE_PLACES_SEARCH_MONTHLY_LIMIT=100",
         "PI_TELEGRAM_GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT=200",
+        "PI_TELEGRAM_GOOGLE_PLACES_CANDIDATES_MONTHLY_LIMIT=300",
         "",
       ].join("\n"),
       { mode: 0o600 },
@@ -94,6 +95,7 @@ describe("credential environment scopes", () => {
       "PI_TELEGRAM_GOOGLE_PLACES_API_KEY_FILE",
       "PI_TELEGRAM_GOOGLE_PLACES_SEARCH_MONTHLY_LIMIT",
       "PI_TELEGRAM_GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT",
+      "PI_TELEGRAM_GOOGLE_PLACES_CANDIDATES_MONTHLY_LIMIT",
     ]);
     expect(JSON.stringify(result)).not.toContain("owner@example.com");
     expect(JSON.stringify(result)).not.toContain("google-keyring-password");

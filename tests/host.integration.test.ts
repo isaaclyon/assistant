@@ -1111,10 +1111,16 @@ export default function(pi) {
       resourceRoot,
     );
     const canonicalResourceRoot = await realpath(resourceRoot);
+    // This is a current-protocol startup fixture, not a legacy migration.
+    const { openJobOccurrenceLedger } = await import("../src/job-occurrences.js");
+    const ledger = openJobOccurrenceLedger(config.stateDir);
+    ledger.reconcileDefinitions([], {});
+    ledger.close();
     await enqueueJobHandoff({
       stateRoot: config.stateRoot,
       coordinatorStateDir: config.stateDir,
       eventId: "test:host-startup-handoff",
+      definitionFingerprint: "a".repeat(64),
       jobId: "host-startup",
       target: "isaac",
       prompt: "/handoff-test routed",

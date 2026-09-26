@@ -79,6 +79,38 @@ describe("places management", () => {
     expect(service.getPlace(first.place.id)).toMatchObject({ sentiment: "liked", position: 0 });
   });
 
+  it.each(["edit", "delete"] as const)("invalidates a provisional move when its source is changed by %s", (mutation) => {
+    const [source, target] = service.listCategories();
+    if (!source || !target) throw new Error("missing categories");
+    const added = service.start({ name: "Original", categoryId: source.id, sentiment: "liked" });
+    service.start({ name: "Existing", categoryId: target.id, sentiment: "liked" });
+    if (added.kind !== "complete") throw new Error("expected completion");
+    const move = service.reposition(added.place.id, { categoryId: target.id });
+    if (move.kind !== "compare") throw new Error("expected comparison");
+    if (mutation === "edit") service.editPlace(added.place.id, { name: "Edited", notes: "Keep this" });
+    else service.deletePlace(added.place.id);
+
+    expect(() => service.answer({
+      insertionId: move.insertionId, revision: move.revision,
+      existingPlaceId: move.existingPlace.id, winner: "candidate",
+    })).toThrow();
+    expect(service.listRanking(target.id).map((place) => place.name)).toEqual(["Existing"]);
+    if (mutation === "edit") {
+      expect(service.getPlace(added.place.id)).toMatchObject({ name: "Edited", notes: "Keep this", categoryId: source.id });
+    } else expect(() => service.getPlace(added.place.id)).toThrow();
+    expect(() => service.resume()).toThrow(/no unfinished ranking/i);
+  });
+
+  it("preserves a place's creation time when repositioning it", () => {
+    const [source, target] = service.listCategories();
+    if (!source || !target) throw new Error("missing categories");
+    const added = service.start({ name: "Original", notes: "Keep this", categoryId: source.id, sentiment: "liked" });
+    if (added.kind !== "complete") throw new Error("expected completion");
+    const moved = service.reposition(added.place.id, { categoryId: target.id });
+    if (moved.kind !== "complete") throw new Error("expected completion");
+    expect(moved.place).toMatchObject({ createdAt: added.place.createdAt, notes: "Keep this" });
+  });
+
   it("undoes the latest addition only while its category has not changed", () => {
     const category = service.listCategories()[0];
     if (!category) throw new Error("missing category");

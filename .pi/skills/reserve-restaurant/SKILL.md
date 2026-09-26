@@ -56,6 +56,11 @@ and never infer or persist a new preference from one booking.
    results are not availability checks, and `no_slots_visible` means only that
    the rendered page exposed no slot buttons. Continue to verify any selected
    slot in the browser immediately before booking.
+   Blocked-page markers override any background slot buttons. The helper
+   filters visible labels by requested date and party size; unmatched labels
+   alone produce `unverified`. When a label omits its year, it verifies only
+   month/day against the requested URL date. Returned times may be nearby
+   alternatives, not an exact match to the requested time.
 4. Verify each offered slot for the exact date, local time, and party size.
    Check seating type and any visible deposit, prepayment, cancellation,
    no-show, minimum-spend, prix-fixe, age, or dining-duration terms.
@@ -133,6 +138,8 @@ confirmation before the final action.
 ## Cleanup
 
 Stop the stock-Chrome helper when finished, including after errors or handoff.
+The OpenTable helper closes its own tabs and conditionally stops only the
+browser launch it created; it does not stop an existing or replacement launch.
 The browser profile remains persistent. Do not save screenshots or page dumps
 containing personal or payment information unless the user explicitly needs an
 artifact and approves its handling.

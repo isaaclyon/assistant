@@ -96,4 +96,31 @@ describe("Google Places gateway", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
     gateway.close();
   });
+
+  it("meters but never persists content for a no-cache profile", async () => {
+    const gateway = await fixture();
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ rating: 4.8, reviews: ["first"] })
+      .mockResolvedValueOnce({ rating: 4.9, reviews: ["second"] });
+    const request = {
+      operation: "details",
+      profile: "details_rich_details",
+      cacheArguments: { placeId: "ChIJ123" },
+      sku: "places_details_rich",
+      monthlyLimit: 2,
+      ttlMs: 1,
+      now: Date.UTC(2026, 0, 1),
+      cache: false,
+    } as const;
+
+    const first = await gateway.request(request, fetch);
+    const second = await gateway.request(request, fetch);
+    const blocked = await gateway.request(request, fetch);
+
+    expect(first).toMatchObject({ status: "ok", cached: false, value: { rating: 4.8 } });
+    expect(second).toMatchObject({ status: "ok", cached: false, value: { rating: 4.9 } });
+    expect(blocked).toMatchObject({ status: "blocked", sku: "places_details_rich" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    gateway.close();
+  });
 });

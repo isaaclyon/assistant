@@ -18,6 +18,7 @@ export interface WebhookServerOptions {
   port: number;
   secret: string;
   getJob(id: string): WebhookJob | undefined;
+  /** Resolves after durable occurrence materialization, not after a Pi run. */
   inject(prompt: string, job: WebhookJob): Promise<void>;
   logger: JobsLogger;
 }
@@ -113,8 +114,6 @@ export async function startWebhookServer({
       respond(response, 404, "not found");
       return;
     }
-    // Accept before the agent turn runs; senders like GitHub time out in ~10s.
-    respond(response, 202, "accepted");
     const headerLines = PROMPT_HEADERS.flatMap((name) => {
       const value = request.headers[name];
       return typeof value === "string" ? [`${name}: ${value}`] : [];
@@ -128,9 +127,11 @@ export async function startWebhookServer({
     ].join("\n\n");
     try {
       await inject(prompt, job);
+      respond(response, 202, "materialized");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error(`Webhook '${job.id}' prompt injection failed: ${message}`);
+      respond(response, 503, "not materialized");
     }
   };
 

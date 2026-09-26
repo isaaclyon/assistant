@@ -104,6 +104,7 @@ PI_TELEGRAM_GOOGLE_ACCOUNT=account@example.com
 PI_TELEGRAM_GOOGLE_PLACES_API_KEY_FILE=/absolute/path/to/places-api-key
 PI_TELEGRAM_GOOGLE_PLACES_SEARCH_MONTHLY_LIMIT=100
 PI_TELEGRAM_GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT=100
+PI_TELEGRAM_GOOGLE_PLACES_CANDIDATES_MONTHLY_LIMIT=500
 ```
 
 The environment file is validated during fleet preflight. The password file
@@ -117,14 +118,29 @@ an account explicitly.
 The Google Places entries are optional as a group. Store the API key in a
 separate regular file owned by the service user with mode `0600`; never put the
 key itself in the instance environment. Both monthly limits are required to
-enable Places, accept integers from 0 through 1,000,000, and are conservative
-per-UTC-month outbound-attempt ceilings. Zero blocks all cache misses. Configure
-limits below the provider budget because failed attempts remain counted.
+enable identity Places operations; the candidate limit is additionally required
+to enable multi-place search. All three accept integers from 0 through
+1,000,000 and are conservative per-UTC-month outbound-attempt ceilings. Zero
+blocks all cache misses. Configure limits below the provider budget because
+failed attempts remain counted.
 
-`places_search` uses gogcli's fixed identity/address field mask and caches the
-best query match for 24 hours. `places_details` uses the fixed identity/address
-field mask and caches by place ID and locale for 30 days. The current profile
-does not request ratings, opening hours, reviews, or other volatile fields.
+All Places operations use one repo-owned fixed-field Places API (New) HTTPS
+transport; `gog` never receives the Places API key. `places_search` requests
+only identity, display name, formatted address, and Google Maps URI, and caches
+the best query match for 24 hours. The `places_details` identity profile uses
+the same fixed identity/address fields and caches by place ID and locale for 30
+days. The opt-in `rich_details` profile requests ratings/count, regular hours,
+national phone, website, price level, and at most three attributed reviews. Rich details use a separate accounting SKU and
+receive their own copy of the configured details ceiling; identity and rich
+details can therefore make up to twice that numeric setting in total. Rich
+details are never written to the local cache.
+
+`places_search_candidates` uses a fixed Places API (New) Text Search field mask
+and returns at most 15 bounded candidates in one request. Candidate entries
+include identity, Google Maps URI, rating, and user rating count so the model
+can choose which results to surface; the tool does not expose pagination tokens
+or request rich details for every candidate. Candidate searches use their own
+monthly accounting SKU and limit. Candidate results are cached for 24 hours.
 
 ### Configure account aliases
 

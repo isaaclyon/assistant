@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -125,9 +125,11 @@ describe("places extension", () => {
     });
     expect(directCategories?.terminate).toBe(true);
     expect(presentedView?.text).toContain("Choose a category");
-    await section.handleCallback?.({ ...baseContext, action: "category", payload: categoryId });
+    const chooseCategory = presentedView?.replyMarkup?.inline_keyboard[0]?.[0]?.callback_data.split(":");
+    await section.handleCallback?.({ ...baseContext, action: chooseCategory?.[2] ?? "", payload: chooseCategory?.[3] ?? "" });
     expect(presentedView?.text).toContain("overall impression");
-    await section.handleCallback?.({ ...baseContext, action: "sentiment", payload: "disliked" });
+    const chooseSentiment = presentedView?.replyMarkup?.inline_keyboard[0]?.[2]?.callback_data.split(":");
+    await section.handleCallback?.({ ...baseContext, action: chooseSentiment?.[2] ?? "", payload: chooseSentiment?.[3] ?? "" });
     expect(presentedView?.text).toContain("Ranked Direct Place");
     expect(presentedView?.text).toContain("#1 of 1 in Restaurants");
     const first = await tool?.execute("call-first", {
@@ -263,6 +265,85 @@ describe("places extension", () => {
     expect(singleton?.details).toMatchObject({ ok: true });
     await rm(stateDir, { recursive: true, force: true });
     unbindPresenter();
+    sectionRegistry.clear();
+  });
+
+  it("restores an in-progress add draft and recovers stale buttons after session resets", async () => {
+    const sectionsPath = join(dirname(resolveTelegramExtensionPath()), "lib", "sections.ts");
+    const sections = (await import(pathToFileURL(sectionsPath).href)) as {
+      createAndBindTelegramSectionRegistry: () => {
+        clear(): void;
+        getSections(): Array<{ id: string; registration: SectionRegistration }>;
+      };
+    };
+    const sectionRegistry = sections.createAndBindTelegramSectionRegistry();
+    const stateDir = await mkdtemp(join(tmpdir(), "places-extension-reset-"));
+    const draftFile = join(stateDir, "places-add-draft.json");
+    process.env.PI_TELEGRAM_BRIDGE_STATE_DIR = stateDir;
+    process.env.PI_TELEGRAM_PRINCIPAL = "isaac";
+    process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID = "isaac";
+    const handlers = new Map<string, () => void>();
+    let tool: ToolDefinition | undefined;
+    const module = (await import(
+      `${pathToFileURL(join(root, ".pi", "extensions", "places.ts")).href}?reset=${Date.now()}`
+    )) as { default: (api: unknown) => void };
+    module.default({
+      on: (event: string, handler: () => void) => handlers.set(event, handler),
+      registerTool: (definition: ToolDefinition) => { tool = definition; },
+    });
+    let edited: SectionView | undefined;
+    let answered: string | undefined;
+    const context: SectionContext = {
+      action: "",
+      payload: "",
+      callbackData: (action, payload) => `section:0:${action}${payload ? `:${payload}` : ""}`,
+      answerCallback: async (text) => { answered = text; },
+      edit: async (view) => { edited = view; },
+      enqueuePrompt: async () => {},
+    };
+    const reset = () => {
+      handlers.get("session_start")?.();
+      const section = sectionRegistry.getSections().find((entry) => entry.id === "assistant/place-rankings")?.registration;
+      if (!section) throw new Error("missing places section");
+      return section;
+    };
+    const tap = async (section: SectionRegistration, view: SectionView | undefined, column = 0) => {
+      const [, , action, payload] = view?.replyMarkup?.inline_keyboard[0]?.[column]?.callback_data.split(":") ?? [];
+      await section.handleCallback?.({ ...context, action: action ?? "", payload: payload ?? "" });
+    };
+
+    let section = reset();
+    await tool?.execute("reset-start", { action: "categories", name: "Tres Gatos coffee" });
+    const staleCategories = await section.render(context);
+    expect(staleCategories.text).toContain("Choose a category");
+
+    section = reset();
+    await tap(section, staleCategories);
+    expect(answered).toContain("Pick up where you left off");
+    expect(edited?.text).toContain("Choose a category");
+    expect(edited?.text).toContain("Adding <b>Tres Gatos coffee</b>");
+    const categories = await section.render(context);
+    expect(categories.text).toContain("Adding <b>Tres Gatos coffee</b>");
+    await tap(section, categories);
+    expect(edited?.text).toContain("overall impression");
+    const staleSentiment = edited;
+    expect(JSON.parse(await readFile(draftFile, "utf8"))).toMatchObject({ name: "Tres Gatos coffee", categoryId: expect.any(String) });
+    expect((await stat(draftFile)).mode & 0o777).toBe(0o600);
+
+    section = reset();
+    await tap(section, staleSentiment, 0);
+    expect(edited?.text).toContain("overall impression");
+    expect(edited?.text).toContain("Adding <b>Tres Gatos coffee</b>");
+    await tap(section, edited, 0);
+    expect(edited?.text).toContain("Ranked Tres Gatos coffee");
+    await expect(stat(draftFile)).rejects.toMatchObject({ code: "ENOENT" });
+
+    await writeFile(draftFile, JSON.stringify({ version: 1, savedAt: Date.now() - 25 * 60 * 60 * 1_000, name: "Old place" }), { mode: 0o600 });
+    section = reset();
+    expect((await section.render(context)).text).toContain("Add a place or browse");
+
+    handlers.get("session_shutdown")?.();
+    await rm(stateDir, { recursive: true, force: true });
     sectionRegistry.clear();
   });
 });

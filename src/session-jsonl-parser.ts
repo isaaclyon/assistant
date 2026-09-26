@@ -1,4 +1,5 @@
-import { open, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open } from "node:fs/promises";
 
 export interface SessionParserLimits {
   maxBlockBytes: number;
@@ -40,6 +41,7 @@ export interface ParseSessionJsonlOptions {
   principal: string;
   includeSafeCwd?: boolean;
   offset?: number;
+  discardingLine?: boolean;
   previousFile?: SessionFileState;
   seenEntryIds?: ReadonlySet<string>;
   limits?: Partial<SessionParserLimits>;
@@ -50,9 +52,11 @@ export interface ParseSessionJsonlOptions {
 export interface ParseSessionJsonlResult {
   documents: SessionDocument[];
   findings: SessionParserFinding[];
-  completion: "clean-eof" | "incomplete-tail" | "file-truncated" | "file-replaced";
+  completion: "clean-eof" | "budget-exhausted" | "incomplete-tail" | "file-truncated" | "file-replaced";
   nextOffset: number;
   file: SessionFileState;
+  discardingLine?: boolean;
+  seenEntries: Array<{ entryId: string; byteOffset: number }>;
 }
 
 const DEFAULT_LIMITS: SessionParserLimits = {
@@ -162,44 +166,53 @@ async function readLineAt(
 export async function parseSessionJsonlFile(
   options: ParseSessionJsonlOptions,
 ): Promise<ParseSessionJsonlResult> {
+  const seenEntries: Array<{ entryId: string; byteOffset: number }> = [];
   const limits = { ...DEFAULT_LIMITS, ...options.limits };
+  for (const [name, value] of Object.entries(limits)) {
+    if (!Number.isSafeInteger(value) || value < 1 || value > DEFAULT_LIMITS[name as keyof SessionParserLimits]) {
+      throw new Error(`Invalid session parser limit: ${name}`);
+    }
+  }
   const chunkBytes = Math.max(1, Math.min(options.chunkBytes ?? 64 * 1024, limits.maxFileBytes));
-  const metadata = await stat(options.path);
-  const file = { device: metadata.dev, inode: metadata.ino, size: metadata.size };
-  if (
-    options.previousFile &&
-    (options.previousFile.device !== file.device || options.previousFile.inode !== file.inode)
-  ) {
-    return {
-      documents: [],
-      findings: [{ code: "FILE_REPLACED", path: options.path }],
-      completion: "file-replaced",
-      nextOffset: 0,
-      file,
-    };
-  }
-  if (
-    options.previousFile &&
-    (file.size < options.previousFile.size || file.size < (options.offset ?? 0))
-  ) {
-    return {
-      documents: [],
-      findings: [{ code: "FILE_TRUNCATED", path: options.path }],
-      completion: "file-truncated",
-      nextOffset: 0,
-      file,
-    };
-  }
-
-  const handle = options.readChunk ? undefined : await open(options.path, "r");
-  const readChunk =
-    options.readChunk ??
-    (async (position: number, length: number): Promise<Uint8Array> => {
-      const buffer = Buffer.alloc(length);
-      const { bytesRead } = await handle!.read(buffer, 0, length, position);
-      return buffer.subarray(0, bytesRead);
-    });
+  const handle = await open(options.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  let snapshot: Awaited<ReturnType<typeof handle.stat>> | undefined;
   try {
+    const metadata = await handle.stat();
+    snapshot = metadata;
+    if (!metadata.isFile()) throw new Error("Session source must be a regular file");
+    const file = { device: metadata.dev, inode: metadata.ino, size: metadata.size };
+    if (
+      options.previousFile &&
+      (options.previousFile.device !== file.device || options.previousFile.inode !== file.inode)
+    ) {
+      return {
+        documents: [],
+        findings: [{ code: "FILE_REPLACED", path: options.path }],
+        completion: "file-replaced",
+        nextOffset: 0,
+        file, seenEntries,
+      };
+    }
+    if (
+      options.previousFile &&
+      (file.size < options.previousFile.size || file.size < (options.offset ?? 0))
+    ) {
+      return {
+        documents: [],
+        findings: [{ code: "FILE_TRUNCATED", path: options.path }],
+        completion: "file-truncated",
+        nextOffset: 0,
+        file, seenEntries,
+      };
+    }
+
+    const readChunk =
+      options.readChunk ??
+      (async (position: number, length: number): Promise<Uint8Array> => {
+        const buffer = Buffer.alloc(length);
+        const { bytesRead } = await handle.read(buffer, 0, length, position);
+        return buffer.subarray(0, bytesRead);
+      });
     const header = await readLineAt(
       readChunk,
       0,
@@ -228,7 +241,7 @@ export async function parseSessionJsonlFile(
         findings: [{ code: "INVALID_SESSION_HEADER", path: options.path, byteOffset: 0 }],
         completion: header.terminated ? "clean-eof" : "incomplete-tail",
         nextOffset: 0,
-        file,
+        file, seenEntries,
       };
     }
 
@@ -242,6 +255,7 @@ export async function parseSessionJsonlFile(
     const seenIds = new Set(options.seenEntryIds);
     let outputBytes = 0;
     let byteOffset = scanStart;
+    let discardingLine = options.discardingLine ?? false;
 
     while (byteOffset < scanEnd) {
       const lineOffset = byteOffset;
@@ -252,6 +266,18 @@ export async function parseSessionJsonlFile(
         chunkBytes,
         MAX_JSONL_LINE_BYTES,
       );
+      if (discardingLine) {
+        byteOffset = line.nextOffset;
+        if (line.terminated) {
+          discardingLine = false;
+          continue;
+        }
+        return {
+          documents, findings,
+          completion: scanEnd < file.size ? "budget-exhausted" : "incomplete-tail",
+          nextOffset: byteOffset, file, seenEntries, discardingLine: true,
+        };
+      }
       if (!line.terminated) {
         if (scanEnd < file.size) {
           findings.push({
@@ -260,12 +286,17 @@ export async function parseSessionJsonlFile(
             sessionId: parsedHeader.id,
             byteOffset: lineOffset,
           });
+          // A whole pass starting at this line still cannot reach its end.
+          // Exclude it, retaining discard state so no suffix becomes a record.
+          const unfit = options.offset !== undefined && lineOffset === scanStart;
+          if (unfit) findings.push({ code: "ENTRY_LIMIT", path: options.path, byteOffset: lineOffset });
           return {
             documents,
             findings,
-            completion: "clean-eof",
-            nextOffset: lineOffset,
-            file,
+            completion: "budget-exhausted",
+            nextOffset: unfit ? line.nextOffset : lineOffset,
+            file, seenEntries,
+            ...(unfit ? { discardingLine: true } : {}),
           };
         }
         return {
@@ -273,7 +304,7 @@ export async function parseSessionJsonlFile(
           findings,
           completion: "incomplete-tail",
           nextOffset: lineOffset,
-          file,
+          file, seenEntries,
         };
       }
       byteOffset = line.nextOffset;
@@ -331,6 +362,7 @@ export async function parseSessionJsonlFile(
           continue;
         }
         seenIds.add(entry.id);
+        seenEntries.push({ entryId: entry.id, byteOffset: lineOffset });
       }
       if (
         !isRecord(entry) ||
@@ -359,7 +391,7 @@ export async function parseSessionJsonlFile(
       }
       const limitedEntry = truncateUtf8(
         blocks.map((block) => block.text).join("\n"),
-        limits.maxEntryBytes,
+        Math.min(limits.maxEntryBytes, limits.maxOutputBytes),
       );
       if (limitedEntry.truncated) {
         findings.push({
@@ -373,6 +405,7 @@ export async function parseSessionJsonlFile(
       if (!limitedEntry.text) continue;
       const textBytes = Buffer.byteLength(limitedEntry.text);
       if (outputBytes + textBytes > limits.maxOutputBytes) {
+        seenEntries.pop(); // This entry is retried at lineOffset, not consumed.
         findings.push({
           code: "TOTAL_OUTPUT_LIMIT",
           path: options.path,
@@ -380,7 +413,10 @@ export async function parseSessionJsonlFile(
           entryId: entry.id,
           byteOffset: lineOffset,
         });
-        continue;
+        return {
+          documents, findings, completion: "budget-exhausted",
+          nextOffset: lineOffset, file, seenEntries,
+        };
       }
       documents.push({
         instanceId: options.instanceId,
@@ -410,11 +446,19 @@ export async function parseSessionJsonlFile(
     return {
       documents,
       findings,
-      completion: "clean-eof",
+      completion: scanEnd < file.size ? "budget-exhausted" : "clean-eof",
       nextOffset: scanEnd,
-      file,
+      file, seenEntries,
     };
   } finally {
-    await handle?.close();
+    try {
+      const current = await lstat(options.path);
+      if (snapshot && (!current.isFile() || current.dev !== snapshot.dev || current.ino !== snapshot.ino ||
+          current.size !== snapshot.size || current.mtimeMs !== snapshot.mtimeMs)) {
+        throw new Error("Session source changed during parsing");
+      }
+    } finally {
+      await handle.close();
+    }
   }
 }

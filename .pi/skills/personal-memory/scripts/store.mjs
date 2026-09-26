@@ -13,6 +13,7 @@ import {
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseDocument } from "yaml";
+import { withMutationLock } from "../../../lib/mutation-lock.mjs";
 
 export const MEMORY_TYPES = Object.freeze([
   "person",
@@ -574,6 +575,13 @@ export function createMarkdownMemoryStore(options) {
       fail("IO_ERROR", "Memory storage is unavailable");
     }
     assertOutsideForbidden(canonical, await canonicalizeRoots(forbiddenRoots));
+    const metadata = await lstat(root);
+    if (!metadata.isDirectory() || (process.getuid && metadata.uid !== process.getuid())) {
+      fail("UNSAFE_VAULT", "Memory storage must be an owned directory");
+    }
+    // Only mutations tighten permissions; read-only retrieval does not change
+    // user-owned storage. Never chmod a forbidden or foreign-owned directory.
+    if (create) await chmod(root, 0o700);
     return true;
   }
 
@@ -652,7 +660,7 @@ export function createMarkdownMemoryStore(options) {
     return { id, deleted: true, relativePath: location.relativePath };
   }
 
-  return {
+  const store = {
     /** Reject a symlinked or forbidden vault root; false when it does not exist yet. */
     async verifyRoot() {
       return prepareRoot(false);
@@ -806,5 +814,18 @@ export function createMarkdownMemoryStore(options) {
       results.sort((a, b) => b.updated.localeCompare(a.updated) || a.id.localeCompare(b.id));
       return results;
     },
+  };
+  // The CLI uses the same scope to include Git preflight and commit. The raw
+  // store is passed only inside the lock so nested acquisition is unnecessary.
+  const withMutation = async (operation) => {
+    await prepareRoot(true);
+    return withMutationLock(join(root, ".mutation-lock.sqlite"), () => operation(store));
+  };
+  return {
+    ...store,
+    withMutation,
+    ...Object.fromEntries(["add", "update", "addHappening", "delete", "deleteWithLocation"].map(
+      (name) => [name, (request) => withMutation((locked) => locked[name](request))],
+    )),
   };
 }

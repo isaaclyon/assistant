@@ -44,21 +44,28 @@ export function buildReservationUrl(baseUrl, { date, time, covers }) {
   return url.toString();
 }
 
-export function parseAvailability(snapshot) {
+export function parseAvailability(snapshot, request) {
   const results = [];
-  const pattern = /button "(Reserve table at .*? at (\d{1,2}:\d{2} [AP]M) on .*? for a party of \d+.*?)"/g;
+  const pattern = /button "(Reserve table at .*? at (\d{1,2}:\d{2} [AP]M) on (.*?),? for a party of (\d+)\b.*?)"/g;
   for (const match of snapshot.matchAll(pattern)) {
+    if (request) {
+      const date = new Date(`${request.date}T00:00:00Z`);
+      if (!Number.isFinite(date.getTime()) || Number(match[4]) !== request.covers) continue;
+      const monthDay = date.toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
+      if (match[3] !== monthDay && match[3] !== `${monthDay}, ${date.getUTCFullYear()}`) continue;
+    }
     results.push({ time: match[2], label: match[1] });
   }
   return results;
 }
 
-export function analyzeSnapshot(snapshot) {
-  const availability = parseAvailability(snapshot);
-  if (availability.length > 0) return { status: "available", availability };
+export function analyzeSnapshot(snapshot, request) {
   if (/access denied|captcha|verify you are human|this site can.t be reached|err_/i.test(snapshot)) {
-    return { status: "blocked", availability };
+    return { status: "blocked", availability: [] };
   }
+  const availability = parseAvailability(snapshot, request);
+  if (availability.length > 0) return { status: "available", availability };
+  if (request && parseAvailability(snapshot).length > 0) return { status: "unverified", availability };
   if (!snapshot.trim()) return { status: "unverified", availability };
   return { status: "no_slots_visible", availability };
 }
@@ -115,11 +122,11 @@ async function runHelper(helper, session, command, ...args) {
 export async function searchOpenTable(args) {
   const helper = process.env.PI_AGENT_BROWSER_HELPER ?? DEFAULT_HELPER;
   const session = args.session ?? "default";
-  const initial = JSON.parse(
-    (await execFileAsync("node", [helper, "status", session], { timeout: 5_000 })).stdout,
+  const started = JSON.parse(
+    (await execFileAsync("node", [helper, "start", session], { timeout: 20_000 })).stdout,
   );
-  const startedHere = initial.status !== "running";
-  await execFileAsync("node", [helper, "start", session], { timeout: 20_000 });
+  const ownedLaunch = started.created === true && typeof started.launchId === "string" && started.launchId.length > 0
+    ? started.launchId : undefined;
 
   const tabs = [];
   try {
@@ -137,7 +144,7 @@ export async function searchOpenTable(args) {
       const snapshot = await runHelper(helper, session, "snapshot", "-i");
       results.push({
         ...tab,
-        ...analyzeSnapshot(snapshot),
+        ...analyzeSnapshot(snapshot, args),
         checkedAt: new Date().toISOString(),
       });
     }
@@ -146,8 +153,8 @@ export async function searchOpenTable(args) {
     for (const tab of tabs.reverse()) {
       await runHelper(helper, session, "tab", "close", tab.tabId).catch(() => undefined);
     }
-    if (startedHere) {
-      await execFileAsync("node", [helper, "stop", session], { timeout: 10_000 }).catch(
+    if (ownedLaunch) {
+      await execFileAsync("node", [helper, "stop", session, "--if-launch", ownedLaunch], { timeout: 10_000 }).catch(
         () => undefined,
       );
     }

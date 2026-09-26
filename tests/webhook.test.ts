@@ -70,6 +70,24 @@ describe("startWebhookServer", () => {
     expect(prompt).toContain('{"a":1}');
   });
 
+  it("does not acknowledge a webhook before durable materialization succeeds", async () => {
+    const { inject, post } = await makeServer();
+    inject.mockRejectedValueOnce(new Error("ledger unavailable"));
+    expect((await post("/hook/plain", "{}", { authorization: `Bearer ${SECRET}` })).status).toBe(503);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    inject.mockImplementationOnce(() => gate);
+    let responded = false;
+    const response = post("/hook/plain", "{}", { authorization: `Bearer ${SECRET}` })
+      .then((result) => { responded = true; return result; });
+    await vi.waitFor(() => expect(inject).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const early = responded;
+    release();
+    expect((await response).status).toBe(202);
+    expect(early).toBe(false);
+  });
+
   it("accepts a valid GitHub HMAC signature and rejects an invalid one", async () => {
     const { inject, post } = await makeServer();
     const body = '{"action":"closed"}';

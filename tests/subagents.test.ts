@@ -119,7 +119,7 @@ describe("background subagent service", () => {
           }],
           jobs: [{
             id: "job-1", batchId: "batch-1", task: "x", status: "running",
-            model: "openai-codex/gpt-5.6-luna", thinking: "high",
+            model: "openai-codex/gpt-6-luna", thinking: "high",
             createdAt, startedAt: createdAt + 1,
           }],
         })),
@@ -152,7 +152,7 @@ describe("background subagent service", () => {
       }],
       jobs: [{
         id: "job-old", batchId: "batch-old", task: "x", status: "failed",
-        model: "openai-codex/gpt-5.6-luna", thinking: "high",
+        model: "openai-codex/gpt-6-luna", thinking: "high",
         createdAt: 1, finishedAt: 2, failureReason: "completion failed", sessionDir,
       }],
     }));

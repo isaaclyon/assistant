@@ -30,8 +30,9 @@ import {
   shouldRecoverTelegramOwnership,
 } from "./config.js";
 import { type InboundInbox, openInbox } from "./inbox.js";
-import { type JobScheduler, startJobScheduler } from "./jobs.js";
-import { drainJobHandoffs, enqueueJobHandoff } from "./job-handoff.js";
+import { type JobDispatch, type JobScheduler, startJobScheduler } from "./jobs.js";
+import { cancelJobHandoff, drainJobHandoffs, enqueueJobHandoff, jobHandoffLocation } from "./job-handoff.js";
+import { injectJobPrompt as injectRuntimeJobPrompt } from "./job-prompt.js";
 import { createPiSubagentRunner } from "./subagent-process.js";
 import { type SubagentService, startSubagentService } from "./subagents.js";
 import {
@@ -500,11 +501,13 @@ export async function startBridgeHost({
   let unbindSubagents: (() => void) | undefined;
   let jobHandoffMonitor: ReturnType<typeof setInterval> | undefined;
   let jobHandoffDrainPromise: Promise<void> | undefined;
+  const jobPromptAbort = new AbortController();
   let stopping = false;
   let disposePromise: Promise<void> | undefined;
   const dispose = (): Promise<void> => {
     disposePromise ??= (async () => {
       stopping = true;
+      jobPromptAbort.abort();
       if (ownershipMonitor) clearInterval(ownershipMonitor);
       if (jobHandoffMonitor) clearInterval(jobHandoffMonitor);
       try {
@@ -693,10 +696,11 @@ export async function startBridgeHost({
     const injectJobPrompt = async (
       prompt: string,
       trigger: ConversationSessionTrigger = "job:scheduled",
+      preflightResult?: (accepted: boolean) => void,
     ): Promise<void> => {
-      for (let attempt = 1; ; attempt += 1) {
-        await runtime.session.waitForIdle();
-        try {
+      await injectRuntimeJobPrompt({
+        waitForIdle: () => runtime.session.waitForIdle(),
+        prepare: async () => {
           if (conversationSessionPolicy) {
             await conversationSessionPolicy.prepare(
               trigger,
@@ -704,32 +708,29 @@ export async function startBridgeHost({
               () => replaceSession(trigger),
             );
           }
-          await runtime.session.prompt(prompt, { source: "rpc" });
-          return;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          if (attempt >= 5 || !message.includes("already processing")) throw error;
-          await new Promise((resolveDelay) => setTimeout(resolveDelay, 2_000));
-        }
-      }
+        },
+        prompt: (text, options) => runtime.session.prompt(text, options),
+      }, prompt, preflightResult, jobPromptAbort.signal);
     };
+    const jobRecipientId = "instanceId" in config ? config.instanceId : "local";
     const drainInstanceJobHandoffs = (): Promise<void> => {
-      if (!("instanceId" in config) || stopping) return Promise.resolve();
+      if (stopping) return Promise.resolve();
       if (jobHandoffDrainPromise) return jobHandoffDrainPromise;
       const drain = drainJobHandoffs({
         stateDir: config.stateDir,
-        instanceId: config.instanceId,
-        inject: (prompt, jobType) =>
-          injectJobPrompt(prompt, `job:${jobType ?? "handoff"}`),
+        instanceId: jobRecipientId,
+        signal: jobPromptAbort.signal,
+        inject: (prompt, jobType, preflightResult) =>
+          injectJobPrompt(prompt, `job:${jobType ?? "handoff"}`, preflightResult),
       }).then((result) => {
         if (result.uncertain > 0) {
           logger.warn(
-            `${result.uncertain} job handoff(s) remain in uncertain processing state for ${config.instanceId}.`,
+            `${result.uncertain} job handoff(s) remain in uncertain processing state for ${jobRecipientId}.`,
           );
         }
         if (result.failed > 0) {
           logger.error(
-            `${result.failed} job handoff(s) failed or were quarantined for ${config.instanceId}.`,
+            `${result.failed} job handoff(s) failed or were quarantined for ${jobRecipientId}.`,
           );
         }
       });
@@ -741,16 +742,6 @@ export async function startBridgeHost({
       jobHandoffDrainPromise = trackedDrain;
       return trackedDrain;
     };
-    if ("instanceId" in config) {
-      await drainInstanceJobHandoffs();
-      jobHandoffMonitor = setInterval(() => {
-        void drainInstanceJobHandoffs().catch((error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          logger.error(`Job handoff drain failed: ${message}`);
-        });
-      }, jobHandoffIntervalMs);
-      jobHandoffMonitor.unref?.();
-    }
 
     const injectSubagentCompletion = async (completion: {
       batchId: string;
@@ -806,30 +797,20 @@ export async function startBridgeHost({
     }
     const dispatchJobPrompt = async (
       prompt: string,
-      dispatch?: {
-        jobId: string;
-        jobType: "cron" | "at" | "heartbeat" | "webhook";
-        target?: string;
-        eventId: string;
-      },
+      dispatch?: JobDispatch,
     ): Promise<void> => {
-      if (!("instanceId" in config) || dispatch?.target === undefined) {
-        await injectJobPrompt(
-          prompt,
-          `job:${dispatch?.jobType ?? "scheduled"}`,
-        );
-        return;
-      }
+      if (!dispatch?.definitionFingerprint) throw new Error("Job occurrence identity is required");
       await enqueueJobHandoff({
-        stateRoot: config.stateRoot,
-        coordinatorStateDir: config.stateDir,
+        ...jobHandoffLocation(config, dispatch.target),
         eventId: dispatch.eventId,
+        definitionFingerprint: dispatch.definitionFingerprint,
         jobId: dispatch.jobId,
         jobType: dispatch.jobType,
-        target: dispatch.target,
         prompt,
       });
-      await drainInstanceJobHandoffs();
+      // Publication is the scheduler's boundary. Pi runs independently and
+      // records its own acceptance; it must not hold the scheduler tick open.
+      void drainInstanceJobHandoffs().catch(() => logger.error("Job recipient drain failed; durable work retained."));
     };
     if (shouldStartJobScheduler(config)) {
       jobScheduler = await startJobScheduler({
@@ -837,6 +818,14 @@ export async function startBridgeHost({
         webhookHost: config.webhookHost,
         webhookPort: config.webhookPort,
         inject: dispatchJobPrompt,
+        cancel: async (dispatch) => {
+          if (!dispatch.occurrenceId) throw new Error("Job occurrence identity is required");
+          await cancelJobHandoff({
+            ...jobHandoffLocation(config, dispatch.target),
+            dispatchId: dispatch.occurrenceId,
+            jobId: dispatch.jobId,
+          });
+        },
         logger,
         ...("instanceId" in config
           ? {
@@ -848,6 +837,13 @@ export async function startBridgeHost({
     } else {
       logger.info("Scheduled-work evaluation is disabled in this instance process.");
     }
+
+    // Reconcile coordinator definitions before consuming its pending work.
+    await drainInstanceJobHandoffs();
+    jobHandoffMonitor = setInterval(() => {
+      void drainInstanceJobHandoffs().catch(() => logger.error("Job handoff drain failed; inspect recipient state."));
+    }, jobHandoffIntervalMs);
+    jobHandoffMonitor.unref?.();
 
     logger.info(`Pi Telegram bridge ready (session: ${runtime.session.sessionFile ?? "ephemeral"}).`);
 

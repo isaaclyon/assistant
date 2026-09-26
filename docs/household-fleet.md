@@ -151,18 +151,20 @@ node /absolute/path/to/immutable/release/dist/src/fleet-preflight.js
 ```
 
 Successful output contains only instance IDs and the coordinator ID. Activation
-builds once, installs all private units, validates jobs, stops the singleton,
-then starts instances sequentially. Each must report `ready` for the exact
-instance ID, release SHA, and stable systemd PID for five seconds. Any failure
-rolls every changed unit back; state, workspaces, and builder worktrees are not
-cleaned.
+builds once and validates jobs, then disables/stops all discovered bridge units,
+including retired and singleton units. It verifies quiescence, snapshots state
+and previous application binaries, and performs offline job migration before
+installing private units and starting instances sequentially. Each must report
+`ready` for the exact instance ID, release SHA, and stable systemd PID for five
+seconds. Failure holds services disabled for explicit recovery, never unit-only
+rollback. Workspaces and builder worktrees are not cleaned.
 
 Activation uses each unit's bounded graceful shutdown. Accepted turns already
 in the durable inbox replay after restart; a model response interrupted after
 Pi took ownership may need to be re-asked because outbound delivery is not
 durable. The singleton is disabled (not merely stopped) before fleet success so
-it cannot reappear on reboot. Rollback restores and re-enables it when it was
-the previous deployment.
+it cannot reappear on reboot. A retained maintenance marker also blocks new
+units on reboot until activation has fully committed.
 
 Normal merged deployment automatically chooses fleet activation when the
 private manifest exists. For diagnosis:
@@ -174,6 +176,95 @@ journalctl --user -u 'pi-telegram-bridge-*.service' --since today
 
 `<stateRoot>/instances/<id>/runtime.json` is the machine-readable readiness
 record. It is mode `0600` and includes no credential values.
+
+## Recovery checkpoints and failure holds
+
+Before rollout, pause external state editors and manual memory/job/recovery
+commands, verify enough free disk for a full state copy plus the previous
+immutable releases, and keep the previous Node executable installed. Services
+remain unavailable during copying and migration. The checkpoint does not copy
+Node itself, external credentials, or canonical memory outside the state tree;
+the offline migration does not change those resources.
+
+`<stateRoot>/.recovery-maintenance` is private JSON pointing to a checkpoint under
+`~/.local/share/pi-telegram-bridge/recovery-backups/checkpoint-*/snapshot`.
+Checkpoints contain private session/job data and must never be uploaded or
+printed. They are not automatically pruned. The sibling
+`previous-unit-status.txt` records prior enablement and active state; the
+snapshot retains only bridge unit files, not unrelated systemd units.
+
+The initial job migration accepts only a complete terminal legacy handoff graph.
+It preserves old files byte-for-byte and refuses pending, processing, failed,
+missing, conflicting, unsafe, or malformed evidence. Resolve pending work under
+the old protocol or retire it explicitly; inspect uncertain session evidence
+before any explicit acknowledgement or retry. Do not rename uncertain work to
+pending merely to pass migration. Exact current one-shot terminal evidence can
+seed suppression without fabricating an occurrence. A legacy `fired[id]` alone
+is insufficient; a reused ID or changed definition requires operator resolution.
+Additional coordinator roots and singleton-to-fleet job-state relocation also
+require explicit reconciliation rather than silent copying. After a fleet
+migration, retire the stale singleton `jobs.json`/`jobs-state.json` from the
+state root and any bridge unit file whose release was pruned: the snapshot must
+copy every unit's release and refuses a unit it cannot prove. Move them to a
+private archive outside the state root and unit directory instead of deleting
+them.
+
+On failure, leave the fleet stopped and disabled. Do not delete the maintenance
+marker, a ledger, or recipient files to make deployment pass. Find the private
+snapshot path without exposing its contents:
+
+```bash
+SNAPSHOT="$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).snapshotDir)' \
+  "$PI_TELEGRAM_BRIDGE_STATE_ROOT/.recovery-maintenance")"
+```
+
+- **Before candidate startup:** if the snapshot has a complete `snapshot.json`
+  and no `candidate-started` file, restore it with the candidate release's
+  `node dist/src/recovery-maintenance.js restore "$SNAPSHOT"`. The command
+  independently requires all bridge units stopped and disabled, verifies backup
+  digests before changing destinations, restores state and matching application
+  binaries/units, and verifies the restored digests. It preserves the deploy
+  lock inode and maintenance marker, does not start services, and can retry an
+  interrupted restore from the same untouched checkpoint. Run `systemctl --user
+  daemon-reload`, verify the restored release and state, then explicitly clear
+  the hold and restore only the enablement/active states recorded in the sibling
+  status file. Retain the checkpoint until recovery is verified.
+- **After candidate startup may have occurred:** `candidate-started` permanently
+  forbids automatic restore. Preserve all new acceptance/session evidence;
+  reconcile with an operator or roll forward. Rewinding the snapshot could
+  duplicate accepted work. Never delete the barrier to authorize a rewind.
+- **Incomplete snapshot:** no `snapshot.json` means the copy never committed.
+  Do not restore it. Migration and candidate startup follow snapshot commit;
+  inspect the exact failure and unchanged source before explicitly recovering
+  prior services. Keep the failed checkpoint for diagnosis.
+
+Generated service units use `ExecCondition` with `recovery-start-check.js`.
+During candidate startup, a one-use-per-deployment authorization is supplied
+through the user manager's volatile environment. Deployment revokes it before
+enabling units and removes/synchronizes the hold only after every instance is
+ready and enabled. On reboot the manager authorization disappears, so a partial
+enable sequence cannot start through a surviving hold. An unexpected deployment
+process kill still requires operator inspection: already-running candidates may
+have accepted work, and the startup barrier must remain authoritative.
+
+Before the first production transition, perform a disposable **non-bridge**
+user-unit smoke test on the target systemd version, using synthetic private
+state and an `ExecStart` that only creates a temporary marker file. Verify:
+
+1. With a maintenance hold and no matching manager authorization, condition exit
+   `1` skips the unit; no marker file appears and `NRestarts` remains zero even
+   with `Restart=on-failure`.
+2. Matching manager authorization permits that harmless start.
+3. After `systemctl --user unset-environment
+   PI_TELEGRAM_RECOVERY_AUTHORIZATION`, a subsequent start is skipped again.
+4. Removing the synthetic hold permits normal startup. Remove the disposable
+   unit/state and reload the manager afterward; never print manager environment
+   contents or touch live bridge units during this smoke test.
+
+Local fake-systemd tests do not replace this platform check or the live smoke
+matrix below. Retain checkpoint copies until production verification completes;
+then remove only explicitly selected obsolete checkpoints, never the checkpoint
+referenced by an unresolved hold.
 
 ## Live smoke test
 
@@ -203,4 +294,5 @@ Perform all checks after the four services are ready on the same release SHA:
 
 Do not declare rollout complete from service status alone. Record the release
 SHA, timestamp, operator, and each smoke result. On any isolation failure, stop
-the affected fleet and restore the backed-up units; preserve state for audit.
+the affected fleet; preserve state and follow the recovery barrier above. Do not
+restore old units alone over state that a candidate may have changed.

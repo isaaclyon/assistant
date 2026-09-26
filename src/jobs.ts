@@ -1,7 +1,7 @@
 import { Cron } from "croner";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { type FSWatcher, watch } from "node:fs";
-import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
@@ -12,6 +12,7 @@ import {
   type StatefulHeartbeatDefinition,
 } from "./heartbeat.js";
 import { type WebhookServer, startWebhookServer } from "./webhook.js";
+import { openJobOccurrenceLedger, type JobOccurrence } from "./job-occurrences.js";
 
 export interface JobsLogger {
   info(message: string): void;
@@ -54,6 +55,12 @@ interface JobsState {
   fired: Record<string, number>;
   lastRun: Record<string, number>;
   lastLoadError: string | null;
+  observedHash: string | null;
+  acceptedHash: string | null;
+}
+
+export function jobsContentHash(raw: string): string {
+  return createHash("sha256").update(raw, "utf8").digest("hex");
 }
 
 const ID_PATTERN = /^[a-z0-9-]{1,64}$/;
@@ -258,7 +265,7 @@ export function parseJobsFile(
 }
 
 async function loadState(path: string): Promise<JobsState> {
-  const empty: JobsState = { fired: {}, lastRun: {}, lastLoadError: null };
+  const empty: JobsState = { fired: {}, lastRun: {}, lastLoadError: null, observedHash: null, acceptedHash: null };
   let parsed: unknown;
   try {
     parsed = JSON.parse(await readFile(path, "utf8"));
@@ -278,6 +285,8 @@ async function loadState(path: string): Promise<JobsState> {
     fired: numberMap(parsed.fired),
     lastRun: numberMap(parsed.lastRun),
     lastLoadError: typeof parsed.lastLoadError === "string" ? parsed.lastLoadError : null,
+    observedHash: typeof parsed.observedHash === "string" ? parsed.observedHash : null,
+    acceptedHash: typeof parsed.acceptedHash === "string" ? parsed.acceptedHash : null,
   };
 }
 
@@ -321,6 +330,7 @@ export interface JobSchedulerOptions {
   webhookHost: string;
   webhookPort: number;
   inject: (prompt: string, dispatch?: JobDispatch) => Promise<void>;
+  cancel?: (dispatch: JobDispatch) => Promise<void>;
   logger: JobsLogger;
   validTargets?: ReadonlySet<string>;
   requireTargets?: boolean;
@@ -336,6 +346,8 @@ export interface JobDispatch {
   jobType: JobDefinition["type"];
   target?: string;
   eventId: string;
+  occurrenceId?: string;
+  definitionFingerprint?: string;
 }
 
 export interface JobScheduler {
@@ -351,6 +363,7 @@ export async function startJobScheduler({
   webhookHost,
   webhookPort,
   inject,
+  cancel,
   logger,
   validTargets,
   requireTargets,
@@ -367,6 +380,7 @@ export async function startJobScheduler({
   let jobs: JobDefinition[] = [];
   const nextRuns = new Map<string, number>();
   let state = await loadState(statePath);
+  const ledger = openJobOccurrenceLedger(stateDir);
   let webhookServer: WebhookServer | undefined;
   let stopped = false;
   const parseOptions: ParseJobsFileOptions = {
@@ -374,26 +388,39 @@ export async function startJobScheduler({
     ...(requireTargets === undefined ? {} : { requireTargets }),
     ...(compatibilityTarget === undefined ? {} : { compatibilityTarget }),
   };
-  const dispatchFor = (
-    job: JobDefinition,
-    eventId: string,
-  ): JobDispatch => ({
-    jobId: job.id,
-    jobType: job.type,
-    ...(job.target === undefined ? {} : { target: job.target }),
-    eventId,
+  const dispatchFor = (occurrence: JobOccurrence): JobDispatch => ({
+    jobId: occurrence.jobId,
+    jobType: occurrence.jobType,
+    ...(occurrence.target === undefined ? {} : { target: occurrence.target }),
+    eventId: occurrence.eventId,
+    occurrenceId: occurrence.id,
+    definitionFingerprint: occurrence.definitionFingerprint,
   });
+  let attempted = new Set<string>();
+  const publish = async (occurrence: JobOccurrence): Promise<boolean> => {
+    if (occurrence.status === "published") return true;
+    if (occurrence.status !== "pending" || attempted.has(occurrence.id)) return false;
+    attempted.add(occurrence.id);
+    await inject(occurrence.prompt, dispatchFor(occurrence));
+    ledger.markPublished(occurrence.id);
+    return true;
+  };
+  const replayPending = async (): Promise<void> => {
+    for (const occurrence of ledger.pending()) {
+      if (stopped) return;
+      try { await publish(occurrence); } catch {
+        logger.error(`Job '${occurrence.jobId}' recipient publication failed; occurrence retained for retry.`);
+      }
+    }
+  };
   const heartbeatRunner = createHeartbeatRunner({
     stateDir,
     runCheck,
-    inject: (prompt, job) =>
-      inject(
-        prompt,
-        dispatchFor(
-          job as HeartbeatJob,
-          `heartbeat:${job.id}:${createHash("sha256").update(prompt).digest("hex")}`,
-        ),
-      ),
+    inject: async (prompt, job) => {
+      const occurrence = ledger.materialize(job as HeartbeatJob,
+        `heartbeat:${job.id}:${createHash("sha256").update(prompt).digest("hex")}`, prompt, nowMs());
+      if (!(await publish(occurrence))) throw new Error("Occurrence awaits recipient publication");
+    },
     logger,
     nowMs,
     checkTimeoutMs,
@@ -410,10 +437,8 @@ export async function startJobScheduler({
 
   const recordLoadError = async (message: string): Promise<void> => {
     logger.error(`jobs.json rejected (keeping the last loaded jobs): ${message}`);
-    if (state.lastLoadError !== message) {
-      state = { ...state, lastLoadError: message };
-      await persistState();
-    }
+    state = { ...state, lastLoadError: message };
+    await persistState();
   };
 
   const computeNextRun = (job: CronJob | HeartbeatJob, afterMs: number): void => {
@@ -434,8 +459,15 @@ export async function startJobScheduler({
           const job = jobs.find((entry) => entry.id === id);
           return job?.type === "webhook" ? job : undefined;
         },
-        inject: (prompt, job) =>
-          inject(prompt, dispatchFor(job, `webhook:${job.id}:${randomUUID()}`)),
+        inject: async (prompt, job) => {
+          await enqueue(async () => {
+            if (stopped) throw new Error("Job scheduler is stopping");
+            ledger.materialize(job, `webhook:${job.id}:${randomUUID()}`, prompt, nowMs());
+          });
+          // The HTTP boundary acknowledges durable materialization, not Pi
+          // execution. Publication retries independently on the coordinator.
+          void enqueue(replayPending).catch(() => logger.error("Webhook publication deferred until the next tick."));
+        },
         logger,
       });
       logger.info(`Webhook trigger server listening on ${webhookHost}:${webhookServer.port}.`);
@@ -447,9 +479,7 @@ export async function startJobScheduler({
     }
   };
 
-  let lastMtimeMs: number | undefined;
   const doReload = async (): Promise<void> => {
-    lastMtimeMs = (await stat(jobsPath).catch(() => undefined))?.mtimeMs;
     let raw: string | undefined;
     try {
       raw = await readFile(jobsPath, "utf8");
@@ -459,6 +489,7 @@ export async function startJobScheduler({
         return;
       }
     }
+    state.observedHash = raw === undefined ? null : jobsContentHash(raw);
     let loaded: JobDefinition[] = [];
     if (raw !== undefined) {
       try {
@@ -468,25 +499,35 @@ export async function startJobScheduler({
         return;
       }
     }
+    const previousJobs = new Map(jobs.map((job) => [job.id, job]));
+    const changed = ledger.reconcileDefinitions(loaded, state.fired);
+    for (const id of changed) delete state.fired[id];
+    // Reconcile every retired occurrence again on startup: a crash may have
+    // happened between the ledger transaction and recipient cancellation.
+    for (const occurrence of ledger.superseded()) {
+      await cancel?.(dispatchFor(occurrence));
+    }
     jobs = loaded;
     const ids = new Set(jobs.map((job) => job.id));
     const prune = (map: Record<string, number>): Record<string, number> =>
       Object.fromEntries(Object.entries(map).filter(([key]) => ids.has(key)));
     state = {
+      ...state,
       fired: prune(state.fired),
       lastRun: prune(state.lastRun),
       lastLoadError: null,
     };
-    await persistState();
     await heartbeatRunner.prune(
       new Set(jobs.flatMap((job) => (job.type === "heartbeat" ? [job.id] : []))),
     );
     const now = nowMs();
-    nextRuns.clear();
+    for (const id of nextRuns.keys()) if (!ids.has(id)) nextRuns.delete(id);
     for (const job of jobs) {
-      if (job.type === "cron" || job.type === "heartbeat") computeNextRun(job, now);
+      if ((job.type === "cron" || job.type === "heartbeat") && !isDeepStrictEqual(previousJobs.get(job.id), job)) computeNextRun(job, now);
     }
     await syncWebhookServer();
+    state.acceptedHash = state.observedHash;
+    await persistState();
     logger.info(`Loaded ${jobs.length} job(s) from ${jobsPath}.`);
   };
 
@@ -538,8 +579,11 @@ export async function startJobScheduler({
       prompt = `Scheduled job '${job.id}' fired (schedule: ${job.schedule}${job.tz ? ` ${job.tz}` : ""}).\n\n${job.prompt}`;
     }
     try {
-      await inject(prompt, dispatchFor(job, eventId));
-      return true;
+      const occurrence = ledger.materialize(job, eventId, prompt, nowMs());
+      // Advance cron only after materialization; downtime still skips slots
+      // that were never durably observed.
+      if (job.type === "cron") computeNextRun(job, nowMs());
+      return await publish(occurrence);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error(`Job '${job.id}' prompt injection failed: ${message}`);
@@ -549,14 +593,26 @@ export async function startJobScheduler({
 
   const doTick = async (): Promise<void> => {
     if (stopped) return;
-    // ponytail: mtime poll backs up fs.watch; both funnel into reload().
-    const mtimeMs = (await stat(jobsPath).catch(() => undefined))?.mtimeMs;
-    if (mtimeMs !== lastMtimeMs) await doReload();
+    // Content identity catches same-mtime edits and backs up fs.watch.
+    const raw = await readFile(jobsPath, "utf8").catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if ((raw === undefined ? null : jobsContentHash(raw)) !== state.observedHash) await doReload();
+    attempted = new Set();
+    await replayPending();
     for (const job of jobs) {
       if (stopped) return;
       const now = nowMs();
       if (job.type === "at") {
-        if (state.fired[job.id] !== undefined || now < Date.parse(job.at)) continue;
+        if (ledger.oneShotPublished(job)) {
+          if (state.fired[job.id] === undefined) {
+            state.fired[job.id] = now;
+            await persistState();
+          }
+          continue;
+        }
+        if (now < Date.parse(job.at)) continue;
         if (await fireScheduled(job, `at:${job.id}:${Date.parse(job.at)}`)) {
           state.fired[job.id] = now;
           state.lastRun[job.id] = now;
@@ -567,8 +623,8 @@ export async function startJobScheduler({
       if (job.type === "webhook") continue;
       const dueMs = nextRuns.get(job.id);
       if (dueMs === undefined || now < dueMs) continue;
-      computeNextRun(job, now);
       if (job.type === "heartbeat") {
+        computeNextRun(job, now);
         await heartbeatRunner.run(job, () => heartbeatIsCurrent(job));
       } else {
         await fireScheduled(job, `cron:${job.id}:${dueMs}`);
@@ -591,7 +647,13 @@ export async function startJobScheduler({
     });
   };
 
-  await reload();
+  try {
+    await reload();
+  } catch (error) {
+    await webhookServer?.close();
+    ledger.close();
+    throw error;
+  }
 
   let watchTimer: NodeJS.Timeout | undefined;
   let watcher: FSWatcher | undefined;
@@ -633,6 +695,8 @@ export async function startJobScheduler({
       const server = webhookServer;
       webhookServer = undefined;
       await server?.close();
+      await operationChain;
+      ledger.close();
     },
   };
 }

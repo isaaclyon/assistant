@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { withMutationLock } from "../../../lib/mutation-lock.mjs";
 import {
   access,
   mkdir,
@@ -100,6 +102,24 @@ async function readState(statePath) {
   return undefined;
 }
 
+async function requireOwnedProcess(state, resolved) {
+  if (!pidAlive(state.pid)) return false;
+  let args;
+  try {
+    args = (await readFile(`/proc/${state.pid}/cmdline`, "utf8")).split("\0");
+  } catch {
+    const result = spawnSync("ps", ["-ww", "-p", String(state.pid), "-o", "command="], {
+      encoding: "utf8", timeout: 1000, maxBuffer: 64 * 1024,
+    });
+    args = result.status === 0 ? result.stdout.trim().split(/\s+/) : [];
+  }
+  if (!args.includes(`--user-data-dir=${resolved.profilePath}`) ||
+      !args.includes(`--remote-debugging-port=${state.port}`)) {
+    throw new Error("Browser process identity is uncertain; refusing to reuse or stop it");
+  }
+  return true;
+}
+
 async function endpointReady(port) {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/json/version`, {
@@ -126,16 +146,22 @@ async function reserveLoopbackPort() {
 async function current(session) {
   const resolved = paths(session);
   const state = await readState(resolved.statePath);
-  if (state && pidAlive(state.pid) && (await endpointReady(state.port))) {
+  if (state && await requireOwnedProcess(state, resolved) && (await endpointReady(state.port))) {
     return { ...state, ...resolved, status: "running" };
   }
   if (state) await rm(resolved.statePath, { force: true });
   return undefined;
 }
 
+async function withSessionLock(session, operation) {
+  const { runtimeDir } = paths(session);
+  await mkdir(runtimeDir, { recursive: true, mode: 0o700 });
+  return withMutationLock(join(runtimeDir, ".lifecycle-lock.sqlite"), operation);
+}
+
 async function start(session) {
   const existing = await current(session);
-  if (existing) return existing;
+  if (existing) return { ...existing, created: false };
 
   const resolved = paths(session);
   await mkdir(resolved.runtimeDir, { recursive: true, mode: 0o700 });
@@ -184,6 +210,7 @@ async function start(session) {
       if (await endpointReady(port)) {
         const state = {
           version: 1,
+          launchId: randomUUID(),
           pid: child.pid,
           port,
           profilePath: resolved.profilePath,
@@ -191,7 +218,7 @@ async function start(session) {
         await writeFile(resolved.statePath, `${JSON.stringify(state)}\n`, {
           mode: 0o600,
         });
-        return { ...state, ...resolved, status: "running" };
+        return { ...state, ...resolved, status: "running", created: true };
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
@@ -206,10 +233,14 @@ async function start(session) {
   }
 }
 
-async function stop(session) {
+async function stop(session, expectedLaunch) {
   const resolved = paths(session);
   const state = await readState(resolved.statePath);
-  if (state && pidAlive(state.pid)) {
+  if (expectedLaunch !== undefined && state?.launchId !== expectedLaunch) {
+    process.stdout.write(`${JSON.stringify({ status: "not_owner", session })}\n`);
+    return;
+  }
+  if (state && await requireOwnedProcess(state, resolved)) {
     try {
       process.kill(-state.pid, "SIGTERM");
     } catch {
@@ -219,7 +250,7 @@ async function stop(session) {
     while (pidAlive(state.pid) && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    if (pidAlive(state.pid)) {
+    if (await requireOwnedProcess(state, resolved)) {
       try {
         process.kill(-state.pid, "SIGKILL");
       } catch {
@@ -238,6 +269,8 @@ function publicState(state, session) {
     port: state.port,
     profilePath: state.profilePath,
     logPath: state.logPath,
+    ...(state.created === undefined ? {} : { created: state.created }),
+    ...(state.launchId === undefined ? {} : { launchId: state.launchId }),
   };
 }
 
@@ -247,24 +280,27 @@ async function main() {
   if (!session) throw new Error(`Invalid browser session name: ${requestedSession}`);
 
   if (command === "start") {
-    process.stdout.write(`${JSON.stringify(publicState(await start(session), session))}\n`);
+    process.stdout.write(`${JSON.stringify(publicState(await withSessionLock(session, () => start(session)), session))}\n`);
     return;
   }
   if (command === "status") {
-    const state = await current(session);
+    const state = await withSessionLock(session, () => current(session));
     process.stdout.write(
       `${JSON.stringify(state ? publicState(state, session) : { status: "stopped", session })}\n`,
     );
     return;
   }
   if (command === "stop") {
-    await stop(session);
+    if (rest.length !== 0 && (rest.length !== 2 || rest[0] !== "--if-launch" || !rest[1])) {
+      throw new Error("stop accepts only --if-launch <launchId>");
+    }
+    await withSessionLock(session, () => stop(session, rest[1]));
     return;
   }
   if (command === "run") {
     const args = rest[0] === "--" ? rest.slice(1) : rest;
     if (args.length === 0) throw new Error("run requires agent-browser arguments");
-    const state = await start(session);
+    const state = await withSessionLock(session, () => start(session));
     const agentBrowser = await executable(
       "agent-browser",
       process.env.STOCK_BROWSER_AGENT_BROWSER,
@@ -280,13 +316,12 @@ async function main() {
         throw new Error("AGENT_BROWSER_PLUGINS must be a JSON array");
       }
     }
-    if (!plugins.some((plugin) => plugin?.name === "onepassword")) {
-      plugins.push({
-        name: "onepassword",
-        command: onePasswordProvider,
-        capabilities: ["credential.read"],
-      });
-    }
+    plugins = plugins.filter((plugin) => plugin?.name !== "onepassword");
+    plugins.push({
+      name: "onepassword",
+      command: onePasswordProvider,
+      capabilities: ["credential.read"],
+    });
     const result = spawnSync(agentBrowser, ["--cdp", String(state.port), ...args], {
       stdio: "inherit",
       env: { ...process.env, AGENT_BROWSER_PLUGINS: JSON.stringify(plugins) },

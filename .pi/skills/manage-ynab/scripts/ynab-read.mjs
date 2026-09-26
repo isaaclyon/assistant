@@ -8,15 +8,39 @@ const execFileAsync = promisify(execFile);
 const MAX_CATEGORIES = 300;
 const MAX_RECENT = 5;
 
+function text(value, maximum, message) {
+  if (typeof value !== "string" || value.length > maximum) throw new Error(message);
+  return value;
+}
+
+function parseTransaction(value) {
+  const message = "YNAB returned invalid transaction context";
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(message);
+  const optionalText = (key, maximum) => value[key] == null ? null : text(value[key], maximum, message);
+  if (value.amount != null && (typeof value.amount !== "number" || !Number.isFinite(value.amount))) throw new Error(message);
+  if (value.approved != null && typeof value.approved !== "boolean") throw new Error(message);
+  return {
+    id: text(value.id, 128, message),
+    date: optionalText("date", 64),
+    amount: value.amount ?? null,
+    payee_name: text(value.payee_name, 500, message),
+    category_name: optionalText("category_name", 500),
+    account_name: optionalText("account_name", 500),
+    memo: optionalText("memo", 4000),
+    approved: value.approved ?? null,
+  };
+}
+
 export function flattenActiveCategories(groups) {
   if (!Array.isArray(groups)) throw new Error("YNAB returned invalid categories");
   const categories = groups.flatMap((group) => {
     if (!group || typeof group !== "object" || group.deleted || group.hidden) return [];
-    if (typeof group.name !== "string" || !Array.isArray(group.categories)) return [];
+    const message = "YNAB returned invalid categories";
+    const groupName = text(group.name, 500, message);
+    if (!Array.isArray(group.categories)) throw new Error(message);
     return group.categories.flatMap((category) => {
       if (!category || typeof category !== "object" || category.deleted || category.hidden) return [];
-      if (typeof category.id !== "string" || typeof category.name !== "string") return [];
-      return [{ id: category.id, name: category.name, group: group.name }];
+      return [{ id: text(category.id, 128, message), name: text(category.name, 500, message), group: groupName }];
     });
   });
   if (categories.length > MAX_CATEGORIES) throw new Error("YNAB returned too many categories");
@@ -26,13 +50,8 @@ export function flattenActiveCategories(groups) {
 }
 
 export function summarizeTransactionContext(transaction, history) {
-  if (
-    !transaction ||
-    typeof transaction !== "object" ||
-    typeof transaction.id !== "string" ||
-    typeof transaction.payee_name !== "string" ||
-    !Array.isArray(history)
-  ) {
+  transaction = parseTransaction(transaction);
+  if (!Array.isArray(history)) {
     throw new Error("YNAB returned invalid transaction context");
   }
 
@@ -45,7 +64,8 @@ export function summarizeTransactionContext(transaction, history) {
         entry.payee_name === transaction.payee_name &&
         entry.deleted !== true,
     )
-    .sort((a, b) => String(b.date ?? "").localeCompare(String(a.date ?? "")));
+    .map(parseTransaction)
+    .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
   const counts = new Map();
   for (const entry of exact) {
     if (

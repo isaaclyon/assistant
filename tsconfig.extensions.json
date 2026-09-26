@@ -6,7 +6,8 @@
     "baseUrl": ".",
     "paths": {
       "@llblab/pi-telegram/commands": [".pi/types/pi-telegram-commands.d.ts"],
-      "@llblab/pi-telegram/sections": [".pi/types/pi-telegram-sections.d.ts"]
+      "@llblab/pi-telegram/sections": [".pi/types/pi-telegram-sections.d.ts"],
+      "@llblab/pi-telegram/updates": [".pi/types/pi-telegram-updates.d.ts"]
     }
   },
   "include": [".pi/extensions/**/*.ts", ".pi/lib/**/*.ts"]

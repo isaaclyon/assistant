@@ -33,16 +33,33 @@ and oversized content before storage. Incremental state commits source identity,
 size, mtime, completed byte offset, and stable entry IDs atomically with the
 derived rows. Rewritten, truncated, and deleted files reconcile stale rows.
 
+Persist parser coverage, warnings, oversized-line discard state, and all seen
+entry IDs separately from file size. Budget-limited files resume even without
+new bytes. Bounded discovery rotates across sources and never deletes unvisited
+files; failed root discovery retains stale state. Coalesce identical refreshes
+and serialize each corpus across processes with a SQLite advisory lock.
+Session rebuild replaces only successfully parsed sources, not the whole corpus
+after a partial scan. Metadata checks across all discovered files distinguish a
+per-pass processing budget from incomplete corpus coverage. Schema 2 preserves
+schema-1 rows and checkpoints while widening session uniqueness to include the
+principal and adding private memory staging.
+
+Interactive search fails closed with no results on incomplete, failed, or
+timed-out refreshes. Memory stages changed notes across bounded passes and
+publishes only after all discovered metadata matches staged coverage. Incomplete
+discovery preserves its previous snapshot but does not expose it as current. This trades
+availability for privacy and honest coverage at the documented scan limits.
+
 A repo-local `search` extension exposes three bounded tools:
 
-- `memory_search` for curated durable knowledge;
-- `session_search` for original conversational evidence; and
+- `assistant_memory_search` for curated durable knowledge;
+- `assistant_session_search` for original conversational evidence; and
 - `session_context` for a bounded before/after window around a session result;
 - `search_index` for explicit status, refresh, and rebuild operations.
 
 These are separate assistant choices. The personal-memory CLI continues to own
 CRUD, lint, core compilation, full-note reads, and a compatibility scan search,
-but tracked assistant guidance prefers `memory_search` whenever the indexed
+but tracked assistant guidance prefers `assistant_memory_search` whenever the indexed
 tool is available. Search tools refresh on demand and never write canonical
 sources.
 

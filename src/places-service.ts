@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { PlacesOperationError } from "./places-errors.js";
 
 import {
   answerPlaceComparison,
@@ -13,6 +14,7 @@ import {
   type PlaceCategory,
   type PlacesStore,
   type StoredPlace,
+  type PlaceDeletionSnapshot,
 } from "./places-store.js";
 
 export type PlacesServiceErrorCode =
@@ -80,28 +82,14 @@ export interface RepositionPlaceInput {
 
 function asServiceError(error: unknown): PlacesServiceError {
   if (error instanceof PlacesServiceError) return error;
-  const message = error instanceof Error ? error.message : String(error);
-  if (/undo is no longer available/i.test(message)) {
-    return new PlacesServiceError("INVALID_ACTION", message, { cause: error });
-  }
-  if (/stale|changed|revision/i.test(message)) {
-    return new PlacesServiceError(
-      "STALE_ACTION",
-      "That ranking action is stale. Resume the current comparison and try again.",
-      { cause: error },
-    );
-  }
-  if (/unique constraint.*category\.normalized_name/i.test(message)) {
-    return new PlacesServiceError("DUPLICATE_CATEGORY", "That category already exists.", {
-      cause: error,
-    });
-  }
-  if (/unique constraint.*place\.category_id.*place\.normalized_name/i.test(message)) {
-    return new PlacesServiceError(
-      "DUPLICATE_PLACE",
-      "A place with that name already exists in this category.",
-      { cause: error },
-    );
+  if (error instanceof PlacesOperationError) {
+    const messages = {
+      STALE_ACTION: "That ranking action is stale. Resume the current comparison and try again.",
+      DUPLICATE_CATEGORY: "That category already exists.",
+      DUPLICATE_PLACE: "A place with that name already exists in this category.",
+      INVALID_ACTION: error.message,
+    };
+    return new PlacesServiceError(error.code, messages[error.code], { cause: error });
   }
   return new PlacesServiceError(
     "PERSISTENCE_ERROR",
@@ -135,10 +123,6 @@ export class PlacesService {
   }
 
   createCategory(name: string): PlaceCategory {
-    const normalized = normalizePlaceName(name);
-    if (this.listCategories().some((category) => category.normalizedName === normalized)) {
-      throw new PlacesServiceError("DUPLICATE_CATEGORY", "That category already exists.");
-    }
     try {
       return this.#store.createCategory(this.#createId(), name, this.#now());
     } catch (error) {
@@ -148,14 +132,6 @@ export class PlacesService {
 
   renameCategory(id: string, name: string): PlaceCategory {
     this.#requireCategory(id);
-    const normalized = normalizePlaceName(name);
-    if (
-      this.listCategories().some(
-        (category) => category.id !== id && category.normalizedName === normalized,
-      )
-    ) {
-      throw new PlacesServiceError("DUPLICATE_CATEGORY", "That category already exists.");
-    }
     try {
       return this.#store.renameCategory(id, name, this.#now());
     } catch (error) {
@@ -163,15 +139,16 @@ export class PlacesService {
     }
   }
 
-  deleteCategory(id: string): void {
+  deletionSnapshot(kind: "place" | "category", id: string): PlaceDeletionSnapshot {
+    try { return this.#store.deletionSnapshot(kind, id); }
+    catch (error) { throw asServiceError(error); }
+  }
+
+  deleteCategory(id: string, expected?: PlaceDeletionSnapshot): void {
     this.#requireCategory(id);
     try {
-      this.#store.deleteCategory(id);
+      this.#store.deleteCategory(id, expected);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (/empty category/i.test(message)) {
-        throw new PlacesServiceError("INVALID_ACTION", message, { cause: error });
-      }
       throw asServiceError(error);
     }
   }
@@ -199,10 +176,10 @@ export class PlacesService {
     }
   }
 
-  deletePlace(id: string): void {
+  deletePlace(id: string, expected?: PlaceDeletionSnapshot): void {
     this.getPlace(id);
     try {
-      this.#store.deletePlace(id);
+      this.#store.deletePlace(id, expected);
     } catch (error) {
       throw asServiceError(error);
     }
