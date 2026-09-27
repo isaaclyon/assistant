@@ -15,6 +15,8 @@ import {
   searchIndexedSessions,
 } from "../../src/search-coordinator.ts";
 import { openSearchIndex, type SearchIndex } from "../../src/search-index.ts";
+import { createOpenAIEmbedder } from "../../src/openai-embeddings.ts";
+import { prepareMemoryEmbeddings, searchHybridMemories, type MemoryEmbeddingPreparation } from "../../src/memory-semantic.ts";
 
 const MemoryTypeSchema = StringEnum([
   "person",
@@ -185,19 +187,24 @@ export default function searchExtension(pi: ExtensionAPI): void {
   pi.on("session_start", () => {
     const activeIndex = index;
     index = undefined;
-    void Promise.allSettled([...pendingRefreshes]).then(() => activeIndex?.close());
+    void closeAfterPending(activeIndex);
   });
   pi.on("session_shutdown", () => {
     const activeIndex = index;
     index = undefined;
-    void Promise.allSettled([...pendingRefreshes]).then(() => activeIndex?.close());
+    void closeAfterPending(activeIndex);
   });
+
+  async function closeAfterPending(activeIndex: SearchIndex | undefined): Promise<void> {
+    await Promise.allSettled([...pendingRefreshes]);
+    activeIndex?.close();
+  }
 
   pi.registerTool({
     name: "assistant_memory_search",
     label: "Search memories",
     description:
-      "Search canonical personal-memory notes through the private derived FTS index. Returns stable note IDs, revisions, metadata, and bounded snippets.",
+      "Search canonical personal-memory notes with keyword and, when configured, semantic retrieval. Returns stable note IDs, revisions, metadata, bounded snippets, and retrieval status.",
     promptSnippet: "Search durable personal memories",
     promptGuidelines: [
       "Use assistant_memory_search as the preferred memory retrieval path for saved facts and preferences. Use the note ID with the personal-memory CLI only for a full read or a change.",
@@ -209,47 +216,64 @@ export default function searchExtension(pi: ExtensionAPI): void {
       statuses: Type.Optional(Type.Array(MemoryStatusSchema, { minItems: 1, maxItems: 3 })),
     }),
     async execute(_id, params) {
-      try {
-        const context = resolveContext();
-        const activeIndex = getIndex(context);
-        const request = {
-          query: params.query,
-          principal: context.principalId,
-          memoryView: context.memoryView,
-          ...(params.limit === undefined ? {} : { limit: params.limit }),
-          ...(params.types === undefined ? {} : { types: params.types }),
-          ...(params.statuses === undefined ? {} : { statuses: params.statuses }),
-        };
-        let page = searchIndexedMemories(activeIndex, request);
-        const refresh = await settleRefreshWithin(
-          trackRefresh(refreshMemory(activeIndex, context)),
-          INTERACTIVE_REFRESH_BUDGET_MS,
-        );
-        if (refresh.status === "fresh" && refresh.value.complete) {
-          page = searchIndexedMemories(activeIndex, request);
-        } else {
-          // An old scope/owner is not proof of current canonical visibility.
-          page = { results: [], truncated: false };
+      // Track the whole pipeline so shutdown cannot close SQLite between
+      // inference and the final canonical refresh/result serialization.
+      return trackRefresh((async () => {
+        try {
+          const context = resolveContext();
+          const activeIndex = getIndex(context);
+          const request = {
+            query: params.query,
+            principal: context.principalId,
+            memoryView: context.memoryView,
+            ...(params.limit === undefined ? {} : { limit: params.limit }),
+            ...(params.types === undefined ? {} : { types: params.types }),
+            ...(params.statuses === undefined ? {} : { statuses: params.statuses }),
+          };
+          let page = searchIndexedMemories(activeIndex, request);
+          let refresh = await settleRefreshWithin(
+            trackRefresh(refreshMemory(activeIndex, context)),
+            INTERACTIVE_REFRESH_BUDGET_MS,
+          );
+          let semantic: MemoryEmbeddingPreparation = { status: "disabled" };
+          if (refresh.status === "fresh" && refresh.value.complete) {
+            semantic = await trackRefresh(prepareMemoryEmbeddings(activeIndex, request, createOpenAIEmbedder()));
+            if (semantic.status !== "disabled") {
+              // Network I/O opens a window for canonical edits, including privacy
+              // changes. Revalidate before selecting or returning any result.
+              refresh = await settleRefreshWithin(
+                trackRefresh(refreshMemory(activeIndex, context)),
+                INTERACTIVE_REFRESH_BUDGET_MS,
+              );
+            }
+            page = refresh.status === "fresh" && refresh.value.complete
+              ? searchHybridMemories(activeIndex, request, semantic)
+              : { results: [], truncated: false };
+          } else {
+            // An old scope/owner is not proof of current canonical visibility.
+            page = { results: [], truncated: false };
+          }
+          return resultEnvelope({
+            ...page,
+            retrieval: page.retrieval ?? { mode: "none", semantic: "skipped" },
+            index:
+              refresh.status === "fresh"
+                ? { status: refresh.value.complete ? "fresh" : "partial", ...refresh.value }
+                : {
+                    status: "stale",
+                    warning:
+                      refresh.status === "timeout"
+                        ? "refresh_timeout"
+                        : "refresh_failed",
+                    corpora: activeIndex.corpusStatuses(),
+                  },
+          });
+        } catch (error) {
+          return error instanceof SearchInputError
+            ? errorEnvelope(error.code, error.message)
+            : errorEnvelope();
         }
-        return resultEnvelope({
-          ...page,
-          index:
-            refresh.status === "fresh"
-              ? { status: refresh.value.complete ? "fresh" : "partial", ...refresh.value }
-              : {
-                  status: "stale",
-                  warning:
-                    refresh.status === "timeout"
-                      ? "refresh_timeout"
-                      : "refresh_failed",
-                  corpora: activeIndex.corpusStatuses(),
-                },
-        });
-      } catch (error) {
-        return error instanceof SearchInputError
-          ? errorEnvelope(error.code, error.message)
-          : errorEnvelope();
-      }
+      })());
     },
   });
 
@@ -370,39 +394,48 @@ export default function searchExtension(pi: ExtensionAPI): void {
       corpus: Type.Optional(CorpusSchema),
     }),
     async execute(_id, params) {
-      try {
-        const context = resolveContext();
-        const activeIndex = getIndex(context);
-        if (params.operation === "status") {
+      return trackRefresh((async () => {
+        try {
+          const context = resolveContext();
+          const activeIndex = getIndex(context);
+          if (params.operation === "status") {
+            return resultEnvelope({
+              ...activeIndex.status(),
+              corpora: activeIndex.corpusStatuses(),
+            });
+          }
+          const corpus = params.corpus ?? "all";
+          const result: Record<string, unknown> = {};
+          if (corpus === "memory" || corpus === "all") {
+            const memory = await trackRefresh(refreshMemory(activeIndex, context));
+            result.memory = memory;
+            if (memory.complete) {
+              const semantic = await trackRefresh(prepareMemoryEmbeddings(activeIndex, {
+                query: "memory", principal: context.principalId, memoryView: context.memoryView,
+              }, createOpenAIEmbedder(), false));
+              result.semantic = { status: semantic.status };
+            }
+          }
+          if (corpus === "session" || corpus === "all") {
+            result.session = await trackRefresh(refreshSessions(
+              activeIndex,
+              context,
+              params.operation === "rebuild",
+            ));
+          }
           return resultEnvelope({
-            ...activeIndex.status(),
-            corpora: activeIndex.corpusStatuses(),
+            ...result,
+            status: {
+              ...activeIndex.status(),
+              corpora: activeIndex.corpusStatuses(),
+            },
           });
+        } catch (error) {
+          return error instanceof SearchInputError
+            ? errorEnvelope(error.code, error.message)
+            : errorEnvelope();
         }
-        const corpus = params.corpus ?? "all";
-        const result: Record<string, unknown> = {};
-        if (corpus === "memory" || corpus === "all") {
-          result.memory = await trackRefresh(refreshMemory(activeIndex, context));
-        }
-        if (corpus === "session" || corpus === "all") {
-          result.session = await trackRefresh(refreshSessions(
-            activeIndex,
-            context,
-            params.operation === "rebuild",
-          ));
-        }
-        return resultEnvelope({
-          ...result,
-          status: {
-            ...activeIndex.status(),
-            corpora: activeIndex.corpusStatuses(),
-          },
-        });
-      } catch (error) {
-        return error instanceof SearchInputError
-          ? errorEnvelope(error.code, error.message)
-          : errorEnvelope();
-      }
+      })());
     },
   });
 }

@@ -39,7 +39,7 @@ describe("search index foundation", () => {
     db.close();
     const migrated = openSearchIndex({ stateDir });
     indexes.push(migrated);
-    expect(migrated.status().schemaVersion).toBe(2);
+    expect(migrated.status().schemaVersion).toBe(3);
     expect(migrated.getSessionSourceState("i", "p", source.sourcePath)).toEqual(source);
     expect(migrated.getSessionDocument("i", "p", "same", "same")).toEqual(document);
     migrated.replaceSessionSource({ ...source, principalId: "other" }, [{ ...document, principalId: "other" }]);
@@ -54,7 +54,7 @@ describe("search index foundation", () => {
     indexes.push(index);
 
     expect(index.status()).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       memoryDocuments: 0,
       sessionDocuments: 0,
     });

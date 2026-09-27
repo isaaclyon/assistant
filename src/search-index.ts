@@ -5,6 +5,7 @@ import { withMutationLock } from "../.pi/lib/mutation-lock.mjs";
 
 import { initializeSearchSchema, SCHEMA_VERSION } from "./search-index-schema.js";
 import { createMemoryScanStore } from "./memory-scan-store.js";
+import { createMemorySemanticStore } from "./memory-semantic.js";
 import type {
   SearchCorpus,
   CorpusOperationStatus,
@@ -379,6 +380,7 @@ export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
       return withMutationLock(join(options.stateDir, `.search-${corpus}-lock.sqlite`), operation);
     },
     memoryScan: createMemoryScanStore(db),
+    semantic: createMemorySemanticStore(db),
     sessionScanCursor(instanceId, principalId) {
       const row = db.prepare("SELECT source_path FROM session_scan_cursor WHERE instance_id = ? AND principal_id = ?")
         .get(instanceId, principalId);
@@ -424,6 +426,11 @@ export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
             document.updatedAt,
           );
         }
+        // Snapshot publication replaces all rows; retain only embeddings of
+        // unchanged revisions without a cascading FK on the transient delete.
+        db.exec(`DELETE FROM memory_embedding WHERE NOT EXISTS (
+          SELECT 1 FROM memory_document WHERE memory_document.note_id = memory_embedding.note_id
+            AND memory_document.revision = memory_embedding.revision)`);
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");

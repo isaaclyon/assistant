@@ -2,10 +2,12 @@ import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from "../src/openai-embeddings.js";
 
 const resourceRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const roots: string[] = [];
+beforeEach(() => vi.stubEnv("PI_TELEGRAM_OPENAI_API_KEY_FILE", ""));
 const originalEnv = {
   stateDir: process.env.PI_TELEGRAM_BRIDGE_STATE_DIR,
   instanceId: process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID,
@@ -27,6 +29,8 @@ interface ToolDefinition {
 }
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   for (const [key, value] of Object.entries({
     PI_TELEGRAM_BRIDGE_STATE_DIR: originalEnv.stateDir,
     PI_TELEGRAM_BRIDGE_INSTANCE_ID: originalEnv.instanceId,
@@ -44,6 +48,66 @@ afterEach(async () => {
 });
 
 describe("search extension", () => {
+  it("serves hybrid results, falls back on API failure, and rechecks canonical visibility after inference", async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), "hybrid-search-extension-"));
+    roots.push(sandbox);
+    const vault = join(sandbox, "vault");
+    const sessions = join(sandbox, "sessions");
+    await mkdir(sessions);
+    const storeModule = await import(pathToFileURL(join(resourceRoot,
+      ".pi", "skills", "personal-memory", "scripts", "store.mjs")).href) as {
+      createMarkdownMemoryStore(options: Record<string, unknown>): { add(request: Record<string, unknown>): Promise<unknown> };
+    };
+    await storeModule.createMarkdownMemoryStore({ root: vault, principal: "isaac", memoryView: "owner-and-household" })
+      .add({ type: "preference", title: "Dining", body: "Prefers quiet restaurants" });
+    process.env.PI_TELEGRAM_BRIDGE_STATE_DIR = join(sandbox, "state");
+    process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID = "isaac";
+    process.env.PI_TELEGRAM_PRINCIPAL = "isaac";
+    process.env.PI_TELEGRAM_MEMORY_VIEW = "owner-and-household";
+    process.env.PI_TELEGRAM_MEMORY_DIR = vault;
+    process.env.PI_TELEGRAM_BRIDGE_SESSION_DIR = sessions;
+    process.env.PI_TELEGRAM_BRIDGE_RESOURCE_ROOT = resourceRoot;
+    const keyPath = join(sandbox, "key");
+    await writeFile(keyPath, "synthetic-key", { mode: 0o600 });
+    vi.stubEnv("PI_TELEGRAM_OPENAI_API_KEY_FILE", keyPath);
+    const handlers = new Map<string, () => void>();
+    const tools = new Map<string, ToolDefinition>();
+    const module = await import(
+      `${pathToFileURL(join(resourceRoot, ".pi", "extensions", "search.ts")).href}?hybrid=${Date.now()}`
+    ) as { default(api: unknown): void };
+    module.default({
+      on(event: string, handler: () => void) { handlers.set(event, handler); },
+      registerTool(tool: ToolDefinition) { tools.set(tool.name, tool); },
+    });
+    const response = (init: RequestInit) => {
+      const inputs = (JSON.parse(String(init.body)) as { input: string[] }).input;
+      return new Response(JSON.stringify({ model: EMBEDDING_MODEL, data: inputs.map((_, index) => ({
+        index, embedding: Array.from({ length: EMBEDDING_DIMENSIONS }, (_, i) => i === 0 ? 1 : 0),
+      })) }));
+    };
+    const fetcher = vi.fn(async (_url: string, init: RequestInit) => response(init));
+    vi.stubGlobal("fetch", fetcher);
+    const memory = tools.get("assistant_memory_search")!;
+    expect((await memory.execute("hybrid", { query: "somewhere to hear each other" })).details).toMatchObject({
+      ok: true, result: { results: [expect.objectContaining({ title: "Dining" })], retrieval: { mode: "hybrid", semantic: "ready" } },
+    });
+    fetcher.mockImplementationOnce(async () => new Response("synthetic failure", { status: 429 }));
+    expect((await memory.execute("fallback", { query: "quiet" })).details).toMatchObject({
+      ok: true, result: { results: [expect.objectContaining({ title: "Dining" })], retrieval: { mode: "keyword", semantic: "unavailable" } },
+    });
+    // An asynchronous inference must not keep a formerly valid privacy view
+    // alive, even if the session ends while its network request is running.
+    fetcher.mockImplementationOnce(async (_url, init) => {
+      await rename(vault, `${vault}-moved`);
+      await symlink(`${vault}-moved`, vault, "dir");
+      handlers.get("session_shutdown")?.();
+      return response(init);
+    });
+    expect((await memory.execute("visibility-change", { query: "quiet" })).details).toMatchObject({
+      ok: true, result: { results: [], index: { status: "stale" }, retrieval: { mode: "none", semantic: "skipped" } },
+    });
+  });
+
   it("bounds interactive refreshes and distinguishes timeout from failure", async () => {
     const module = await import(
       `${pathToFileURL(join(resourceRoot, ".pi", "extensions", "search.ts")).href}?budget=${Date.now()}`
@@ -247,7 +311,7 @@ describe("search extension", () => {
     expect(status.details).toMatchObject({
       ok: true,
       result: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         memoryDocuments: 1,
         sessionDocuments: 3,
       },

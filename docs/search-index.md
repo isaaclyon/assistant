@@ -10,7 +10,7 @@ truth.
 - `assistant_memory_search` searches curated durable notes. It refreshes the memory
   corpus from canonical Markdown, applies the host-bound memory view in SQL,
   and returns stable note IDs, revisions, metadata, ranking, and bounded
-  snippets.
+  snippets. Configured instances combine keyword and hosted semantic search.
 - `assistant_session_search` searches original conversation evidence. It incrementally
   refreshes only `PI_TELEGRAM_BRIDGE_SESSION_DIR` for the active
   instance/principal and returns stable session ID, entry ID, timestamp, role,
@@ -33,6 +33,58 @@ It never serves an old privacy view as current. Explicit `search_index`
 maintenance waits for completion; repeated refreshes resume bounded memory and session
 scans. Concurrent identical refreshes coalesce, and per-corpus SQLite advisory
 locks serialize refreshes across handles and processes.
+
+## Hosted semantic memory search
+
+Set `PI_TELEGRAM_OPENAI_API_KEY_FILE=/absolute/private/path/openai-api-key` in
+the instance's private environment file to enable semantic memory retrieval.
+The referenced file must contain only an OpenAI API key, be a regular file
+(not a symlink), be owned by the service user, and have mode `0600`. The key
+is read just in time and never stored in the search database. Apply environment
+changes through the normal deployment procedure. With no pointer configured,
+memory retrieval remains keyword-only.
+
+Enabling this sends the search query and eligible note title/tag/body sections
+to OpenAI's fixed `https://api.openai.com/v1/embeddings` endpoint using
+`text-embedding-3-small` at its default 1,536 dimensions. Principal, scope,
+lifecycle, and type filters run before selecting text for embedding. Session
+history is not embedded. The usual Codex login does not supply this API key.
+
+Short notes use one embedding; headings divide larger notes into sections,
+and long sections split on Unicode character boundaries. Each input includes
+the note title/tags and is bounded to 6,000 UTF-8 bytes. Vectors are cached in
+the same SQLite database by note ID, revision, content hash, and model/chunking
+version. Unchanged notes reuse their vectors across refreshes and restarts;
+changed/deleted revisions are removed during snapshot publication.
+
+Each search sends one batch containing its query and at most 32 missing
+eligible sections. Warm searches send only the query. Cold or large vaults
+fill progressively; `search_index` refresh/rebuild for memory also warms up to
+32 missing active, visible sections per invocation without sending a query.
+Repeat maintenance while its `semantic.status` is `partial` to finish warming
+the cache. Embedding refresh is on demand; there is no background worker.
+
+The local search scans eligible vectors for cosine similarity, takes the best
+section per note, and combines semantic and BM25 ranks with reciprocal rank
+fusion (`1 / (60 + rank)`, one-based). Each branch contributes up to 20
+candidates, or the requested result limit when larger; the merged list is
+deduplicated and trimmed to that limit. Scores express rank, not confidence
+or proof that a note answers the question. Semantic-only snippets come from
+the matching section. The assistant must still assess whether a result applies.
+
+OpenAI requests have a 2.5-second network timeout and no interactive retries.
+The tool rechecks canonical visibility after inference before returning
+either hybrid or fallback results. A provider/key failure returns current
+keyword results; a failed canonical refresh still returns no results.
+The existing 1.5-second budget applies separately to each canonical refresh,
+so total search time includes those checks and any network request.
+
+Memory search responses include `retrieval.mode` (`hybrid`, `keyword`, or
+`none`) and `retrieval.semantic` (`ready`, `partial`, `disabled`, `unavailable`,
+or `skipped`). `partial` means some eligible sections still need embeddings;
+keyword retrieval still covers the full current corpus. `unavailable` indicates
+an embedding failure, and `skipped` indicates an unverified canonical snapshot.
+See [ADR-0034](adr/0034-hybrid-semantic-memory-search.md).
 
 ## Refresh and recovery
 
@@ -65,9 +117,11 @@ indexed rows. Source identity and prefix checks reject observed concurrent edits
 but unchanged detection is metadata-based, not protection against deliberately
 metadata-preserving rewrites.
 
-Schema 2 migrates schema 1, retaining existing rows and checkpoints, widening
-session identity uniqueness to include the principal, and reparsing sources that
-lack coverage state. The database remains disposable.
+Schema 3 adds the embedding cache and migrates schemas 1 and 2 without losing
+existing documents or checkpoints. The schema-1 migration also widens
+session identity uniqueness to include the principal. Sources without coverage
+state are reparsed on refresh. The database remains disposable;
+deleting it also removes cached vectors, which must be regenerated through OpenAI.
 
 If the database is deleted, the next search or explicit rebuild recreates it
 from canonical sources. If an incompatible schema is encountered, remove only

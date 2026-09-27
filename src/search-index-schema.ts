@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 interface SchemaVersionRow { schema_version: number }
 
@@ -39,6 +39,15 @@ function initializeSchema(db: DatabaseSync): void {
       owner         TEXT,
       created_at    TEXT NOT NULL,
       updated_at    TEXT NOT NULL
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS memory_embedding (
+      note_id TEXT NOT NULL,
+      revision TEXT NOT NULL,
+      chunk_hash TEXT NOT NULL,
+      model TEXT NOT NULL,
+      vector BLOB NOT NULL,
+      PRIMARY KEY (note_id, revision, chunk_hash, model)
     ) STRICT;
 
     CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
@@ -160,7 +169,7 @@ export function initializeSearchSchema(db: DatabaseSync): void {
     const existing = db
       .prepare("SELECT schema_version FROM search_index_metadata WHERE singleton = 1")
       .get() as unknown as SchemaVersionRow | undefined;
-    if (existing !== undefined && existing.schema_version !== 1 && existing.schema_version !== SCHEMA_VERSION) {
+    if (existing !== undefined && ![1, 2, SCHEMA_VERSION].includes(existing.schema_version)) {
       throw new Error(
         `Search index schema version ${existing.schema_version} is not supported; rebuild the derived index`,
       );

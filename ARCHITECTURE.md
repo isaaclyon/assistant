@@ -180,6 +180,13 @@ hooks, signing, and unbounded execution. It never pushes; see
 Derived search storage, incremental session reconciliation, and the
 memory/session evidence boundary are defined by
 [ADR-0026](docs/adr/0026-use-derived-fts-indexes-for-memory-and-session-search.md).
+Opted-in instances add OpenAI `text-embedding-3-small` vectors to the same derived
+database for hybrid memory retrieval. The search extension selects visible,
+revision-bound note sections before embedding and rechecks canonical visibility
+after inference. A bounded, on-demand embedding batch and local cosine scan
+feed reciprocal rank fusion with FTS; provider failure falls back to current
+keyword results. Session evidence remains FTS-only. See
+[ADR-0034](docs/adr/0034-hybrid-semantic-memory-search.md).
 
 ## Startup
 

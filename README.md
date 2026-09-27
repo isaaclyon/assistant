@@ -166,7 +166,10 @@ note does not erase it from Git history.
 The always-on assistant uses separate indexed `assistant_memory_search` and
 `assistant_session_search` tools for retrieval. Their private per-instance SQLite/FTS5
 database is disposable and rebuildable from canonical Markdown and session
-JSONL. The tracked skill-local CLI continues to own full-note reads, mutations,
+JSONL. Memory search optionally combines keyword matches with cached OpenAI
+embeddings when `PI_TELEGRAM_OPENAI_API_KEY_FILE` points to a private API-key
+file; see [semantic search setup](docs/search-index.md#hosted-semantic-memory-search).
+Session search remains keyword-based. The tracked skill-local CLI continues to own full-note reads, mutations,
 list/happenings, lint, and core operations; it takes one JSON request line on
 stdin and returns one bounded JSON line:
 

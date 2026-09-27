@@ -80,6 +80,7 @@ describe("credential environment scopes", () => {
         "PI_TELEGRAM_GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT=200",
         "PI_TELEGRAM_GOOGLE_PLACES_CANDIDATES_MONTHLY_LIMIT=300",
         "PI_TELEGRAM_TYPESAFE_API_KEY_FILE=/private/typesafe-api-key",
+        "PI_TELEGRAM_OPENAI_API_KEY_FILE=/private/openai-api-key",
         "",
       ].join("\n"),
       { mode: 0o600 },
@@ -98,11 +99,13 @@ describe("credential environment scopes", () => {
       "PI_TELEGRAM_GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT",
       "PI_TELEGRAM_GOOGLE_PLACES_CANDIDATES_MONTHLY_LIMIT",
       "PI_TELEGRAM_TYPESAFE_API_KEY_FILE",
+      "PI_TELEGRAM_OPENAI_API_KEY_FILE",
     ]);
     expect(JSON.stringify(result)).not.toContain("owner@example.com");
     expect(JSON.stringify(result)).not.toContain("google-keyring-password");
     expect(JSON.stringify(result)).not.toContain("google-places-api-key");
     expect(JSON.stringify(result)).not.toContain("typesafe-api-key");
+    expect(JSON.stringify(result)).not.toContain("openai-api-key");
   });
 
   it("rejects invalid Google Places monthly limits", async () => {
