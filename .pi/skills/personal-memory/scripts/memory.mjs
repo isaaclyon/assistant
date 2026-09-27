@@ -22,6 +22,7 @@ const USAGE_CODES = new Set(["INVALID_COMMAND", "INVALID_INPUT", "INVALID_ID"]);
 const OPERATIONAL_CODES = new Set([
   "NOT_FOUND",
   "REVISION_CONFLICT",
+  "TEXT_CONFLICT",
   "DUPLICATE_ID",
   "CONFIRMATION_REQUIRED",
   "UNSAFE_VAULT",
@@ -65,6 +66,52 @@ async function readRequest(stdin) {
   return request;
 }
 
+/** Shared CLI/tool boundary. confirmed is a trusted in-process capability,
+ * never a field read from a model/CLI request. Only the Telegram approval
+ * handler supplies it after consuming an operation-bound, one-use token. */
+export async function executeMemoryOperation(command, request, {
+  env = process.env, cwd = process.cwd(), confirmed = false,
+} = {}) {
+  if (!COMMANDS.has(command)) throw new MemoryError("INVALID_COMMAND", "Unknown memory operation");
+  const root = resolveMemoryDirectory(env);
+  const view = resolveMemoryView(env);
+  const forbiddenRoots = [cwd, PROJECT_ROOT];
+  const store = createMarkdownMemoryStore({ root, forbiddenRoots, ...view });
+  if (MUTATING_COMMANDS.has(command)) {
+    return store.withMutation(async (locked) => {
+      if (!confirmed && (command === "delete" ||
+          (command === "update" && request?.patch?.scope === "household" &&
+           (await locked.read({ id: request.id })).scope === "personal"))) {
+        throw new MemoryError("CONFIRMATION_REQUIRED", "Use the memory tool's Telegram confirmation button");
+      }
+      const gitRoot = resolveMemoryGitAutocommit(env)
+        ? await prepareMemoryGitAutocommit(root, { env }) : undefined;
+      const operation = command === "happening-add" ? "addHappening"
+        : command === "delete" && gitRoot ? "deleteWithLocation" : command;
+      const result = await locked[operation](request);
+      if (!gitRoot) return result;
+      const { relativePath, ...publicData } = result;
+      return {
+        ...publicData,
+        git: await commitMemoryMutation(gitRoot, {
+          action: GIT_ACTIONS[command] ?? "update", id: result.id, relativePath,
+        }, { env }),
+      };
+    });
+  }
+  if (command === "lint" || command === "core") {
+    if (Object.keys(request).length > 0) throw new MemoryError("INVALID_INPUT", "Request must be empty");
+    const options = { root, forbiddenRoots, sessionRoots: resolveBridgeSessionDirectories(env), ...view };
+    return command === "lint" ? lintMemoryVault(options) : compileCoreMemory(options);
+  }
+  if (command === "search" || command === "happenings") {
+    await store.verifyRoot();
+    return createMarkdownMemorySearchBackend({ root, ...view })[command](request);
+  }
+  if (command === "list") return { memories: await store.list(request) };
+  return store[command](request);
+}
+
 export async function runMemoryCli({
   argv = process.argv.slice(2),
   stdin = process.stdin,
@@ -97,48 +144,7 @@ export async function runMemoryCli({
   }
 
   try {
-    const root = resolveMemoryDirectory(env);
-    const view = resolveMemoryView(env);
-    const forbiddenRoots = [cwd, PROJECT_ROOT];
-    // Constructing the store enforces lexical vault confinement; search
-    // bypasses the store's per-operation root checks, so verify the real
-    // (symlink-resolved) root explicitly before scanning.
-    const store = createMarkdownMemoryStore({ root, forbiddenRoots, ...view });
-    let data;
-    if (MUTATING_COMMANDS.has(command)) {
-      data = await store.withMutation(async (locked) => {
-        const gitRoot = resolveMemoryGitAutocommit(env)
-          ? await prepareMemoryGitAutocommit(root, { env }) : undefined;
-        const operation = command === "happening-add" ? "addHappening"
-          : command === "delete" && gitRoot ? "deleteWithLocation" : command;
-        const result = await locked[operation](request);
-        if (!gitRoot) return result;
-        const { relativePath, ...publicData } = result;
-        return {
-          ...publicData,
-          git: await commitMemoryMutation(gitRoot, {
-            action: GIT_ACTIONS[command] ?? "update", id: result.id, relativePath,
-          }, { env }),
-        };
-      });
-    } else if (command === "lint" || command === "core") {
-      if (Object.keys(request).length > 0) throw new MemoryError("INVALID_INPUT", "Request must be empty");
-      const options = {
-        root,
-        forbiddenRoots,
-        sessionRoots: resolveBridgeSessionDirectories(env),
-        ...view,
-      };
-      data = command === "lint" ? await lintMemoryVault(options) : await compileCoreMemory(options);
-    } else if (command === "search" || command === "happenings") {
-      await store.verifyRoot();
-      const backend = createMarkdownMemorySearchBackend({ root, ...view });
-      data = await backend[command](request);
-    } else if (command === "list") {
-      data = { memories: await store.list(request) };
-    } else {
-      data = await store[command](request);
-    }
+    const data = await executeMemoryOperation(command, request, { env, cwd });
     stdout.write(`${JSON.stringify(successEnvelope(data))}\n`);
     return command === "lint" && !data.valid ? 3 : 0;
   } catch (error) {
