@@ -381,6 +381,9 @@ describe("startBridgeHost", () => {
       );
       expect(host.runtime.session.getActiveToolNames()).not.toContain("imagegen");
       const messages: string[] = [];
+      host.runtime.session.setThinkingLevel("low");
+      const priorModel = host.runtime.session.model;
+      host.runtime.services.settingsManager.setDefaultThinkingLevel("high");
       const replacement = createTelegramSessionReplacementRuntime({
         sendTargetText: async (_target, text) => {
           messages.push(text);
@@ -395,6 +398,8 @@ describe("startBridgeHost", () => {
       }, { timeout: 30_000 });
       await replacement.onSessionStart();
       expect(messages).toContain("✅ New session started in this thread.");
+      expect(host.runtime.session.model).toEqual(priorModel);
+      expect(host.runtime.session.thinkingLevel).toBe("low");
 
       const replacementSessionFile = host.runtime.session.sessionFile;
       expect(replacementSessionFile).toContain(join(root, "state", "sessions"));
