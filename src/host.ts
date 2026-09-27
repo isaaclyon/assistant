@@ -240,6 +240,7 @@ export async function startBridgeHost({
     throw error;
   }
 
+  let newSessionDefaults: Pick<AgentSession, "model" | "thinkingLevel"> | undefined;
   const createRuntime: CreateAgentSessionRuntimeFactory = async ({
     cwd,
     agentDir,
@@ -339,6 +340,12 @@ export async function startBridgeHost({
     const result = await createAgentSessionFromServices({
       services,
       sessionManager,
+      ...(sessionStartEvent?.reason === "new" && newSessionDefaults
+        ? {
+            ...(newSessionDefaults.model ? { model: newSessionDefaults.model } : {}),
+            thinkingLevel: newSessionDefaults.thinkingLevel,
+          }
+        : {}),
       ...(sessionStartEvent === undefined ? {} : { sessionStartEvent }),
     });
     return { ...result, services, diagnostics: services.diagnostics };
@@ -380,9 +387,14 @@ export async function startBridgeHost({
     }
     sessionReplacementInFlight = true;
     try {
+      newSessionDefaults = {
+        model: runtime.session.model,
+        thinkingLevel: runtime.session.thinkingLevel,
+      };
       const result = await runtime.newSession();
       return { ...result, sessionId: runtime.session.sessionId };
     } finally {
+      newSessionDefaults = undefined;
       sessionReplacementInFlight = false;
     }
   };

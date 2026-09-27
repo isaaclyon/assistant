@@ -233,6 +233,11 @@ unchanged to preserve prompt caching, and it fails open. See
 
 ## Session lifecycle
 
+Host session replacement supplies the outgoing model and thinking level to the
+fresh runtime before session-start hooks run. A version- and source-checked
+install patch opens the existing `/start` menu after Telegram's successful
+manual replacement notice, using the fresh context and original chat/thread.
+
 Pi compaction remains token-driven and may carry a summary within a session.
 Idle rotation is an independent, event-driven host policy: it never creates an
 empty session at the timeout, copies no prior context, emits no standalone
