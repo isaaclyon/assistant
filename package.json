@@ -19,7 +19,7 @@
     "start": "node dist/src/daemon.js",
     "telegram:setup": "npm run build && node dist/src/setup.js",
     "test": "vitest run --exclude '.worktrees/**'",
-    "test:pi-compat": "vitest run tests/pi-compatibility.test.ts tests/codex-extension.test.ts tests/host.integration.test.ts tests/retry-extension.test.ts tests/telegram-new-session.test.ts tests/subagent-process.test.ts tests/conversation-session-policy.test.ts tests/conversation-routing.test.ts",
+    "test:pi-compat": "vitest run tests/pi-compatibility.test.ts tests/codex-extension.test.ts tests/codex-request.test.ts tests/host.integration.test.ts tests/retry-extension.test.ts tests/telegram-new-session.test.ts tests/subagent-process.test.ts tests/conversation-session-policy.test.ts tests/conversation-routing.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:extensions": "tsc -p tsconfig.extensions.json",
     "typecheck:telegram": "tsc -p node_modules/@llblab/pi-telegram/tsconfig.json --noEmit"

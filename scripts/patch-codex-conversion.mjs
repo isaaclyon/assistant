@@ -25,7 +25,7 @@ async function patchFile(path, original, replacement) {
   const source = await readFile(path, "utf8");
   if (source.includes(replacement)) return;
   if (!source.includes(original)) {
-    throw new Error(`Codex config-path patch no longer applies cleanly to ${path}.`);
+    throw new Error(`Codex compatibility patch no longer applies cleanly to ${path}.`);
   }
   await writeFile(path, source.replace(original, replacement));
 }
@@ -40,4 +40,26 @@ await patchFile(
     return process.env["PI_CODEX_CONVERSION_CONFIG_PATH"]?.trim()
         || join(agentDir, CODEX_CONVERSION_CONFIG_BASENAME);
 }`,
+);
+
+// Pi 0.87 carries instructions and tool declarations in system messages. The
+// pinned adapter still consumes the legacy Context fields, including during
+// prewarm. Use Pi's own delta replay so removed tools/sections stay removed.
+await patchFile(
+  join(packageRoot, "dist", "providers", "openai-codex", "request-body.js"),
+  `import { clampThinkingLevel } from "@earendil-works/pi-ai";`,
+  `import { clampThinkingLevel, normalizeContext, getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";`,
+);
+await patchFile(
+  join(packageRoot, "dist", "providers", "openai-codex", "request-body.js"),
+  `export function buildRequestBody(model, context, options) {
+    const supportsToolSearch`,
+  `export function buildRequestBody(model, context, options) {
+    const transcript = normalizeContext(context);
+    context = {
+        systemPrompt: getCurrentSystemPrompt(transcript.messages),
+        tools: getCurrentTools(transcript.messages),
+        messages: transcript.messages.filter((message) => message.role !== "system"),
+    };
+    const supportsToolSearch`,
 );

@@ -1,11 +1,16 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { createAssistantMessageEventStream, type AssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { describe, expect, it, vi } from "vitest";
 import { startBridgeHost } from "../src/host.js";
 import { injectJobPrompt } from "../src/job-prompt.js";
 import { buildConversationRoutingRequest } from "../src/conversation-routing.js";
+
+const { buildRequestBody } = await import(pathToFileURL(join(
+  import.meta.dirname, "../node_modules/@howaboua/pi-codex-conversion/dist/providers/openai-codex/request-body.js",
+)).href);
 
 const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
@@ -75,7 +80,12 @@ describe("Pi release compatibility", () => {
       let calls = 0;
       const events: string[] = [];
       session.subscribe((event) => events.push(event.type));
-      session.agent.streamFunction = (_model, context) => {
+      const streamFunction: NonNullable<typeof session.agent.streamFunction> = (_model, context) => {
+        const body = buildRequestBody(_model, context, {});
+        expect(body.instructions).toContain("SYNTHETIC_HOST_INSTRUCTIONS");
+        expect(body.tools.map((tool: { name: string }) => tool.name)).toEqual(
+          expect.arrayContaining(["exec_command", "write_stdin", "apply_patch", "compat_echo"]),
+        );
         requests.push(structuredClone(context.messages));
         const stream = createAssistantMessageEventStream();
         const message: AssistantMessage = { ...oldAssistant, content: [], usage, timestamp: Date.now() };
@@ -101,6 +111,7 @@ describe("Pi release compatibility", () => {
         }
         return stream;
       };
+      session.agent.streamFunction = streamFunction;
       const accepted = vi.fn();
       await injectJobPrompt({ waitForIdle: () => session.waitForIdle(), prepare: async () => {},
         prompt: (text, options) => session.prompt(text, options) }, "[telegram] Follow up", accepted);
@@ -129,6 +140,9 @@ describe("Pi release compatibility", () => {
       await host.runtime.newSession();
       expect(host.runtime.session.sessionId).not.toBe("legacy");
       expect(host.runtime.session.sessionManager.getBranch().some((entry) => entry.type === "message")).toBe(false);
+      host.runtime.session.agent.streamFunction = streamFunction;
+      await host.runtime.session.prompt("[telegram] After replacement", { source: "rpc" });
+      expect(host.runtime.session.getLastAssistantText()).toBe("SYNTHETIC_FINAL");
       expect(await readFile(legacyFile, "utf8")).toContain("LEGACY_QUESTION");
       expect(logger.error).not.toHaveBeenCalled();
     } finally {

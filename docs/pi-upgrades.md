@@ -54,6 +54,10 @@ release is not permission to float these dependencies or ignore patch guards.
   retaining history. Network inference and summary generation are synthetic.
 - A real bundled-CLI child test proving the subagent process still loads exactly
   the read-only tools and returns a final report with an offline provider.
+- Actual Codex request serialization from both legacy and transcript contexts,
+  including instruction sections and tool additions/removals. The real-host test
+  checks outgoing instructions and tool schemas after retry, compaction, and
+  session replacement.
 - Existing queue/replay, `/new`, Jev routing, job acceptance/handoff, attachment,
   target-isolation, and deployment/recovery regressions.
 
@@ -77,9 +81,12 @@ and repair forward or reconcile recovery explicitly.
 - SessionManager now owns finalized provider context. Host routing reads its
   branch and replacement uses the official runtime lifecycle.
 - RPC/JSON streaming uses deltas; the background runner consumes final text.
-- The existing adapter's context hook filters conversation messages and leaves
-  system/tool restoration to Pi. Offline tests verify instructions and tools
-  survive both retries and compaction.
+- Pi now carries instructions and tools in transcript system messages. Adapter
+  2.2.13 still reads legacy context fields, so the version/source-checked install
+  patch replays Pi's instruction and tool deltas at the Codex request builder.
+  Both legacy prewarm calls and normalized provider calls retain their contracts.
+  Tests inspect the actual outgoing request, not just the pre-serialization
+  transcript, after retries, compaction, and session replacement.
 - The Telegram fork needed `max` added to its thinking-level contract and menu.
 - Pi's `agent_settled` boundary remains the correct final-delivery hook; retain
   the tested lifecycle patch.
