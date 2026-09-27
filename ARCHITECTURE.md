@@ -36,6 +36,7 @@ The host explicitly loads the pinned, repo-installed Codex conversion and retry 
 | Pending direct place-add draft | `<stateDir>/places-add-draft.json` | Places extension |
 | Personal memory vault | `~/.local/share/pi-telegram-bridge/memory` (override: `PI_TELEGRAM_MEMORY_DIR`) | `personal-memory` skill CLI |
 | Derived memory/session search index | `<stateDir>/search-index.db` | Search extension/coordinator |
+| Memory recall decision log (IDs, timings, probabilities) | `<stateDir>/memory-recall.jsonl` | Search extension |
 | Google Places cache and monthly attempt accounting | `<stateDir>/google-places.db` | Google extension/gateway |
 | Google OAuth client/tokens and keyring | External `gogcli` configuration selected per instance | gogcli / operator |
 | Google keyring password | External mode-`0600` file selected by instance environment | User / Google extension |
@@ -207,6 +208,14 @@ after inference. A bounded, on-demand embedding batch and local cosine scan
 feed reciprocal rank fusion with FTS; provider failure falls back to current
 keyword results. Session evidence remains FTS-only. See
 [ADR-0034](docs/adr/0034-hybrid-semantic-memory-search.md).
+Instances that opt into `PI_TELEGRAM_MEMORY_RECALL=jev` also recall notes
+before Telegram, scheduled-job, and reminder turns, recognized by their
+host-written prompt prefixes. The search extension's `before_agent_start` hook
+searches with the incoming and two previous messages, asks Jev one yes/no
+question per candidate, rechecks visibility, and returns passing notes as one
+hidden `memory-recall` session message. It leaves the system prompt
+unchanged to preserve prompt caching, and it fails open. See
+[ADR-0037](docs/adr/0037-recall-memory-with-jev-before-each-turn.md).
 
 ## Startup
 

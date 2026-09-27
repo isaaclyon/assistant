@@ -16,7 +16,24 @@ import {
 } from "../../src/search-coordinator.ts";
 import { openSearchIndex, type SearchIndex } from "../../src/search-index.ts";
 import { createOpenAIEmbedder } from "../../src/openai-embeddings.ts";
-import { prepareMemoryEmbeddings, searchHybridMemories, type MemoryEmbeddingPreparation } from "../../src/memory-semantic.ts";
+import {
+  prepareMemoryEmbeddings,
+  prepareMemoryQueryEmbeddings,
+  searchHybridMemories,
+  searchHybridMemoriesForQueries,
+  visibleMemoryRevisions,
+  type MemoryEmbeddingPreparation,
+} from "../../src/memory-semantic.ts";
+import {
+  appendRecallLog,
+  classifyRecallPrompt,
+  isMemoryRecallEnabled,
+  recallMemories,
+  RECALL_CANDIDATE_LIMIT,
+  type RecallCandidate,
+} from "../../src/memory-recall.ts";
+import { createTypeSafeJudge } from "../../src/semantic-judge.ts";
+import { isBridgeRuntime } from "../lib/bridge-runtime.ts";
 
 const MemoryTypeSchema = StringEnum([
   "person",
@@ -199,6 +216,68 @@ export default function searchExtension(pi: ExtensionAPI): void {
     await Promise.allSettled([...pendingRefreshes]);
     activeIndex?.close();
   }
+
+  /** Fails closed: a stale index is not proof of current canonical visibility. */
+  const requireFreshMemory = async (activeIndex: SearchIndex, context: SearchContext): Promise<void> => {
+    const refresh = await settleRefreshWithin(
+      trackRefresh(refreshMemory(activeIndex, context)),
+      INTERACTIVE_REFRESH_BUDGET_MS,
+    );
+    if (refresh.status !== "fresh" || !refresh.value.complete) throw new Error("Memory index is not fresh");
+  };
+
+  // ADR-0037: the same refresh -> embed -> refresh privacy sequence as the
+  // search tool, with one query per recent message in a single embedding batch.
+  const retrieveRecallCandidates = async (
+    context: SearchContext,
+    queries: string[],
+  ): Promise<RecallCandidate[]> => {
+    const activeIndex = getIndex(context);
+    const request = {
+      query: queries[0]!,
+      principal: context.principalId,
+      memoryView: context.memoryView,
+      limit: RECALL_CANDIDATE_LIMIT,
+    };
+    await requireFreshMemory(activeIndex, context);
+    const semantic = await trackRefresh(
+      prepareMemoryQueryEmbeddings(activeIndex, request, queries, createOpenAIEmbedder()),
+    );
+    if (semantic.status !== "disabled") await requireFreshMemory(activeIndex, context);
+    return searchHybridMemoriesForQueries(activeIndex, request, queries, semantic)
+      .map(({ id, revision, type, title, snippet }) => ({ id, revision, type, title, snippet }));
+  };
+
+  const currentRecallRevisions = async (context: SearchContext): Promise<Map<string, string>> => {
+    const activeIndex = getIndex(context);
+    await requireFreshMemory(activeIndex, context);
+    return visibleMemoryRevisions(activeIndex, {
+      query: "recall", principal: context.principalId, memoryView: context.memoryView,
+    });
+  };
+
+  pi.on("before_agent_start", async (event, ctx) => {
+    if (!isBridgeRuntime() || !isMemoryRecallEnabled() || !classifyRecallPrompt(event.prompt)) return;
+    let context: SearchContext;
+    try {
+      context = resolveContext();
+    } catch {
+      return;
+    }
+    if (context.memoryView === "none") return;
+    const message = await trackRefresh(recallMemories({
+      prompt: event.prompt,
+      entries: ctx.sessionManager.buildContextEntries(),
+      sessionId: ctx.sessionManager.getSessionId(),
+    }, {
+      retrieve: (queries) => retrieveRecallCandidates(context, queries),
+      currentRevisions: () => currentRecallRevisions(context),
+      // Built per turn so it reads the current environment and global fetch.
+      judge: createTypeSafeJudge({ timeoutMs: 3_000, maxAttempts: 1 }),
+      log: (record) => appendRecallLog(context.stateDir, record),
+    }));
+    return message ? { message } : undefined;
+  });
 
   pi.registerTool({
     name: "assistant_memory_search",

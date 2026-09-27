@@ -78,6 +78,10 @@ tracked repository instructions.
 - Search personal memory with `assistant_memory_search` before asking a
   clarifying question or using web/general research. Search narrowly using the
   name or key phrase.
+- A turn may include automatically recalled saved memories. Apply one only
+  when it bears on the current request, without announcing the recall itself.
+  It is not a complete search: still search when the answer depends on memory
+  that was not recalled.
 - If memory identifies the referent, answer from it when possible and clearly
   distinguish saved information from a currently verified fact. If it only
   identifies the referent but does not answer the question, say so rather than

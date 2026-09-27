@@ -88,6 +88,45 @@ keyword retrieval still covers the full current corpus. `unavailable` indicates
 an embedding failure, and `skipped` indicates an unverified canonical snapshot.
 See [ADR-0034](adr/0034-hybrid-semantic-memory-search.md).
 
+## Automatic memory recall
+
+Set `PI_TELEGRAM_MEMORY_RECALL=jev` and `PI_TELEGRAM_TYPESAFE_API_KEY_FILE` in
+an instance's private environment file to recall relevant notes before each
+Telegram message, scheduled job, and one-time reminder. Heartbeat reactions,
+webhooks, and background-subagent completions never trigger recall. Without
+`PI_TELEGRAM_OPENAI_API_KEY_FILE`, candidates come from keyword search only.
+
+Before the turn starts, the search extension builds up to three queries: the
+incoming text, the previous assistant message, and the previous user message.
+A reply such as "ok do it" therefore searches the proposal it answers. The
+queries share one embedding request, and the per-query rankings are interleaved
+into eight distinct candidates. Jev then answers one yes/no question per
+candidate over the last four visible messages: would this note change what the
+assistant should do next? Notes at P(yes) 0.5 or higher, at most four and 2,000
+snippet characters, are added to the session as one hidden `memory-recall`
+message with note IDs and revisions. A note revision already recalled in the
+active context is not judged or added again.
+
+This sends recent conversation excerpts and candidate note titles and
+snippets to TypeSafe on every qualifying turn, in addition to query text sent
+to OpenAI. Enable it only with the instance owner's approval. The same
+visibility filters and canonical rechecks as the search tool apply, plus one
+more recheck after judgment. Any failure adds nothing, and the turn proceeds
+as it would without recall. The Jev call has one attempt with a three-second
+timeout; there is no overall recall deadline yet.
+
+Each qualifying turn appends one line to `<stateDir>/memory-recall.jsonl`
+(mode `0600`) with the outcome, per-stage timings, and each candidate's note
+ID, revision, probability, and result. It never contains message or note text.
+For example, to see the added latency and injection rate:
+
+```bash
+jq -s '{turns: length, injected: map(select(.outcome == "injected")) | length,
+  total_ms: (map(.ms.total) | sort)}' "$STATE_DIR/memory-recall.jsonl"
+```
+
+See [ADR-0037](adr/0037-recall-memory-with-jev-before-each-turn.md).
+
 ## Refresh and recovery
 
 Memory refresh stages parsed notes privately and publishes a transactional snapshot
