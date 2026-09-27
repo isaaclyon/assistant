@@ -162,6 +162,65 @@ gog auth alias list
 authorized independently with the required read-only service scopes. Alias
 configuration is private external state, not tracked repository configuration.
 
+## Enable individual Calendar changes
+
+Calendar writes require gogcli **0.34.1** (the reviewed Discovery API adapter)
+and the full `https://www.googleapis.com/auth/calendar` OAuth grant. The
+existing read-only grant is insufficient. An operator can reauthorize the
+selected account in its existing isolated `GOG_HOME`, using the same private
+keyring setup above:
+
+```bash
+gog --gmail-no-send auth add account@example.com --services calendar --force-consent
+```
+
+Retain any other already-authorized services explicitly when reauthorizing an
+account. To retain read-only Gmail and Contacts grants while adding Calendar
+writes, authorize read-only service scopes plus the explicit Calendar scope:
+
+```bash
+gog --readonly --gmail-no-send auth add account@example.com \
+  --services calendar,gmail,contacts \
+  --extra-scopes https://www.googleapis.com/auth/calendar --force-consent
+```
+
+The bridge still exposes only reads for Gmail and Contacts. Authorization is
+interactive; do not paste tokens or authorization redirects into chat.
+
+Use the typed `calendar_list` result to select the stable IDs for Personal and
+Things to Do. Put this single-quoted JSON value in the selected instance's
+mode-`0600` environment file (replace the example IDs and account):
+
+```dotenv
+PI_TELEGRAM_GOOGLE_CALENDAR_WRITES='{"instance":"isaac","account":"account@example.com","personal":"personal-calendar-id","thingsToDo":"things-to-do-calendar-id"}'
+```
+
+The instance must match the host's instance ID. Account aliases and `primary`
+are not authorization identities. Missing, malformed, or mismatched
+configuration disables writes; other instances remain disabled. The bridge
+checks editor/owner access before each operation. Activate the configuration
+through the normal deployment workflow.
+
+`calendar_event`, `calendar_create`, `calendar_update`, and
+`calendar_request_delete` support the approved calendars. New events default
+to Personal. Timed events require a matching offset and IANA zone; all-day end
+dates are exclusive. Patches preserve unrelated fields. Guests, invitations,
+recurrence/instances, and special event types are rejected. Deletion requires a
+chat-bound, expiring, one-use Telegram button; no tool operation approves it.
+
+Creates derive a stable event ID from the account, calendar, and
+`operation_key`. Reusing the key across a retry or restart reads the same
+event. A changed draft with that key is rejected. A lost write response causes
+one reconciliation read, never a blind mutation retry. A failed reconciliation
+returns an unresolved outcome. A successful delete response or a returned
+cancelled tombstone verifies deletion; a generic read failure does not.
+
+**Concurrency limit:** gogcli 0.34.1 does not expose conditional `If-Match`
+writes. The bridge compares the event's version immediately before editing or
+deleting, but another client can still change it between that read and the
+write. This is not atomic version protection. A future client with conditional
+headers can close that gap without changing the user flow.
+
 ## Verify
 
 Ask the assistant to check Google account status. The typed result reports only
@@ -171,9 +230,15 @@ raw diagnostics.
 
 For Calendar, ask it to list calendars, show events for a bounded date range,
 search a bounded range, or check availability across configured aliases. The
-tool always supplies `--readonly`, `--no-input`, and Gmail-send blocking. It
+read adapters supply `--readonly`, `--no-input`, and Gmail-send blocking. They
 normalizes and bounds returned fields, omits cancelled events, preserves
-all-day/date and time-zone distinctions, and marks remote text as untrusted.
+all-day/date and time-zone distinctions, and mark remote text as untrusted.
+
+For writes, first verify the allowlist and OAuth grant. Any live mutation test
+must use an explicitly identified disposable event; deletion still uses its
+confirmation button. Automated tests use synthetic events and transports.
+Authorization failures require the interactive account setup above; an
+unresolved result must not be presented as success.
 
 For Gmail, ask it to search a focused Gmail query, triage unread or actionable
 threads, summarize one returned thread, or propose a reply. Thread search and

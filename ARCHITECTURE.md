@@ -91,6 +91,14 @@ command or raw API method. Each child is non-interactive, bounded, receives a
 minimal environment plus a just-in-time keyring password, and returns only a
 normalized operation-specific result. Per-instance private configuration owns
 the binary path, default account, and credential-file path; see ADR-0027.
+An opt-in instance/account/calendar-ID allowlist enables individual Calendar
+event changes through operation-owned Discovery API adapters. Stable event IDs
+support creation retries; edits preserve unrequested fields. The Google
+extension owns expiring, chat-bound Telegram deletion confirmations. Read
+adapters retain `--readonly`; write adapters are restricted to Calendar events
+and never expose a raw API method to the model. See
+[ADR-0036](docs/adr/0036-guarded-calendar-writes.md), including the client's
+non-atomic revision-check limitation.
 Google Places requests additionally pass through conservative per-instance
 monthly attempt reservation. Places requests bypass gog and do not require its
 configuration: identity lookups,

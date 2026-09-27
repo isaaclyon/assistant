@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { access, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
+import { parseCalendarWriteConfig, type CalendarWriteConfig } from "./google-calendar-writes.ts";
 
 export const DEFAULT_TIMEOUT_MS = 10_000;
 export const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
@@ -11,6 +12,7 @@ export const FAILURE_MESSAGE = "Google Workspace command failed";
 const MAX_PLACES_MONTHLY_LIMIT = 1_000_000;
 
 export interface GoogleRuntime {
+  calendarWrites?: CalendarWriteConfig;
   account?: string;
   binary?: string;
   passwordFile?: string;
@@ -91,6 +93,7 @@ export async function runGogJson(options: {
   signal?: AbortSignal;
   timeoutMs?: number;
   maxOutputBytes?: number;
+  allowEmptyOutput?: boolean;
 }): Promise<unknown> {
   try {
     if (options.signal?.aborted) throw new Error(FAILURE_MESSAGE);
@@ -156,7 +159,8 @@ export async function runGogJson(options: {
         options.signal?.removeEventListener("abort", abort);
         if (code !== 0 || stderrBytes > 0) return fail();
         try {
-          const parsed: unknown = JSON.parse(Buffer.concat(stdout).toString("utf8"));
+          const output = Buffer.concat(stdout).toString("utf8");
+          const parsed: unknown = options.allowEmptyOutput && !output.trim() ? {} : JSON.parse(output);
           killChildTree();
           settled = true;
           resolve(parsed);
@@ -171,6 +175,7 @@ export async function runGogJson(options: {
 }
 
 export async function resolveGoogleRuntime(): Promise<GoogleRuntime> {
+  const calendarWrites = parseCalendarWriteConfig(process.env.PI_TELEGRAM_GOOGLE_CALENDAR_WRITES, process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID);
   const binary = process.env.PI_TELEGRAM_GOG_BINARY?.trim();
   const passwordFile = process.env.PI_TELEGRAM_GOG_KEYRING_PASSWORD_FILE?.trim();
   const gogHome = process.env.PI_TELEGRAM_GOG_HOME?.trim();
@@ -192,6 +197,7 @@ export async function resolveGoogleRuntime(): Promise<GoogleRuntime> {
     gogHome && isAbsolute(gogHome),
   );
   return {
+    ...(calendarWrites ? { calendarWrites } : {}),
     ...(gogConfigured ? { binary: binary!, passwordFile: passwordFile!, gogHome: gogHome! } : {}),
     ...(account ? { account } : {}),
     ...(stateDir && isAbsolute(stateDir) ? { stateDir } : {}),

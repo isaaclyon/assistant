@@ -1,5 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { registerTelegramSection, presentTelegramSection } from "@llblab/pi-telegram/sections";
+import { CALENDAR_WRITE_OPERATIONS, CalendarWrites, CalendarWriteError } from "../lib/google-calendar-writes.ts";
 import {
   executePlacesOperation,
   MAX_PLACE_CANDIDATES,
@@ -45,6 +47,7 @@ interface GoogleWorkspaceRegistrationOptions extends PlacesOperationOptions {
 
 interface MinimalPiApi {
   registerTool(tool: Parameters<ExtensionAPI["registerTool"]>[0]): void;
+  on?: ExtensionAPI["on"];
 }
 
 function success(result: unknown): {
@@ -77,23 +80,100 @@ const windowParameters = {
   to: Type.String({ minLength: 10, maxLength: 64 }),
 };
 
+const calendarParameter = Type.Optional(Type.Union([Type.Literal("personal"), Type.Literal("things_to_do")]));
+const eventTimeParameter = Type.Union([
+  Type.Object({ date: Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" }) }, { additionalProperties: false }),
+  Type.Object({ dateTime: Type.String({ minLength: 20, maxLength: 64 }), timeZone: Type.String({ minLength: 1, maxLength: 64 }) }, { additionalProperties: false }),
+]);
+const eventFields = {
+  summary: Type.String({ minLength: 1, maxLength: 500 }),
+  description: Type.Optional(Type.String({ maxLength: 4_000 })),
+  location: Type.Optional(Type.String({ maxLength: 500 })),
+  start: eventTimeParameter, end: eventTimeParameter,
+};
+const eventTarget = {
+  account: accountParameter, calendar: calendarParameter,
+  event_id: Type.String({ minLength: 1, maxLength: 1_024 }),
+};
+const etagParameter = Type.String({ minLength: 1, maxLength: 200 });
+const CALENDAR_SECTION = "assistant/calendar-confirmation";
+function calendarFailure(error: unknown) {
+  return error instanceof CalendarWriteError ? { code: error.code, message: error.message } : {
+    code: "GOOGLE_CALENDAR_UNAVAILABLE",
+    message: "Calendar is unavailable. Check Google authorization and Calendar access before retrying",
+  };
+}
+
 export function registerGoogleWorkspaceTool(
   pi: MinimalPiApi,
   options: GoogleWorkspaceRegistrationOptions,
 ): void {
+  const calendarWrites = new CalendarWrites(options.run);
+  let unregister: (() => void) | undefined;
+  let pending: { token: string; event: Record<string, unknown> } | undefined;
+  let presenting = false;
+  const clear = () => { unregister?.(); unregister = undefined; calendarWrites.clear(); pending = undefined; presenting = false; };
+  pi.on?.("session_shutdown", clear);
+  pi.on?.("session_start", () => {
+    clear();
+    if (!process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID) return;
+    unregister = registerTelegramSection({
+      id: CALENDAR_SECTION, label: "📅 Calendar confirmations", order: 26,
+      render(ctx) {
+        const item = pending; pending = undefined;
+        if (!item) return { text: "No event deletion is awaiting confirmation.", parseMode: "plain" };
+        calendarWrites.bind(item.token, ctx.chatId);
+        const start = item.event.start as Record<string, unknown>;
+        const end = item.event.end as Record<string, unknown>;
+        return {
+          text: `Delete event: ${item.event.summary ?? "Untitled"}\nCalendar: ${item.event.calendar === "personal" ? "Personal" : "Things to Do"}\n` +
+            `Start: ${start.date ?? start.dateTime}\nEnd: ${end.date ?? end.dateTime}${end.date ? " (exclusive)" : ""}\n` +
+            `${start.timeZone ? `Time zone: ${start.timeZone}\n` : ""}\nThis confirmation expires in 10 minutes and applies only to this version.`,
+          parseMode: "plain",
+          replyMarkup: { inline_keyboard: [[
+            { text: "Confirm deletion", callback_data: ctx.callbackData("confirm", item.token) },
+            { text: "Cancel", callback_data: ctx.callbackData("cancel", item.token) },
+          ]] },
+        };
+      },
+      async handleCallback(ctx) {
+        if (ctx.action !== "confirm" && ctx.action !== "cancel") return "pass";
+        await ctx.answerCallback();
+        let text: string;
+        try {
+          if (ctx.action === "cancel") { calendarWrites.cancel(ctx.payload, ctx.chatId); text = "Cancelled. The event was not deleted."; }
+          else { await calendarWrites.confirm(ctx.payload, ctx.chatId); text = "Event deleted."; }
+        } catch (error) { text = calendarFailure(error).message; }
+        // A failed Telegram edit must never replay the mutation.
+        await ctx.edit({ text, parseMode: "plain", replyMarkup: { inline_keyboard: [] } });
+        return "handled";
+      },
+    });
+  });
   pi.registerTool({
     name: "google_workspace",
     label: "Google Workspace",
     description:
-      "Run typed, allowlisted Google operations for account status, bounded read-only Workspace inspection, and locally metered Google Places lookup.",
-    promptSnippet: "Inspect configured Google Workspace data and perform bounded Google Places lookup",
+      "Run typed Google Workspace reads, guarded Calendar changes in Personal or Things to Do, and locally metered Google Places lookup. Event deletion requires a direct user confirmation button.",
+    promptSnippet: "Inspect Google Workspace, manage individual personal Calendar events, and look up places",
     promptGuidelines: [
       "Use google_workspace only for its typed operations; never invoke gogcli through shell commands.",
-      "Every operation is read-only. Never imply that an event, email, or contact was created, changed, sent, or accepted; proposed replies stay as text in your response.",
+      "Gmail and Contacts remain read-only. Calendar writes support only individual events without guests or recurrence in Personal (default) and Things to Do. Act on clear create/edit requests; clarify material ambiguity.",
+      "Read calendar_event before updating or requesting deletion, and pass its if_etag. Patch only requested fields. Timed events need an explicit offset and matching IANA timeZone; all-day end dates are exclusive.",
+      "For calendar_create choose one unique operation_key and reuse it unchanged on retries. Never retry an unresolved creation with a new key. Claim success only from verified tool results.",
+      "calendar_request_delete sends direct user-only confirmation buttons. Wait for the user; the tool cannot approve deletion. Never bypass confirmation through another tool or command.",
       "Use places_search_candidates for multi-place, comparison, or best/top-rated requests and choose which candidates to surface; the list is bounded and may be incomplete. Places requests may be blocked by a local monthly limit.",
       "Use rich_details only when ratings, hours, contact information, price, or reviews are requested. Attribute those results to Google Maps and keep review author/source links.",
     ],
     parameters: Type.Union([
+      Type.Object({ operation: Type.Literal("calendar_event"), ...eventTarget }, { additionalProperties: false }),
+      Type.Object({ operation: Type.Literal("calendar_create"), account: accountParameter, calendar: calendarParameter,
+        operation_key: Type.String({ minLength: 1, maxLength: 128 }), event: Type.Object(eventFields, { additionalProperties: false }),
+      }, { additionalProperties: false }),
+      Type.Object({ operation: Type.Literal("calendar_update"), ...eventTarget, if_etag: etagParameter,
+        patch: Type.Partial(Type.Object(eventFields, { additionalProperties: false, minProperties: 1 })),
+      }, { additionalProperties: false }),
+      Type.Object({ operation: Type.Literal("calendar_request_delete"), ...eventTarget, if_etag: etagParameter }, { additionalProperties: false }),
       Type.Object({ operation: Type.Literal("account_status"), account: accountParameter }, { additionalProperties: false }),
       Type.Object({
         operation: Type.Literal("calendar_list"),
@@ -175,6 +255,25 @@ export function registerGoogleWorkspaceTool(
       }
       const operation = requiredSafeString(input.operation, 64);
       if (!operation) return failure("GOOGLE_OPERATION_INVALID", "The Google Workspace operation is invalid");
+      if (CALENDAR_WRITE_OPERATIONS.has(operation)) {
+        try {
+          if (operation !== "calendar_request_delete") return success(await calendarWrites.execute(runtime, input, signal));
+          if (!unregister) throw new CalendarWriteError("CALENDAR_CONFIRMATION_UNAVAILABLE", "Event deletion requires an active Telegram session");
+          if (presenting) throw new CalendarWriteError("CALENDAR_BUSY", "Another deletion preview is being presented");
+          presenting = true;
+          let token: string | undefined;
+          try {
+            const preview = await calendarWrites.execute(runtime, input, signal);
+            token = preview.token as string;
+            pending = { token, event: preview.event as Record<string, unknown> };
+            await presentTelegramSection(CALENDAR_SECTION);
+            return success({ operation, status: "awaiting_confirmation", message: "Confirmation buttons sent. Wait for the user; the event has not been deleted." });
+          } catch (error) {
+            if (token) calendarWrites.discard(token);
+            throw error;
+          } finally { pending = undefined; presenting = false; }
+        } catch (error) { const selected = calendarFailure(error); return failure(selected.code, selected.message); }
+      }
       const account = selectedAccount(input, runtime);
       const isPlacesOperation = PLACES_OPERATIONS.has(operation);
       if (operation !== "calendar_availability" && !isPlacesOperation && !account) {
@@ -368,6 +467,9 @@ export default function googleWorkspaceExtension(pi: ExtensionAPI): void {
         passwordFile: runtime.passwordFile,
         gogHome: runtime.gogHome,
         args,
+        // Discovery DELETE returns HTTP 204 with no JSON body. Only this exact
+        // internally owned method may treat an empty successful response as {}.
+        allowEmptyOutput: args[5] === "--force" && args.slice(6, 11).join(" ") === "api call calendar v3 calendar.events.delete",
         ...(signal ? { signal } : {}),
       });
     },

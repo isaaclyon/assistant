@@ -24,6 +24,15 @@ async function fixture() {
   return { binary: process.execPath, passwordFile, gogHome: root, args: ["-e", "process.stdout.write('{}')"] };
 }
 
+it("accepts an empty HTTP-success body only for an explicitly selected adapter", async () => {
+  const options = await fixture();
+  options.args = ["-e", "process.exit(0)"];
+  await expect(transport.runGogJson(options)).rejects.toThrow("Google Workspace command failed");
+  await expect(transport.runGogJson({ ...options, allowEmptyOutput: true })).resolves.toEqual({});
+  options.args = ["-e", "process.exit(1)"];
+  await expect(transport.runGogJson({ ...options, allowEmptyOutput: true })).rejects.toThrow("Google Workspace command failed");
+});
+
 describe.each([
   {
     operation: "rich details",
