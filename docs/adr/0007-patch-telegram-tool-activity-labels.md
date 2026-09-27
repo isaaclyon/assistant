@@ -21,6 +21,11 @@ come from deterministic allowlisted rules; unknown commands use a generic label
 and never expose their contents. Repository tests import the installed formatter
 and verify both mappings and privacy-safe fallbacks.
 
+The same source-checked patch reduces the active tool-status edit interval from
+two seconds to one second. Updates still coalesce into one edited message, and
+the existing transport error handling and end-of-turn cleanup remain in place.
+A fake-clock behavior test verifies the one-second cadence and cancellation.
+
 Maintaining this behavior as a local install patch was chosen over adding another
 commit to the fork because it is bridge-specific presentation policy. Editing
 `node_modules` without a reproducible script and parsing labels with a model were

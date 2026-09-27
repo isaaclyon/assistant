@@ -145,6 +145,15 @@ if (!/^\s*"version":\s*"0\.20\.6",?\s*$/m.test(manifest)) {
 }
 
 let source = await readFile(toolActivityPath, "utf8");
+const originalSource = source;
+const originalInterval = "export const TELEGRAM_TOOL_ACTIVITY_EDIT_INTERVAL_MS = 2_000;";
+const replacementInterval = "export const TELEGRAM_TOOL_ACTIVITY_EDIT_INTERVAL_MS = 1_000;";
+if (!source.includes(replacementInterval)) {
+  if (!source.includes(originalInterval)) {
+    throw new Error("Telegram tool-activity cadence patch no longer applies cleanly.");
+  }
+  source = source.replace(originalInterval, replacementInterval);
+}
 if (!source.includes(replacement)) {
   if (!source.includes(original) || !source.includes(obsoleteHintKeys)) {
     throw new Error(
@@ -154,5 +163,5 @@ if (!source.includes(replacement)) {
   source = source
     .replace(obsoleteHintKeys, "")
     .replace(original, replacement);
-  await writeFile(toolActivityPath, source);
 }
+if (source !== originalSource) await writeFile(toolActivityPath, source);
