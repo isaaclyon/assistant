@@ -77,8 +77,9 @@ capability profiles.
    `PI_CREDENTIAL_ENGINEERING_*`. Optional operational keys are the webhook
    host/port, memory path/auto-commit settings, human-idle session timeout, and
    `PI_TELEGRAM_TYPESAFE_API_KEY_FILE` (an absolute path to a mode-`0600`
-   TypeSafe API key file, needed only on the jobs coordinator for
-   `semantic-match` heartbeats; see ADR-0031).
+   TypeSafe API key file, used for `semantic-match` heartbeats and opted-in
+   conversation routing; see ADR-0031 and ADR-0033). The optional
+   `PI_TELEGRAM_SESSION_ROUTING` accepts `jev` or `off`.
    Validation reports key names, never values.
 
    Port `0` requests an ephemeral listener and may be reused. Any fixed
@@ -94,6 +95,18 @@ restart only the affected instance, and verify its exact runtime metadata. Keep
 the prior value available in the secret manager until the smoke test succeeds.
 
 ## Inactivity-based session rotation
+
+For semantic conversation routing, set `PI_TELEGRAM_SESSION_ROUTING=jev` and
+`PI_TELEGRAM_TYPESAFE_API_KEY_FILE` in the instance's private environment, then
+deploy normally. Jev receives the first user message, last two conversational
+messages, and incoming text only after a gap longer than 15 minutes. P(same
+conversation) below 0.3 starts a fresh session; uncertainty, unavailable text,
+and API failure keep the current one. Each excerpt is bounded to 4,096 characters.
+The original Telegram message time prevents queue delays from extending the gap.
+This opt-in sends conversation excerpts to TypeSafe; enable it only with that
+instance owner's approval. It takes precedence over idle-hours rotation and
+prevents scheduled work from resetting history. Set `off` or remove the setting
+to return to the idle-hours policy on the next deployment.
 
 Rotation is disabled by default. To enable an eight-hour human-idle boundary for
 one instance, atomically add `PI_TELEGRAM_SESSION_IDLE_HOURS=8` to that

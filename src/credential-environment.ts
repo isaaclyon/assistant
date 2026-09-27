@@ -13,6 +13,7 @@ const OPERATIONAL_KEYS = new Set([
   "PI_TELEGRAM_MEMORY_DIR",
   "PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT",
   "PI_TELEGRAM_SESSION_IDLE_HOURS",
+  "PI_TELEGRAM_SESSION_ROUTING",
   "PI_TELEGRAM_GOG_BINARY",
   "PI_TELEGRAM_GOG_HOME",
   "PI_TELEGRAM_GOG_KEYRING_PASSWORD_FILE",
@@ -105,6 +106,9 @@ export async function validateCredentialEnvironmentFile(
         );
       }
       sessionIdleHours = parsed;
+    }
+    if (key === "PI_TELEGRAM_SESSION_ROUTING" && !["jev", "off"].includes(match[2]!.trim())) {
+      throw new Error("PI_TELEGRAM_SESSION_ROUTING must be jev or off");
     }
     if (
       key === "PI_TELEGRAM_GOOGLE_PLACES_SEARCH_MONTHLY_LIMIT" ||

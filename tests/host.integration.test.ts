@@ -46,6 +46,7 @@ interface ShortTestConfig {
   webhookHost: string;
   webhookPort: number;
   sessionIdleMs?: number;
+  sessionRouting?: "jev";
 }
 type TestHostOptions = Omit<Parameters<typeof startBridgeHost>[0], "config"> & {
   config: BridgeInstanceConfig | ShortTestConfig;
@@ -86,6 +87,7 @@ async function expandTestConfig(config: ShortTestConfig): Promise<BridgeInstance
     stateDir: config.stateDir,
     sessionDir: config.sessionDir,
     ...(config.sessionIdleMs === undefined ? {} : { sessionIdleMs: config.sessionIdleMs }),
+    ...(config.sessionRouting === undefined ? {} : { sessionRouting: config.sessionRouting }),
     inboxPath: join(config.stateDir, "inbox.db"),
     codexConfigPath: config.codexConfigPath,
     restartMarkerPath: join(config.stateDir, "restart-pending.json"),
@@ -194,6 +196,54 @@ async function loadPinnedLockApi(): Promise<{
 }
 
 describe("startBridgeHost", () => {
+  it("routes the pinned fork's prompt through Jev and official session replacement", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-jev-routing-"));
+    const agentDir = join(root, "agent");
+    await mkdir(agentDir);
+    await writeFile(join(agentDir, "auth.json"), JSON.stringify({ "openai-codex": {
+      type: "oauth", access: "test", refresh: "test", expires: Date.now() + 3_600_000,
+    } }));
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "openai-codex", defaultModel: "gpt-5.6-sol" }));
+    const extensionPath = join(root, "no-telegram-network.mjs");
+    await writeFile(extensionPath, "export default function() {}\n");
+    const key = join(root, "typesafe-key");
+    await writeFile(key, "fake-test-key", { mode: 0o600 });
+    let now = Date.now();
+    const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+    vi.stubEnv("PI_TELEGRAM_TYPESAFE_API_KEY_FILE", key);
+    const fetcher = vi.fn(async (_url: unknown, _init?: RequestInit) => new Response(JSON.stringify({ model: "jev-1.13.0", answers: {
+      same_conversation: { type: "noul", noul: 0.01 },
+    } })));
+    vi.stubGlobal("fetch", fetcher);
+    const host = await startTestBridgeHost({
+      config: { agentDir, cwd: root, stateDir: join(root, "state"), sessionDir: join(root, "state/sessions"),
+        codexConfigPath: join(root, "state/codex.json"), webhookHost: "127.0.0.1", webhookPort: 0, sessionRouting: "jev" },
+      nowMs: () => now, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }, telegramExtensionPath: extensionPath,
+    });
+    try {
+      const fork = await import(pathToFileURL(join(dirname(resolveTelegramExtensionPath()), "lib/host.ts")).href);
+      await fork.prepareTelegramHostPrompt({ historyText: "Coffee tips?", sentAtMs: now });
+      host.runtime.session.sessionManager.appendMessage({ role: "user", content: "[telegram] Coffee tips?", timestamp: now });
+      const originalId = host.runtime.session.sessionId;
+      now += 900_001;
+      const incoming = { historyText: "Plan a birthday party", sentAtMs: now };
+      await expect(fork.prepareTelegramHostPrompt(incoming)).resolves.toEqual({ sessionReplaced: true });
+      expect(host.runtime.session.sessionId).not.toBe(originalId);
+      const judgeCalls = () => fetcher.mock.calls.filter(([url]) => url === "https://api.typesafe.ai/v1/systemone");
+      const [, init] = judgeCalls()[0]!;
+      expect(JSON.parse(init!.body as string).state.incoming_user_message).toBe(incoming.historyText);
+      // Fresh-runtime replay of the unchanged incoming turn cannot rotate again.
+      await expect(fork.prepareTelegramHostPrompt(incoming)).resolves.toEqual({ sessionReplaced: false });
+      expect(judgeCalls()).toHaveLength(1);
+    } finally {
+      await host.dispose();
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+      if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+    }
+  }, 40_000);
+
   it("rejects malformed idle-session state before touching the durable inbox", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-telegram-host-idle-state-"));
     const stateDir = join(root, "state");

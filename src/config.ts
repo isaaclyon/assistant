@@ -34,6 +34,7 @@ export interface BridgeInstanceConfig {
   stateDir: string;
   sessionDir: string;
   sessionIdleMs?: number;
+  sessionRouting?: "jev" | undefined;
   inboxPath: string;
   codexConfigPath: string;
   restartMarkerPath: string;
@@ -47,6 +48,12 @@ export interface BridgeInstanceConfig {
 type BridgeEnvironment = Readonly<Record<string, string | undefined>>;
 
 const MAX_SESSION_IDLE_HOURS = 8_760;
+
+export function resolveSessionRouting(value: string | undefined): "jev" | undefined {
+  if (!value?.trim() || value.trim() === "off") return undefined;
+  if (value.trim() === "jev") return "jev";
+  throw new Error("PI_TELEGRAM_SESSION_ROUTING must be jev or off");
+}
 
 function resolveSessionIdleMs(value: string | undefined): number {
   const raw = value?.trim();
@@ -127,6 +134,7 @@ export function resolveBridgeInstanceConfig(
     configRoot,
     ...paths,
     sessionIdleMs: resolveSessionIdleMs(env.PI_TELEGRAM_SESSION_IDLE_HOURS),
+    sessionRouting: resolveSessionRouting(env.PI_TELEGRAM_SESSION_ROUTING),
     webhookHost: env.PI_TELEGRAM_BRIDGE_WEBHOOK_HOST?.trim() || "127.0.0.1",
     webhookPort,
   };

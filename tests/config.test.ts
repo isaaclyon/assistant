@@ -38,6 +38,12 @@ const resolveIsaac = (env: Record<string, string>) =>
   resolveBridgeInstanceConfig(singleInstanceManifest(), "isaac", env, "/home/tester", "/release");
 
 describe("resolveBridgeInstanceConfig", () => {
+  it("requires explicit per-instance opt-in for Jev conversation routing", () => {
+    expect(resolveIsaac({}).sessionRouting).toBeUndefined();
+    expect(resolveIsaac({ PI_TELEGRAM_SESSION_ROUTING: "off" }).sessionRouting).toBeUndefined();
+    expect(resolveIsaac({ PI_TELEGRAM_SESSION_ROUTING: "jev" }).sessionRouting).toBe("jev");
+    expect(() => resolveIsaac({ PI_TELEGRAM_SESSION_ROUTING: "yes" })).toThrow(/must be jev or off/);
+  });
   it("selects one stable instance and derives its resource, workspace, and private state boundaries", () => {
     const manifest = parseBridgeInstanceManifest(
       JSON.stringify({
