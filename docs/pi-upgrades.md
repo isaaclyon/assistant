@@ -19,7 +19,7 @@ relevant urgent security fix can be upgraded manually without waiting for the
 weekly check or cooldown. A failed compatibility check needs a fix or an
 explicitly documented deferral; do not bypass it to meet the target.
 
-The Telegram fork, Codex conversion adapter, and retry extension remain separate
+The Telegram fork, Codex conversion adapter, web extension, and retry extension remain separate
 reviewed pins. Review their compatibility during each Pi update; a new Pi
 release is not permission to float these dependencies or ignore patch guards.
 
@@ -54,7 +54,7 @@ release is not permission to float these dependencies or ignore patch guards.
   retaining history. Network inference and summary generation are synthetic.
 - A real bundled-CLI child test proving the subagent process still loads exactly
   the read-only tools and returns a final report with an offline provider.
-- Actual Codex request serialization from both legacy and transcript contexts,
+- Actual Codex request serialization from transcript contexts,
   including instruction sections and tool additions/removals. The real-host test
   checks outgoing instructions and tool schemas after retry, compaction, and
   session replacement.
@@ -82,14 +82,27 @@ and repair forward or reconcile recovery explicitly.
   branch and replacement uses the official runtime lifecycle.
 - RPC/JSON streaming uses deltas; the background runner consumes final text.
 - Pi now carries instructions and tools in transcript system messages. Adapter
-  2.2.13 still reads legacy context fields, so the version/source-checked install
-  patch replays Pi's instruction and tool deltas at the Codex request builder.
-  Both legacy prewarm calls and normalized provider calls retain their contracts.
-  Tests inspect the actual outgoing request, not just the pre-serialization
-  transcript, after retries, compaction, and session replacement.
+  2.2.13 silently dropped them. Codex conversion 3.0.39 natively supports this
+  format; no request-serialization patch is needed. Tests inspect the actual
+  outgoing request after retries, compaction, and session replacement.
 - The Telegram fork needed `max` added to its thinking-level contract and menu.
 - Pi's `agent_settled` boundary remains the correct final-delivery hook; retain
   the tested lifecycle patch.
 
 Sources: [Pi changelog](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md)
 and [Dependabot options](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference).
+
+## Extension refresh after the tool-access regression
+
+- Pin Codex conversion 3.0.39 and retry 0.31.0. Review the installed adapter's
+  `CHANGELOG.md` and retry's `README.md` against the Pi 0.87.1 runtime.
+- Retarget the guarded bridge-only config-path patch to the adapter's new
+  `config-store.js` module. Keep per-instance configuration and credentials.
+- Codex conversion 3 split web access into a separate package. Explicitly load
+  pinned `@howaboua/pi-codex-web-run` 0.0.4 and fail startup if it cannot load.
+  The real-host compatibility test requires `web_run` alongside shell/patch tools.
+  Image generation remains uninstalled. Default execution stays normal; context
+  management and LAN voice are not enabled by this upgrade.
+- Keep the custom Telegram fork at its latest reviewed commit. Upstream 0.51.5
+  changes the runtime integration substantially and requires a separate migration
+  preserving household routing, durable inbox, session replacement, and patches.

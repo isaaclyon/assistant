@@ -84,7 +84,7 @@ describe("Pi release compatibility", () => {
         const body = buildRequestBody(_model, context, {});
         expect(body.instructions).toContain("SYNTHETIC_HOST_INSTRUCTIONS");
         expect(body.tools.map((tool: { name: string }) => tool.name)).toEqual(
-          expect.arrayContaining(["exec_command", "write_stdin", "apply_patch", "compat_echo"]),
+          expect.arrayContaining(["exec_command", "write_stdin", "apply_patch", "web_run", "compat_echo"]),
         );
         requests.push(structuredClone(context.messages));
         const stream = createAssistantMessageEventStream();

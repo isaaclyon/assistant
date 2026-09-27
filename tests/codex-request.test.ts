@@ -15,12 +15,11 @@ const tool = { name: "exec_command", description: "Run a command", parameters: {
 const user = { role: "user" as const, content: "Inspect the workspace", timestamp: 1 };
 
 describe("Codex wire request compatibility", () => {
-  it("preserves instructions and executable schemas after Pi normalizes context", () => {
+  it("preserves instructions and executable schemas in Pi transcript context", () => {
     const legacy = { systemPrompt: "BUILDER_INSTRUCTIONS", tools: [tool], messages: [user] } as Context;
     const transcript = normalizeContext(legacy);
     const before = structuredClone(transcript);
     const body = buildRequestBody(model, transcript, {});
-    expect(body).toEqual(buildRequestBody(model, legacy, {}));
     expect(body.instructions).toBe("BUILDER_INSTRUCTIONS");
     expect(body.tools).toEqual([expect.objectContaining({
       type: "function", name: tool.name, parameters: tool.parameters,
