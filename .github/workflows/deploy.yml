@@ -24,7 +24,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - run: npm run check
+      - name: Check host, extensions, Telegram SDK compatibility, and behavior
+        run: npm run check
       - run: npm run build
 
   deploy:
