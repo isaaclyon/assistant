@@ -175,10 +175,17 @@ gog --gmail-no-send auth add account@example.com --services calendar --force-con
 ```
 
 Retain any other already-authorized services explicitly when reauthorizing an
-account. For example, use `--services calendar,gmail,contacts --gmail-scope readonly`
-when those three services are required. The bridge still exposes only reads
-for Gmail and Contacts. Authorization is interactive; do not paste tokens or
-authorization redirects into chat.
+account. To retain read-only Gmail and Contacts grants while adding Calendar
+writes, authorize read-only service scopes plus the explicit Calendar scope:
+
+```bash
+gog --readonly --gmail-no-send auth add account@example.com \
+  --services calendar,gmail,contacts \
+  --extra-scopes https://www.googleapis.com/auth/calendar --force-consent
+```
+
+The bridge still exposes only reads for Gmail and Contacts. Authorization is
+interactive; do not paste tokens or authorization redirects into chat.
 
 Use the typed `calendar_list` result to select the stable IDs for Personal and
 Things to Do. Put this single-quoted JSON value in the selected instance's
