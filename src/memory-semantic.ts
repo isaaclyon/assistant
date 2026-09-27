@@ -7,6 +7,8 @@ import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, normalizeEmbedding, type EmbedTe
 // Changing the model, dimensions, or chunking invalidates the derived cache.
 const CACHE_VERSION = `${EMBEDDING_MODEL}:${EMBEDDING_DIMENSIONS}:sections-v1`;
 const MAX_NEW_CHUNKS = 32;
+/** The embedder accepts 33 inputs: the chunk batch shrinks as queries are added. */
+const MAX_QUERIES = 3;
 
 interface MemoryChunk {
   note: MemoryDocumentSearchMatch;
@@ -110,24 +112,56 @@ export async function prepareMemoryEmbeddings(
   embed: EmbedTexts | undefined,
   includeQuery = true,
 ): Promise<MemoryEmbeddingPreparation> {
-  searchIndexedMemories(index, request); // Share tool input validation with FTS.
+  const prepared = await prepareMemoryQueryEmbeddings(index, request, includeQuery ? [request.query] : [], embed);
+  return { status: prepared.status, ...(prepared.queryVectors ? { queryVector: prepared.queryVectors[0]! } : {}) };
+}
+
+export interface MemoryQueryEmbeddingPreparation {
+  status: MemoryEmbeddingPreparation["status"];
+  /** One vector per query, in order, when the batch succeeded. */
+  queryVectors?: number[][];
+}
+
+/**
+ * Embeds several queries with the same visibility filters in one bounded
+ * request. Queries share the batch with missing chunks, so the chunk share
+ * shrinks to keep the whole request within one embedding call.
+ */
+export async function prepareMemoryQueryEmbeddings(
+  index: SearchIndex,
+  request: IndexedMemorySearchRequest,
+  queries: readonly string[],
+  embed: EmbedTexts | undefined,
+): Promise<MemoryQueryEmbeddingPreparation> {
+  if (queries.length > MAX_QUERIES) throw new Error("Too many memory queries");
+  // Share tool input validation with FTS for the filters and every query.
+  searchIndexedMemories(index, request);
+  for (const query of queries) searchIndexedMemories(index, { ...request, query });
   if (!embed) return { status: "disabled" };
   const chunks = index.semantic.chunks(request);
   if (chunks.length === 0) return { status: "ready" };
   const missing = chunks.filter((chunk) => !chunk.vector);
-  const batch = missing.slice(0, MAX_NEW_CHUNKS);
-  if (!includeQuery && batch.length === 0) return { status: "ready" };
+  const batch = missing.slice(0, MAX_NEW_CHUNKS + 1 - Math.max(1, queries.length));
+  if (queries.length === 0 && batch.length === 0) return { status: "ready" };
   try {
-    const inputs = [...(includeQuery ? [request.query] : []), ...batch.map((chunk) => chunk.input)];
+    const inputs = [...queries, ...batch.map((chunk) => chunk.input)];
     const vectors = await embed(inputs);
     if (vectors.length !== inputs.length) throw new Error("Incomplete embedding response");
     const normalized = vectors.map(normalizeEmbedding);
-    batch.forEach((chunk, i) => index.semantic.save(chunk, normalized[i + (includeQuery ? 1 : 0)]!));
+    batch.forEach((chunk, i) => index.semantic.save(chunk, normalized[i + queries.length]!));
     return { status: missing.length > batch.length ? "partial" : "ready",
-      ...(includeQuery ? { queryVector: normalized[0]! } : {}) };
+      ...(queries.length > 0 ? { queryVectors: normalized.slice(0, queries.length) } : {}) };
   } catch {
     return { status: "unavailable" };
   }
+}
+
+/** Current revision of every note visible under the request's view and filters. */
+export function visibleMemoryRevisions(
+  index: SearchIndex,
+  request: IndexedMemorySearchRequest,
+): Map<string, string> {
+  return new Map(index.semantic.chunks(request).map((chunk) => [chunk.note.id, chunk.note.revision]));
 }
 
 /** Call only after a successful canonical refresh, including after inference. */
@@ -165,4 +199,33 @@ export function searchHybridMemories(
     truncated: lexical.truncated || semantic.length > candidateLimit || results.length > limit,
     retrieval: { mode: best.size > 0 ? "hybrid" : "keyword", semantic: chunks.some((chunk) => !chunk.vector) ? "partial" : "ready" },
     ...(lexical.warning ? { warning: lexical.warning } : {}) };
+}
+
+/**
+ * Runs one hybrid search per query and interleaves the rankings: every query's
+ * first result, then every second result, skipping repeats. Summed rank fusion
+ * would favor notes that rank moderately across several queries, letting an
+ * uninformative query ("ok do it") crowd out another query's best match. Call
+ * only after a successful canonical refresh, including after inference.
+ */
+export function searchHybridMemoriesForQueries(
+  index: SearchIndex,
+  request: IndexedMemorySearchRequest,
+  queries: readonly string[],
+  prepared: MemoryQueryEmbeddingPreparation,
+): MemoryDocumentSearchMatch[] {
+  const limit = request.limit ?? 10;
+  const pages = queries.map((query, queryIndex) => {
+    const vector = prepared.queryVectors?.[queryIndex];
+    return searchHybridMemories(index, { ...request, query },
+      { status: prepared.status, ...(vector ? { queryVector: vector } : {}) }).results;
+  });
+  const merged = new Map<string, MemoryDocumentSearchMatch>();
+  for (let rank = 0; merged.size < limit && pages.some((page) => rank < page.length); rank += 1) {
+    for (const page of pages) {
+      const result = page[rank];
+      if (result && !merged.has(result.id) && merged.size < limit) merged.set(result.id, result);
+    }
+  }
+  return [...merged.values()];
 }

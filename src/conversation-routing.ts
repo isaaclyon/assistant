@@ -1,28 +1,14 @@
+import { isRecord as record, isTelegramText, visibleText } from "./conversation-text.js";
 import type { SemanticJudge, SemanticJudgeRequest } from "./semantic-judge.js";
 
 export const CONVERSATION_ROUTING_IDLE_MS = 15 * 60 * 1_000;
-const TEXT_LIMIT = 4096;
-
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function visibleText(content: unknown): string {
-  const text = typeof content === "string" ? content : Array.isArray(content)
-    ? content.filter((block) => record(block) && block.type === "text" && typeof block.text === "string")
-      .map((block) => block.text).join("\n") : "";
-  // Pi/Telegram metadata includes local paths and handler output. Keep only the
-  // conversational text; never include images, reasoning, tools, or summaries.
-  return text.split(/(?:^|\n)\[(?:attachments|outputs|voice|time)(?:\||\])/)[0]!
-    .trim().slice(0, TEXT_LIMIT);
-}
 
 /** Bootstrap a newly enabled policy from persisted human history, not jobs. */
 export function lastTelegramMessageTime(branch: readonly unknown[]): number | undefined {
   for (let index = branch.length - 1; index >= 0; index -= 1) {
     const entry = branch[index];
     if (!record(entry) || entry.type !== "message" || !record(entry.message)) continue;
-    if (entry.message.role !== "user" || !/^\[telegram(?:\||\])/.test(visibleText(entry.message.content))) continue;
+    if (entry.message.role !== "user" || !isTelegramText(visibleText(entry.message.content))) continue;
     const time = entry.message.timestamp;
     if (typeof time === "number" && Number.isSafeInteger(time) && time > 0) return time;
   }
@@ -43,7 +29,7 @@ export function buildConversationRoutingRequest(
     if (!text) continue;
     if (message.role === "user") {
       // Host jobs and subagent completions also use Pi's user role.
-      if (!/^\[telegram(?:\||\])/.test(text)) continue;
+      if (!isTelegramText(text)) continue;
       firstUser ??= text;
     }
     if (!firstUser) continue;

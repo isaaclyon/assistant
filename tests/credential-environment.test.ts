@@ -6,14 +6,14 @@ import { describe, expect, it } from "vitest";
 import { validateCredentialEnvironmentFile } from "../src/credential-environment.js";
 
 describe("credential environment scopes", () => {
-  it("validates the explicit conversation-routing setting", async () => {
+  it.each(["PI_TELEGRAM_SESSION_ROUTING", "PI_TELEGRAM_MEMORY_RECALL"])("validates the explicit %s setting", async (key) => {
     const path = join(await mkdtemp(join(tmpdir(), "jev-routing-env-")), "instance.env");
     for (const value of ["jev", "off", "invalid"]) {
-      await writeFile(path, `PI_TELEGRAM_CREDENTIAL_SCOPE=isaac-personal\nPI_TELEGRAM_SESSION_ROUTING=${value}\n`, { mode: 0o600 });
+      await writeFile(path, `PI_TELEGRAM_CREDENTIAL_SCOPE=isaac-personal\n${key}=${value}\n`, { mode: 0o600 });
       if (value === "invalid") {
-        await expect(validateCredentialEnvironmentFile(path, "isaac-personal")).rejects.toThrow(/must be jev or off/);
+        await expect(validateCredentialEnvironmentFile(path, "isaac-personal")).rejects.toThrow(`${key} must be jev or off`);
       } else {
-        await expect(validateCredentialEnvironmentFile(path, "isaac-personal")).resolves.toMatchObject({ keys: expect.arrayContaining(["PI_TELEGRAM_SESSION_ROUTING"]) });
+        await expect(validateCredentialEnvironmentFile(path, "isaac-personal")).resolves.toMatchObject({ keys: expect.arrayContaining([key]) });
       }
     }
   });

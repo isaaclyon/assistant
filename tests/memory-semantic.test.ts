@@ -4,7 +4,13 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it, vi } from "vitest";
 import { openSearchIndex, type MemoryIndexDocument, type SearchIndex } from "../src/search-index.js";
-import { prepareMemoryEmbeddings, searchHybridMemories } from "../src/memory-semantic.js";
+import {
+  prepareMemoryEmbeddings,
+  prepareMemoryQueryEmbeddings,
+  searchHybridMemories,
+  searchHybridMemoriesForQueries,
+  visibleMemoryRevisions,
+} from "../src/memory-semantic.js";
 import { EMBEDDING_DIMENSIONS } from "../src/openai-embeddings.js";
 
 const roots: string[] = [];
@@ -145,4 +151,31 @@ it("combines lexical and semantic ranks, deduplicates notes, and honors the limi
   expect(page.results).toHaveLength(2);
   expect(new Set(page.results.map((r) => r.id)).size).toBe(2);
   expect(page.truncated).toBe(true);
+});
+
+it("embeds several queries in one bounded request and keeps each query's best match", async () => {
+  const documents = Array.from({ length: 40 }, (_, i) => note(`n${String(i).padStart(2, "0")}`, {
+    title: `Note ${i}`, body: i === 7 ? "Emma is allergic to shellfish" : `Filler ${i}`,
+  }));
+  documents.push(note("dinner", { title: "Kin Khao", body: "Favorite Thai restaurant for Friday dinners" }));
+  const index = await setup(documents);
+  // Axis 1 marks the allergy note and the first query; axis 2 the restaurant and the third.
+  const embed = vi.fn(async (inputs: string[]) => inputs.map((input) =>
+    vector(/shellfish|seafood allergy/.test(input) ? 1 : /Kin Khao|Thai/.test(input) ? 2 : 0)));
+  const queries = ["any seafood allergy concerns", "ok do it", "book Thai for Friday"];
+  const prepared = await prepareMemoryQueryEmbeddings(index, { ...request, query: queries[0]! }, queries, embed);
+  expect(embed).toHaveBeenCalledTimes(1);
+  expect(embed.mock.calls[0]![0]).toHaveLength(33);
+  expect(embed.mock.calls[0]![0].slice(0, 3)).toEqual(queries);
+  expect(prepared).toMatchObject({ status: "partial", queryVectors: [expect.any(Array), expect.any(Array), expect.any(Array)] });
+  await prepareMemoryQueryEmbeddings(index, { ...request, query: queries[0]! }, queries, embed);
+  const again = await prepareMemoryQueryEmbeddings(index, { ...request, query: queries[0]! }, queries, embed);
+  expect(again.status).toBe("ready");
+  const ids = searchHybridMemoriesForQueries(index, { ...request, query: queries[0]!, limit: 8 }, queries, again)
+    .map((result) => result.id);
+  expect(ids).toHaveLength(8);
+  // The uninformative middle query ranks fillers first; interleaving still keeps both real matches on top.
+  expect(ids.slice(0, 3)).toEqual(["n07", "n00", "dinner"]);
+  expect(visibleMemoryRevisions(index, request).get("dinner")).toBe("r1");
+  await expect(prepareMemoryQueryEmbeddings(index, request, ["a", "b", "c", "d"], embed)).rejects.toThrow(/Too many/);
 });

@@ -78,8 +78,10 @@ capability profiles.
    host/port, memory path/auto-commit settings, human-idle session timeout, and
    `PI_TELEGRAM_TYPESAFE_API_KEY_FILE` (an absolute path to a mode-`0600`
    TypeSafe API key file, used for `semantic-match` heartbeats and opted-in
-   conversation routing; see ADR-0031 and ADR-0033). The optional
-   `PI_TELEGRAM_SESSION_ROUTING` accepts `jev` or `off`.
+   conversation routing and memory recall; see ADR-0031, ADR-0033, and
+   ADR-0037). The optional `PI_TELEGRAM_SESSION_ROUTING` and
+   `PI_TELEGRAM_MEMORY_RECALL` settings each accept `jev` or `off`; see the
+   [recall setup](search-index.md#automatic-memory-recall).
    `PI_TELEGRAM_OPENAI_API_KEY_FILE` enables hosted semantic memory search for
    that instance through a private mode-`0600` OpenAI API-key file; see the
    [search setup](search-index.md#hosted-semantic-memory-search).
