@@ -13,3 +13,7 @@ export function resolveCodexExtensionPath(): string {
 export function resolveRetryExtensionPath(): string {
   return require.resolve("@narumitw/pi-retry/src/retry.ts");
 }
+
+export function resolveCodexWebExtensionPath(): string {
+  return require.resolve("@howaboua/pi-codex-web-run");
+}

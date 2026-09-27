@@ -145,7 +145,7 @@ PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT=1
 Keep the file mode `0600` and restart the service after changing it. Shell
 invocations of the memory CLI may still set these variables directly.
 
-The Codex adapter defaults to normal mode for the bridge's `openai-codex` model, exposing `exec_command`, `write_stdin`, `apply_patch`, image viewing, and web search. Image generation is disabled. Its settings are independent of normal Pi sessions. The pinned extension receives this separate path through the version-checked patch in `scripts/patch-codex-conversion.mjs`; update that patch deliberately when changing the extension version.
+The Codex adapter defaults to normal mode for the bridge's `openai-codex` model, exposing `exec_command`, `write_stdin`, `apply_patch`, and image viewing. The separately pinned Codex web extension provides `web_run`. Image generation is disabled. Its settings are independent of normal Pi sessions. The pinned extension receives this separate path through the version-checked patch in `scripts/patch-codex-conversion.mjs`; update that patch deliberately when changing the extension version.
 
 ## Personal memory
 

@@ -82,7 +82,7 @@ describe("Codex conversion extension", () => {
       "dist",
       "adapter",
       "activation",
-      "config.js",
+      "config-store.js",
     );
     const configModule = (await import(pathToFileURL(modulePath).href)) as {
       getCodexConversionConfigPath(agentDir?: string): string;

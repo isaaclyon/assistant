@@ -14,9 +14,9 @@ async function assertPinnedVersion() {
   const manifest = JSON.parse(
     await readFile(join(packageRoot, "package.json"), "utf8"),
   );
-  if (manifest.version !== "2.2.13") {
+  if (manifest.version !== "3.0.39") {
     throw new Error(
-      `Refusing to patch @howaboua/pi-codex-conversion ${String(manifest.version)}; expected 2.2.13.`,
+      `Refusing to patch @howaboua/pi-codex-conversion ${String(manifest.version)}; expected 3.0.39.`,
     );
   }
 }
@@ -25,14 +25,14 @@ async function patchFile(path, original, replacement) {
   const source = await readFile(path, "utf8");
   if (source.includes(replacement)) return;
   if (!source.includes(original)) {
-    throw new Error(`Codex config-path patch no longer applies cleanly to ${path}.`);
+    throw new Error(`Codex compatibility patch no longer applies cleanly to ${path}.`);
   }
   await writeFile(path, source.replace(original, replacement));
 }
 
 await assertPinnedVersion();
 await patchFile(
-  join(packageRoot, "dist", "adapter", "activation", "config.js"),
+  join(packageRoot, "dist", "adapter", "activation", "config-store.js"),
   `export function getCodexConversionConfigPath(agentDir = getAgentDir()) {
     return join(agentDir, CODEX_CONVERSION_CONFIG_BASENAME);
 }`,

@@ -36,6 +36,7 @@ import { createPiSubagentRunner } from "./subagent-process.js";
 import { type SubagentService, startSubagentService } from "./subagents.js";
 import {
   resolveCodexExtensionPath,
+  resolveCodexWebExtensionPath,
   resolveRetryExtensionPath,
   resolveTelegramExtensionPath,
 } from "./package-paths.js";
@@ -139,6 +140,7 @@ export async function startBridgeHost({
   const { resourceRoot, workspaceCwd, inboxPath, telegramProfile, capabilityProfile } = config;
   const codexExtensionPath = resolveCodexExtensionPath();
   const retryExtensionPath = resolveRetryExtensionPath();
+  const codexWebExtensionPath = resolveCodexWebExtensionPath();
   process.env.PI_CODING_AGENT_DIR = config.agentDir;
   process.env.PI_CODEX_CONVERSION_CONFIG_PATH = config.codexConfigPath;
   process.env.PI_TELEGRAM_BRIDGE_STATE_DIR = config.stateDir;
@@ -253,14 +255,16 @@ export async function startBridgeHost({
       telegramExtensionPath,
       codexExtensionPath,
       retryExtensionPath,
+      codexWebExtensionPath,
     ];
+    const pinnedExtensionCount = additionalExtensionPaths.length;
     const additionalSkillPaths: string[] = [];
     const refreshRepoResources = async (): Promise<void> => {
       const selection = await loadCapabilityProfile(resourceRoot, capabilityProfile);
       telegramAgentsPath = selection.instructionsPath;
       additionalExtensionPaths.splice(
-        3,
-        additionalExtensionPaths.length - 3,
+        pinnedExtensionCount,
+        additionalExtensionPaths.length - pinnedExtensionCount,
         ...selection.extensionPaths,
       );
       additionalSkillPaths.splice(0, additionalSkillPaths.length, ...selection.skillPaths);
@@ -321,6 +325,15 @@ export async function startBridgeHost({
       );
       throw new Error(
         `Retry extension failed to load from ${retryExtensionPath}${loadError ? `: ${loadError.error}` : ""}`,
+      );
+    }
+    const codexWebLoaded = extensions.extensions.some(
+      (extension) => extension.path === codexWebExtensionPath || extension.resolvedPath === codexWebExtensionPath,
+    );
+    if (!codexWebLoaded) {
+      const loadError = extensions.errors.find((error) => error.path === codexWebExtensionPath);
+      throw new Error(
+        `Codex web extension failed to load from ${codexWebExtensionPath}${loadError ? `: ${loadError.error}` : ""}`,
       );
     }
     const result = await createAgentSessionFromServices({
