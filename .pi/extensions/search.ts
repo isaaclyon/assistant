@@ -207,7 +207,7 @@ export default function searchExtension(pi: ExtensionAPI): void {
       "Search canonical personal-memory notes with keyword and, when configured, semantic retrieval. Returns stable note IDs, revisions, metadata, bounded snippets, and retrieval status.",
     promptSnippet: "Search durable personal memories",
     promptGuidelines: [
-      "Use assistant_memory_search as the preferred memory retrieval path for saved facts and preferences. Use the note ID with the personal-memory CLI only for a full read or a change.",
+      "Use assistant_memory_search as the preferred memory retrieval path for saved facts and preferences. Use assistant_memory with the returned note ID for full reads and changes.",
     ],
     parameters: Type.Object({
       query: Type.String({ minLength: 1, maxLength: 512 }),

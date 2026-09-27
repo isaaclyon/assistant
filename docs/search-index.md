@@ -23,8 +23,10 @@ truth.
   or explicitly refreshes/rebuilds `memory`, `session`, or `all`.
 
 The tracked Telegram instructions prefer these indexed tools. The
-`personal-memory` CLI continues to own note reads and mutations, lint, core
-compilation, list/happenings, and a compatibility scan search.
+`assistant_memory` uses the same hybrid retrieval for duplicate suggestions
+before creation. It owns agent-facing note reads and mutations; the shared
+`personal-memory` executor also backs CLI lint, core compilation, list/happenings,
+and compatibility reads, ordinary updates, and scan search.
 
 Interactive memory and session searches give their on-demand refresh 1.5
 seconds. If refresh fails, exceeds that budget, or reports incomplete coverage,

@@ -6,7 +6,7 @@ import { Readable } from "node:stream";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { runMemoryCli } from "../.pi/skills/personal-memory/scripts/memory.mjs";
+import { executeMemoryOperation, runMemoryCli } from "../.pi/skills/personal-memory/scripts/memory.mjs";
 import { commitMemoryMutation } from "../.pi/skills/personal-memory/scripts/git.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -200,12 +200,12 @@ describe("personal memory CLI", () => {
     const added = parseLine(addedResult.stdout).data;
     expect(added.git).toEqual({ committed: true });
 
-    const updatedResult = await run("update", {
+    // Protected mutations come from the trusted callback executor, not a CLI flag.
+    const updated = await executeMemoryOperation("update", {
       id: added.id,
       ifRevision: added.revision,
       patch: { body: "Prefers synthetic coffee.", scope: "household" },
-    }, { gitAutocommit: true });
-    const updated = parseLine(updatedResult.stdout).data;
+    }, { env: { PI_TELEGRAM_MEMORY_DIR: vault, PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT: "1" }, confirmed: true });
     expect(updated.git).toEqual({ committed: true });
     expect(updated).toMatchObject({ scope: "household" });
     expect(updated).not.toHaveProperty("owner");
@@ -219,12 +219,12 @@ describe("personal memory CLI", () => {
     const happened = parseLine(happeningResult.stdout).data;
     expect(happened.git).toEqual({ committed: true });
 
-    const deletedResult = await run("delete", {
+    const deleted = await executeMemoryOperation("delete", {
       id: added.id,
       ifRevision: happened.revision,
       confirmId: added.id,
-    }, { gitAutocommit: true });
-    expect(parseLine(deletedResult.stdout).data).toEqual({
+    }, { env: { PI_TELEGRAM_MEMORY_DIR: vault, PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT: "1" }, confirmed: true });
+    expect(deleted).toEqual({
       id: added.id,
       deleted: true,
       git: { committed: true },
@@ -407,7 +407,7 @@ describe("personal memory CLI", () => {
     expect(parseLine(stale.stderr).error.code).toBe("REVISION_CONFLICT");
   });
 
-  it("requires delete confirmation and then removes the note", async () => {
+  it("rejects CLI deletion even with a self-supplied matching confirmation ID", async () => {
     const added = await addNote();
     const unconfirmed = await run("delete", {
       id: added.id,
@@ -421,9 +421,9 @@ describe("personal memory CLI", () => {
       ifRevision: added.revision,
       confirmId: added.id,
     });
-    expect(confirmed.exitCode).toBe(0);
-    expect(parseLine(confirmed.stdout).data).toEqual({ id: added.id, deleted: true });
-    expect(await readdir(join(vault, "preferences"))).toEqual([]);
+    expect(confirmed.exitCode).toBe(3);
+    expect(parseLine(confirmed.stderr).error.code).toBe("CONFIRMATION_REQUIRED");
+    expect(parseLine((await run("read", { id: added.id })).stdout).data.id).toBe(added.id);
   });
 
   it("lists and searches stored notes", async () => {

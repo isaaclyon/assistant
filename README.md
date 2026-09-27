@@ -175,9 +175,16 @@ database is disposable and rebuildable from canonical Markdown and session
 JSONL. Memory search optionally combines keyword matches with cached OpenAI
 embeddings when `PI_TELEGRAM_OPENAI_API_KEY_FILE` points to a private API-key
 file; see [semantic search setup](docs/search-index.md#hosted-semantic-memory-search).
-Session search remains keyword-based. The tracked skill-local CLI continues to own full-note reads, mutations,
-list/happenings, lint, and core operations; it takes one JSON request line on
-stdin and returns one bounded JSON line:
+Session search remains keyword-based. The typed `assistant_memory` tool handles
+full-note reads and mutations through the same locked, Git-aware executor as the
+skill-local CLI. Creation first returns duplicate suggestions and a retry-safe
+draft token. Updates use revision-checked, exact-text edits. Deletion and sharing
+personal notes require one-use Telegram confirmation buttons; CLI flags cannot
+approve them. See [ADR-0035](docs/adr/0035-typed-memory-operations.md).
+
+The CLI still handles list/happenings, lint, core inspection, and compatibility
+reads/ordinary edits. It takes one JSON request line on stdin and returns one
+bounded JSON line:
 
 ```bash
 node .pi/skills/personal-memory/scripts/memory.mjs read <<'EOF'

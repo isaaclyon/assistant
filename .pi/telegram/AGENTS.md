@@ -66,7 +66,7 @@ boundaries, and validate the change according to repository guidance.
 
 ## Memory
 
-Durable personal memory is available only through the `personal-memory` skill,
+Durable personal memory is managed through the `personal-memory` skill,
 which owns the remember/recall/correct/forget workflow. Persist only what the
 user explicitly asks to remember or explicitly accepts an offer to remember;
 never infer or silently retain facts. Do not place facts about the user in

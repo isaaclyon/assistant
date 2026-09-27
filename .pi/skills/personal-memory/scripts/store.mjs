@@ -208,6 +208,29 @@ function validateBody(body) {
   return body;
 }
 
+/** Validate a proposed note without touching the filesystem. */
+export function validateMemoryDraft(request) {
+  const body = validateBody(request?.body ?? "");
+  if (Buffer.byteLength(body, "utf8") > MAX_MEMORY_NOTE_BYTES - 4096) fail("INVALID_INPUT", "Memory body is too large");
+  return { type: validateType(request?.type), title: validateTitle(request?.title), tags: validateTags(request?.tags), body };
+}
+
+function applyBodyEdits(body, edits) {
+  if (!Array.isArray(edits) || edits.length < 1 || edits.length > 20) fail("INVALID_INPUT", "Memory edits are invalid");
+  for (const edit of edits) {
+    if (!edit || typeof edit.expectedText !== "string" || !edit.expectedText ||
+        typeof edit.replacementText !== "string" || Object.keys(edit).some(key => !["expectedText", "replacementText"].includes(key))) {
+      fail("INVALID_INPUT", "Memory edits are invalid");
+    }
+    const offset = body.indexOf(edit.expectedText);
+    if (offset < 0 || body.indexOf(edit.expectedText, offset + 1) >= 0) {
+      fail("TEXT_CONFLICT", "Expected text must occur exactly once; read the note again");
+    }
+    body = body.slice(0, offset) + edit.replacementText + body.slice(offset + edit.expectedText.length);
+  }
+  return validateBody(body);
+}
+
 export function validateHappeningDate(date) {
   if (typeof date !== "string" || !HAPPENING_DATE_PATTERN.test(date)) {
     fail("INVALID_INPUT", "Happening date must be YYYY-MM-DD");
@@ -736,8 +759,9 @@ export function createMarkdownMemoryStore(options) {
       if (typeof ifRevision !== "string" || !patch || typeof patch !== "object" || Array.isArray(patch)) {
         fail("INVALID_INPUT", "Memory update is invalid");
       }
-      const allowed = new Set(["status", "scope", "title", "tags", "body"]);
+      const allowed = new Set(["status", "scope", "title", "tags", "body", "bodyEdits"]);
       if (Object.keys(patch).some((key) => !allowed.has(key))) fail("INVALID_INPUT", "Memory update is invalid");
+      if (Object.hasOwn(patch, "body") && Object.hasOwn(patch, "bodyEdits")) fail("INVALID_INPUT", "Choose body replacement or targeted edits");
       const location = await locate(id);
       const { note } = await readLocated(location);
       assertVisible(note);
@@ -755,7 +779,8 @@ export function createMarkdownMemoryStore(options) {
         status: Object.hasOwn(patch, "status") ? validateStatus(patch.status) : note.status,
         title: Object.hasOwn(patch, "title") ? validateTitle(patch.title) : note.title,
         tags: Object.hasOwn(patch, "tags") ? validateTags(patch.tags) : note.tags,
-        body: Object.hasOwn(patch, "body") ? validateBody(patch.body) : note.body,
+        body: Object.hasOwn(patch, "bodyEdits") ? applyBodyEdits(note.body, patch.bodyEdits)
+          : Object.hasOwn(patch, "body") ? validateBody(patch.body) : note.body,
         updated: now().toISOString(),
       };
       const raw = renderNote(updated);

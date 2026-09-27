@@ -149,6 +149,44 @@ core adds nothing. A compilation failure is logged by Pi and the turn continues
 without core memory; no partial projection, generated file, or cache is used.
 Changes take effect on the next agent start.
 
+## Typed tool protocol
+
+`assistant_memory` is the preferred CRUD interface. Requests are discriminated
+by `action`; identity and scope come from the runtime, never the request.
+
+```json
+{"action":"read","id":"2f5f167d-7a18-4457-8de7-f2f801f1e934"}
+{"action":"prepare_create","type":"preference","title":"Coffee preference","body":"Prefers light-roast coffee."}
+{"action":"create","creationToken":"<token from prepare_create>"}
+{"action":"update","id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","ifRevision":"sha256:…","patch":{"bodyEdits":[{"expectedText":"light-roast","replacementText":"medium-roast"}]}}
+{"action":"request_delete","id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","ifRevision":"sha256:…"}
+{"action":"request_share","id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","ifRevision":"sha256:…"}
+```
+
+Responses use `{ok:true,result:…}` or `{ok:false,error:{code,message}}`.
+Preparation validates the draft and returns up to five `possibleDuplicates`
+from current hybrid search, retrieval status, and a `creationToken`. This does
+not save a note; the first preparation may initialize an empty private vault.
+Candidates are related notes, not automatic duplicate judgments. Tokens bind
+the exact draft for ten minutes in the current session; repeated creation with
+the same token returns the same settled outcome, including an in-flight write.
+Reset/restart invalidates tokens, so search again before preparing a new one.
+
+Typed updates accept `title`, `tags`, `status`, and `bodyEdits`. Edits are ordered
+`expectedText`/`replacementText` pairs; each expected passage must occur exactly
+once in the body at that step. A missing or repeated passage returns
+`TEXT_CONFLICT`. All edits and metadata changes commit together or none do.
+`ifRevision` remains mandatory. The CLI's ordinary update also supports
+`bodyEdits`, but cannot combine them with a complete `body` replacement.
+
+Delete and share requests return `awaiting_confirmation` and display a direct
+Telegram preview with Confirm/Cancel buttons. No authorization token is returned
+to the model and there is no model-callable approval action. A callback token
+binds the current instance/session, chat, operation, note ID, and revision. It
+expires after ten minutes, is consumed before mutation, and is discarded on
+session reset. The callback reports success or a revision conflict directly in
+Telegram, including a saved-but-uncommitted Git warning when applicable.
+
 ## CLI protocol
 
 The subcommand is the only argv; the request is exactly one JSON object line on
@@ -164,7 +202,7 @@ stderr:
 ```
 
 Exit codes: `0` success, `2` usage/validation, `3` expected operational failure
-(`NOT_FOUND`, `REVISION_CONFLICT`, `DUPLICATE_ID`, `CONFIRMATION_REQUIRED`,
+(`NOT_FOUND`, `REVISION_CONFLICT`, `TEXT_CONFLICT`, `DUPLICATE_ID`, `CONFIRMATION_REQUIRED`,
 `UNSAFE_VAULT`, `UNSAFE_ENTRY`, `MALFORMED_NOTE`, `CORE_INVALID`,
 `GIT_AUTOCOMMIT_UNAVAILABLE`), `1`
 unexpected I/O failure. A completed `lint` emits an `ok:true` report on stdout;
@@ -187,10 +225,10 @@ be inspected. Forgetting does not remove prior content from Git history.
 // read — data: metadata plus body
 {"id":"2f5f167d-7a18-4457-8de7-f2f801f1e934"}
 
-// update — patch keys: status, scope, title, tags, body; data: updated note with body
-{"id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","ifRevision":"sha256:…","patch":{"scope":"household"}}
+// update — patch keys: status, scope, title, tags, body or bodyEdits; personal-to-household promotion requires the typed tool
+{"id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","ifRevision":"sha256:…","patch":{"bodyEdits":[{"expectedText":"light-roast","replacementText":"medium-roast"}]}}
 
-// delete — confirmId must equal id; data: {"id":…,"deleted":true}
+// delete — retained command, always returns CONFIRMATION_REQUIRED; confirmId is not user authorization
 {"id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","ifRevision":"sha256:…","confirmId":"2f5f167d-7a18-4457-8de7-f2f801f1e934"}
 
 // search — compatibility filesystem scan; prefer the assistant_memory_search tool
@@ -213,7 +251,7 @@ be inspected. Forgetting does not remove prior content from Git history.
 {}
 ```
 
-Search is bounded lexical matching: query ≤ 512 characters, all tokens must
+CLI search is bounded lexical matching: query ≤ 512 characters, all tokens must
 match across title/tags/body, title matches outweigh tags outweigh body,
 results capped at 50 (default 10), snippets at 240 characters. Warnings are
 sanitized `{code, relativePath}` pairs; note contents never appear in errors.

@@ -7,9 +7,36 @@ description: "Stores, recalls, corrects, and forgets explicitly requested person
 
 Durable personal memory lives in a private Markdown directory outside this
 repository (default `~/.local/share/pi-telegram-bridge/memory`). Retrieve it
-through the indexed `assistant_memory_search` tool. Use the CLI below for full-note reads,
-mutations, list/happenings queries, lint, and core inspection — never edit files
-directly or interpolate user text into shell commands.
+through `assistant_memory_search`. Use `assistant_memory` for full-note reads,
+creation, updates, deletion, and sharing. Use the CLI below for list/happenings
+queries, adding happenings, lint, and core inspection. Never edit files directly
+or interpolate user text into shell commands.
+
+## Typed memory operations
+
+- `read`: pass the stable `id`; the result includes the body and current revision.
+- `prepare_create`: pass `type`, `title`, `body`, and optional `tags`. Inspect
+  `possibleDuplicates`, which uses current hybrid search when configured.
+  Related results are suggestions, not proven duplicates. Read candidates when
+  needed; update a matching note instead of creating another.
+- `create`: pass the returned `creationToken` only for a distinct new note.
+  Preparation saves no note. Tokens bind the draft, expire after ten minutes,
+  and return the same result on retries within that session. A reset invalidates
+  them; search again before preparing a replacement.
+- `update`: pass `id`, `ifRevision`, and a patch of `title`, `tags`, `status`, or
+  `bodyEdits`. Each edit contains `expectedText` and `replacementText`; expected
+  text must occur exactly once. Edits apply sequentially and all must succeed
+  before anything is written. To append text, replace a unique ending passage
+  with itself plus the addition.
+- `request_delete` / `request_share`: pass `id` and `ifRevision`. The direct
+  Telegram section displays the version-bound preview and Confirm/Cancel
+  buttons. Only its authorized callback can apply the change. Do not generate
+  a prompt button, ask for a typed approval instead, or route around it with
+  shell/CLI calls. `awaiting_confirmation` is not persistence success.
+
+If the typed tool is unavailable, report that limitation for protected actions.
+The CLI rejects deletion and personal-to-household promotion; a matching
+`confirmId` does not authorize either operation.
 
 ## Invoking the CLI
 
@@ -20,8 +47,8 @@ list. Write the JSON literally inside the heredoc — never interpolate it from
 shell variables or command substitution.
 
 ```bash
-node .pi/skills/personal-memory/scripts/memory.mjs <add|read|update|delete|search|list|happening-add|happenings|lint|core> <<'EOF'
-{"query":"coffee","limit":5}
+node .pi/skills/personal-memory/scripts/memory.mjs list <<'EOF'
+{"types":["preference"]}
 EOF
 ```
 
@@ -48,9 +75,10 @@ changed.
   statements, infer preferences, or derive facts from behavior.
 - Refuse to store credentials, auth tokens, full card numbers, or other
   secrets. Store purchase and reference notes only on explicit request.
-- Search first. If one existing note clearly covers the same fact, update it
-  instead of adding a duplicate. Ask only when the target or content is
-  materially ambiguous.
+- Use `prepare_create` before creating. If an existing note clearly covers the
+  same fact, update it instead. Ask only when the target or content is materially
+  ambiguous. If semantic retrieval is unavailable, the preparation reports
+  keyword fallback; do not treat the suggestions as exhaustive.
 - Supported types: `person`, `preference`, `event`, `list`, `recipe`,
   `purchase`, `reference`. A wishlist is a `list`. Type is immutable; to
   reclassify, add the corrected note and, after confirmation, forget the old
@@ -68,7 +96,7 @@ changed.
   first unless the conversation clearly establishes a public or general topic.
   Do not jump to web search or ask for clarification before this lookup.
 - Use the `assistant_memory_search` tool for retrieval. Fall back to the CLI's
-  `search` scan only if that tool fails. Use the CLI's `read` operation only for the relevant top result(s)
+  `search` scan only if that tool fails. Use `assistant_memory` with `read` for the relevant top result(s)
   when the bounded search metadata and snippet are insufficient.
 - Use `assistant_session_search` instead when the user asks what was discussed, decided,
   attempted, or observed in an earlier conversation. Session evidence is
@@ -84,14 +112,13 @@ changed.
 
 - Search and `read` the note to obtain its current `revision`, then `update`
   with `ifRevision` and a patch containing only the requested changes
-  (`title`, `tags`, `body`, `status`, and/or `scope`). Unrelated content and unknown frontmatter
-  are preserved automatically.
+  (`title`, `tags`, `bodyEdits`, and/or `status`). Use unique expected text for
+  body changes so unrelated passages remain intact; unknown frontmatter is preserved.
 - Treat promotion from `personal` to `household` as an explicit disclosure:
-  name the note and ask for confirmation before sending the revision-checked
-  update. A household bot cannot demote or claim ownership of a personal note.
-- On `REVISION_CONFLICT`, the note changed since it was read (for example a
-  manual Obsidian edit). Re-read and report the conflict rather than
-  overwriting.
+  use `request_share` to present the user-only confirmation. This shares the
+  whole note. A household bot cannot demote or claim ownership of a personal note.
+- On `REVISION_CONFLICT` or `TEXT_CONFLICT`, reread the note and reconsider the
+  requested edit. Do not silently replace the whole body to bypass a conflict.
 
 ## Lifecycle status
 
@@ -125,7 +152,7 @@ changed.
   propose the link rather than silently adding it when the relationship is not
   sufficiently certain; add it after the user explicitly requests or confirms
   it. Do not present an inferred link as an established fact.
-- Verify every add or backlink update with an `ok:true` CLI response before
+- Verify every add or backlink update with an `ok:true` mutation result before
   claiming the relationship is linked.
 
 ## Session provenance
@@ -144,8 +171,9 @@ changed.
 
 - Find the exact note and show the user a minimal preview (title, type, date —
   not the body) before doing anything.
-- Obtain a separate explicit confirmation, then `delete` with `ifRevision` and
-  `confirmId` equal to the note's `id`.
+- Call `request_delete` with the current `ifRevision`. The direct Telegram
+  confirmation executes the exact deletion once and reports its result.
+  Expired, cancelled, stale, or session-reset buttons cannot authorize deletion.
 - Deletion permanently removes the canonical note only. When material, explain
   that it does not erase Telegram/Pi conversation history, filesystem backups,
   Git history, or third-party backups.
@@ -197,6 +225,7 @@ Telegram agent start; ordinary local Pi sessions do not receive it.
   notes; personal context contains the current principal's personal notes plus
   household notes.
 - Never interpolate user text into shell commands; requests go through stdin.
-- Never claim persistence without an observed successful CLI response.
+- Never claim persistence from a draft or pending confirmation; require an
+  observed successful mutation result.
 - Never claim a local Git commit unless `git.committed` is `true`; the CLI never
   pushes memory commits.

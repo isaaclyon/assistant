@@ -150,9 +150,12 @@ send remains non-durable.
 
 The memory vault is user-owned plain Markdown outside the checkout and
 releases, so it survives deployment cleanup and can be opened directly in
-Obsidian. Only the tracked skill-local CLI
-(`.pi/skills/personal-memory/scripts/memory.mjs`) mutates it and exposes
-schema-checked lint and bounded `#core` preview operations. Core output is
+Obsidian. The `assistant_memory` tool and tracked skill-local CLI share the
+executor in `.pi/skills/personal-memory/scripts/memory.mjs`, including the
+mutation lock and optional Git preflight/commit. The CLI also exposes
+schema-checked lint and bounded `#core` preview operations. The memory extension
+owns session-local creation drafts and direct Telegram approval callbacks;
+see [ADR-0035](docs/adr/0035-typed-memory-operations.md). Core output is
 disposable derived state compiled directly from notes. A repo-local extension
 appends it to the system prompt at each `before_agent_start`, but only while the
 host's token-guarded process-local runtime marker is bound; ordinary Pi sessions
