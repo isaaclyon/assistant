@@ -13,6 +13,8 @@ import { mkdir, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
 
 import { loadCapabilityProfile } from "./capabilities.js";
+import { CONVERSATION_ROUTING_IDLE_MS, lastTelegramMessageTime, shouldStartNewConversation } from "./conversation-routing.js";
+import { createTypeSafeJudge } from "./semantic-judge.js";
 import {
   ConversationSessionPolicy,
   type ConversationSessionTrigger,
@@ -157,18 +159,23 @@ export async function startBridgeHost({
   await mkdir(config.sessionDir, { recursive: true, mode: 0o700 });
   await ensureCodexConfig(config.codexConfigPath);
   const instanceLabel = config.instanceId;
-  const sessionIdleMs = config.sessionIdleMs ?? 0;
+  const semanticRouting = config.sessionRouting === "jev";
+  const conversationJudge = createTypeSafeJudge({ timeoutMs: 3_000, maxAttempts: 1 });
+  const sessionIdleMs = semanticRouting ? CONVERSATION_ROUTING_IDLE_MS : config.sessionIdleMs ?? 0;
   const conversationSessionPolicy = sessionIdleMs > 0
     ? await ConversationSessionPolicy.open({
         path: join(config.stateDir, "conversation-session-state.json"),
         timeoutMs: sessionIdleMs,
+        semanticRouting,
         nowMs,
         instanceId: instanceLabel,
         logger,
       })
     : undefined;
   logger.info(
-    conversationSessionPolicy
+    semanticRouting
+      ? `Jev conversation routing enabled for ${instanceLabel} (after 15 minutes).`
+      : conversationSessionPolicy
       ? `Idle session rotation enabled for ${instanceLabel} (${sessionIdleMs / 3_600_000} hour(s)).`
       : `Idle session rotation disabled for ${instanceLabel}.`,
   );
@@ -387,12 +394,23 @@ export async function startBridgeHost({
     }));
     if (conversationSessionPolicy) {
       bindings.push(bindTelegramHostPromptPreparation(
-        async () =>
-          conversationSessionPolicy.prepare(
+        async ({ prompt }) => {
+          const branch = semanticRouting ? runtime.session.sessionManager.getBranch() : [];
+          return conversationSessionPolicy.prepare(
             "telegram",
             runtime.session.sessionId,
             () => replaceSession("telegram"),
-          ),
+            semanticRouting ? {
+              ...(prompt?.sentAtMs !== undefined ? { sentAtMs: prompt.sentAtMs } : {}),
+              previousHumanAtMs: lastTelegramMessageTime(branch),
+              shouldStartNew: () => shouldStartNewConversation(
+                branch,
+                prompt?.text ?? "",
+                conversationJudge,
+              ),
+            } : undefined,
+          );
+        },
       ));
     }
   } catch (error) {

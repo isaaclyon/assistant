@@ -128,6 +128,15 @@ queued Telegram work, active/pending turns, compaction, or Pi pending messages;
 background-subagent completions bypass the policy. See
 [ADR-0022](docs/adr/0022-rotate-sessions-after-human-inactivity.md).
 
+An instance can instead opt into `PI_TELEGRAM_SESSION_ROUTING=jev`. After a
+human-message gap longer than 15 minutes, the host classifies bounded first,
+recent, and incoming conversation text through the existing TypeSafe client.
+P(same conversation) below 0.3 uses the same durable replacement path; failures
+and uncertainty retain history. This mode suppresses job-triggered idle
+rotation. The fork passes bounded incoming text and its original message time
+through prompt preparation; see
+[ADR-0033](docs/adr/0033-route-conversations-with-jev.md).
+
 Exactly one `jobsRole: coordinator` process owns cron, at,
 heartbeat, and webhook trigger evaluation plus mutable run state. Version-3 jobs
 name a stable target instance or `both-personal`. Before execution, the

@@ -71,6 +71,7 @@ export interface TelegramHostPromptPreparationResult {
 
 export type TelegramHostPromptPreparation = (input: {
   trigger: "telegram";
+  prompt?: { text: string; sentAtMs?: number };
 }) => Promise<TelegramHostPromptPreparationResult>;
 
 export type TelegramSessionReplacementTrigger =

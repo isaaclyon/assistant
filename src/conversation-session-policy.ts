@@ -47,6 +47,7 @@ interface PolicyLogger {
 interface ConversationSessionPolicyOptions {
   path: string;
   timeoutMs: number;
+  semanticRouting?: boolean;
   nowMs?: () => number;
   instanceId?: string;
   logger?: PolicyLogger;
@@ -277,7 +278,7 @@ export class ConversationSessionPolicy {
 
   private constructor(
     private readonly options: Required<Pick<ConversationSessionPolicyOptions, "path" | "timeoutMs" | "nowMs">> &
-      Pick<ConversationSessionPolicyOptions, "instanceId" | "logger"> & {
+      Pick<ConversationSessionPolicyOptions, "instanceId" | "logger" | "semanticRouting"> & {
         saveState: typeof saveConversationSessionState;
       },
     private state: ConversationSessionState | undefined,
@@ -328,12 +329,34 @@ export class ConversationSessionPolicy {
     trigger: ConversationSessionTrigger,
     currentSessionId: string,
     replace: () => Promise<SessionReplacementResult>,
+    prompt?: { sentAtMs?: number; previousHumanAtMs?: number | undefined; shouldStartNew: () => Promise<boolean> },
   ): Promise<{ sessionReplaced: boolean }> {
     return this.exclusive(async () => {
+      if (this.options.semanticRouting && trigger !== "telegram") {
+        return { sessionReplaced: false };
+      }
+      const wallTime = this.options.nowMs();
+      const sentAt = prompt?.sentAtMs;
+      const previousHumanAt = prompt?.previousHumanAtMs;
+      if (this.options.semanticRouting && !this.state &&
+          Number.isSafeInteger(previousHumanAt) && previousHumanAt! > 0 && previousHumanAt! <= wallTime) {
+        this.state = {
+          version: 1,
+          lastHumanPromptAt: new Date(previousHumanAt!).toISOString(),
+          rotatedForHumanPromptAt: null,
+        };
+      }
+      const state = this.state && recoveredState(this.state, currentSessionId);
+      const nowMs = this.options.semanticRouting
+        ? Math.max(
+            Number.isSafeInteger(sentAt) && sentAt! > 0 ? Math.min(sentAt!, wallTime) : wallTime,
+            state?.lastHumanPromptAt ? Date.parse(state.lastHumanPromptAt) : 0,
+          )
+        : wallTime;
       const plan = planConversationSessionPreparation(this.state, {
         trigger,
-        nowMs: this.options.nowMs(),
-        timeoutMs: this.options.timeoutMs,
+        nowMs,
+        timeoutMs: this.options.timeoutMs + (this.options.semanticRouting ? 1 : 0),
         currentSessionId,
       });
       if (plan.kind === "unchanged") return { sessionReplaced: false };
@@ -346,6 +369,21 @@ export class ConversationSessionPolicy {
       if (plan.kind === "persist") {
         await this.persist(plan.state);
         return { sessionReplaced: false };
+      }
+
+      if (this.options.semanticRouting) {
+        let startNew = false;
+        try {
+          startNew = await prompt?.shouldStartNew() ?? false;
+        } catch {
+          // Deliberately omit exception details: HTTP bodies and message text
+          // must never reach operational logs. Preserve context on an outage.
+          this.options.logger?.error("Jev conversation routing unavailable; continuing the current session.");
+        }
+        if (!startNew) {
+          await this.persist(plan.successState);
+          return { sessionReplaced: false };
+        }
       }
 
       await this.persist(plan.pendingState);

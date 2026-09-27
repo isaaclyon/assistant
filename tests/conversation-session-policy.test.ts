@@ -115,6 +115,76 @@ describe("conversation session planning", () => {
 });
 
 describe("ConversationSessionPolicy", () => {
+  it("classifies the first post-deployment turn using existing human history", async () => {
+    const policy = await ConversationSessionPolicy.open({
+      path: "/unused/jev-bootstrap.json", timeoutMs: 900_000, semanticRouting: true,
+      nowMs: () => baseline + HOUR, saveState: async () => undefined,
+    });
+    const judge = vi.fn(async () => true);
+    await expect(policy.prepare("telegram", "old", async () => ({ cancelled: false, sessionId: "new" }), {
+      previousHumanAtMs: baseline, shouldStartNew: judge,
+    })).resolves.toEqual({ sessionReplaced: true });
+    expect(judge).toHaveBeenCalledOnce();
+  });
+  it("recovers a Jev replacement after a failed final write without reclassifying", async () => {
+    let now = baseline;
+    let writes = 0;
+    const policy = await ConversationSessionPolicy.open({
+      path: "/unused/jev-recovery.json", timeoutMs: 900_000, semanticRouting: true,
+      nowMs: () => now, saveState: async () => { if (++writes === 3) throw new Error("disk full"); },
+    });
+    const replace = vi.fn(async () => ({ cancelled: false, sessionId: "new" }));
+    const judge = vi.fn(async () => true);
+    await policy.prepare("telegram", "old", replace, { sentAtMs: now, shouldStartNew: judge });
+    now += 900_001;
+    const prompt = { sentAtMs: now, shouldStartNew: judge };
+    await expect(policy.prepare("telegram", "old", replace, prompt)).rejects.toThrow("disk full");
+    now += 2 * HOUR;
+    await expect(policy.prepare("telegram", "new", replace, prompt)).resolves.toEqual({ sessionReplaced: false });
+    expect(judge).toHaveBeenCalledOnce();
+    expect(replace).toHaveBeenCalledOnce();
+  });
+
+  it("uses Jev only strictly after 15 minutes, retains uncertain/failing turns, and ignores jobs", async () => {
+    let now = baseline;
+    const policy = await ConversationSessionPolicy.open({
+      path: "/unused/jev-conversation-session-state.json", timeoutMs: 900_000,
+      semanticRouting: true, nowMs: () => now, saveState: async () => undefined,
+    });
+    const replace = vi.fn(async () => ({ cancelled: false, sessionId: "new" }));
+    const judge = vi.fn(async () => false);
+    await policy.prepare("telegram", "old", replace, { shouldStartNew: judge });
+    now += 900_000;
+    await policy.prepare("telegram", "old", replace, { shouldStartNew: judge });
+    expect(judge).not.toHaveBeenCalled();
+    now += 900_001;
+    await policy.prepare("job:cron", "old", replace);
+    await policy.prepare("telegram", "old", replace, { shouldStartNew: judge });
+    expect(judge).toHaveBeenCalledOnce();
+    expect(replace).not.toHaveBeenCalled();
+    now += 900_001;
+    judge.mockRejectedValueOnce(new Error("unavailable"));
+    await expect(policy.prepare("telegram", "old", replace, { shouldStartNew: judge })).resolves.toEqual({ sessionReplaced: false });
+    now += 900_001;
+    judge.mockResolvedValueOnce(true);
+    await expect(policy.prepare("telegram", "old", replace, { shouldStartNew: judge })).resolves.toEqual({ sessionReplaced: true });
+    expect(replace).toHaveBeenCalledOnce();
+  });
+
+  it("uses message time rather than queue wait time and never moves the human clock backward", async () => {
+    const saveState = vi.fn(async (_path: string, _state: unknown) => undefined);
+    const policy = await ConversationSessionPolicy.open({
+      path: "/unused/jev-message-time.json", timeoutMs: 900_000, semanticRouting: true,
+      nowMs: () => baseline + 10 * HOUR, saveState,
+    });
+    const replace = vi.fn(async () => ({ cancelled: false, sessionId: "new" }));
+    const judge = vi.fn(async () => true);
+    await policy.prepare("telegram", "old", replace, { sentAtMs: baseline, shouldStartNew: judge });
+    await policy.prepare("telegram", "old", replace, { sentAtMs: baseline + 1000, shouldStartNew: judge });
+    await policy.prepare("telegram", "old", replace, { sentAtMs: baseline - 1000, shouldStartNew: judge });
+    expect(judge).not.toHaveBeenCalled();
+    expect(saveState.mock.calls.at(-1)?.[1]).toMatchObject({ lastHumanPromptAt: new Date(baseline + 1000).toISOString() });
+  });
   it("persists private atomic state and survives restart", async () => {
     const root = await mkdtemp(join(tmpdir(), "conversation-policy-"));
     const path = join(root, "conversation-session-state.json");
