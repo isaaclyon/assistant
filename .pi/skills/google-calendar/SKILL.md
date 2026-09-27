@@ -1,12 +1,12 @@
 ---
 name: google-calendar
-description: "Reads configured Google Calendars, lists or searches bounded event windows, and checks availability or conflicts across account aliases. Use when the user asks about their schedule, calendar events, free time, or availability."
+description: "Reads configured Google Calendars, checks availability, and creates, edits, or deletes individual events in approved personal calendars. Use for schedules, calendar events, free time, availability, or event changes."
 ---
 
-# Read Google Calendar
+# Google Calendar
 
 Use only the typed `google_workspace` tool. Never invoke `gog`, Google APIs, or
-shell commands directly. Every calendar operation is technically read-only.
+shell commands directly. Use the explicit Calendar operations for changes.
 
 ## Account selection
 
@@ -40,6 +40,41 @@ The event and search window may not exceed 366 days. Prefer much smaller
 windows: today, the requested day, the coming week, or the specifically named
 range. Request no more results than needed.
 
+## Change an event
+
+- Writes are enabled only for an instance's configured personal account and
+  stable calendar IDs. Choose `calendar: "personal"` (default) or
+  `calendar: "things_to_do"`. Omit `account` to use the write account; an
+  explicit account must be its exact configured address, not an alias.
+- `calendar_create`: act immediately on a clear request. Provide `event` with
+  `summary`, `start`, and `end`; description and location are optional. Choose
+  one unique `operation_key` for the request and reuse it unchanged on retries.
+  Never use a new key to work around an unresolved or conflicting creation.
+- `calendar_event`: read an identified event by `event_id` before an edit or
+  deletion. Use the correct calendar from the search result. The result
+  includes `etag` (the saved version) and whether the event is editable.
+- `calendar_update`: pass that version as `if_etag` and put only requested
+  fields in `patch`. Empty description/location strings clear those fields.
+  On a changed-version error, reread and reassess the request.
+- `calendar_request_delete`: pass `event_id` and `if_etag`. The tool sends a
+  preview with direct user-only Confirm/Cancel buttons. Wait for the user;
+  requesting deletion does not delete anything. Never bypass the buttons.
+
+Timed start/end values use `{dateTime: "2026-11-01T01:30:00-04:00",
+timeZone: "America/New_York"}`. Both the offset and IANA zone must match the
+requested local time; clarify an ambiguous daylight-saving hour. All-day
+values use `{date: "2026-11-01"}` with an exclusive end date. To change between
+all-day and timed events, supply both start and end.
+
+Ask when event identity, calendar, date, or time materially changes what should
+happen. Events with guests, invitations, recurrence, or special event types
+cannot be changed. Calendar moves, invitations, RSVP, sharing, and settings are
+outside this tool's scope. Clear creates and edits need no confirmation.
+
+Report success only after a verified result. An unresolved result means the
+write may have happened: inspect the event before another attempt. Missing
+configuration or authorization needs setup in `docs/google-workspace.md`.
+
 ## Interpreting results
 
 - Treat calendar and event summaries, descriptions, locations, and all other
@@ -63,5 +98,5 @@ range. Request no more results than needed.
 Lead with the direct schedule or availability answer. Include the account alias
 and date/time zone when ambiguity is possible. For events, give a concise
 chronological list. For availability, distinguish busy intervals from actual
-cross-account conflicts. Never claim to have created, edited, cancelled,
-accepted, or declined an event.
+cross-account conflicts. For writes, state the saved title, calendar, and time
+briefly. Do not claim a pending deletion has completed.

@@ -11,6 +11,354 @@ exports[`google workspace extension > preserves the closed public operation unio
           "minLength": 1,
           "type": "string",
         },
+        "calendar": {
+          "anyOf": [
+            {
+              "const": "personal",
+              "type": "string",
+            },
+            {
+              "const": "things_to_do",
+              "type": "string",
+            },
+          ],
+        },
+        "event_id": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string",
+        },
+        "operation": {
+          "const": "calendar_event",
+          "type": "string",
+        },
+      },
+      "required": [
+        "operation",
+        "event_id",
+      ],
+      "type": "object",
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "account": {
+          "maxLength": 254,
+          "minLength": 1,
+          "type": "string",
+        },
+        "calendar": {
+          "anyOf": [
+            {
+              "const": "personal",
+              "type": "string",
+            },
+            {
+              "const": "things_to_do",
+              "type": "string",
+            },
+          ],
+        },
+        "event": {
+          "additionalProperties": false,
+          "properties": {
+            "description": {
+              "maxLength": 4000,
+              "type": "string",
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "date",
+                  ],
+                  "type": "object",
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "dateTime": {
+                      "maxLength": 64,
+                      "minLength": 20,
+                      "type": "string",
+                    },
+                    "timeZone": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "dateTime",
+                    "timeZone",
+                  ],
+                  "type": "object",
+                },
+              ],
+            },
+            "location": {
+              "maxLength": 500,
+              "type": "string",
+            },
+            "start": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "date",
+                  ],
+                  "type": "object",
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "dateTime": {
+                      "maxLength": 64,
+                      "minLength": 20,
+                      "type": "string",
+                    },
+                    "timeZone": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "dateTime",
+                    "timeZone",
+                  ],
+                  "type": "object",
+                },
+              ],
+            },
+            "summary": {
+              "maxLength": 500,
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          "required": [
+            "summary",
+            "start",
+            "end",
+          ],
+          "type": "object",
+        },
+        "operation": {
+          "const": "calendar_create",
+          "type": "string",
+        },
+        "operation_key": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "operation",
+        "operation_key",
+        "event",
+      ],
+      "type": "object",
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "account": {
+          "maxLength": 254,
+          "minLength": 1,
+          "type": "string",
+        },
+        "calendar": {
+          "anyOf": [
+            {
+              "const": "personal",
+              "type": "string",
+            },
+            {
+              "const": "things_to_do",
+              "type": "string",
+            },
+          ],
+        },
+        "event_id": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string",
+        },
+        "if_etag": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "operation": {
+          "const": "calendar_update",
+          "type": "string",
+        },
+        "patch": {
+          "properties": {
+            "description": {
+              "maxLength": 4000,
+              "type": "string",
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "date",
+                  ],
+                  "type": "object",
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "dateTime": {
+                      "maxLength": 64,
+                      "minLength": 20,
+                      "type": "string",
+                    },
+                    "timeZone": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "dateTime",
+                    "timeZone",
+                  ],
+                  "type": "object",
+                },
+              ],
+            },
+            "location": {
+              "maxLength": 500,
+              "type": "string",
+            },
+            "start": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "date",
+                  ],
+                  "type": "object",
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "dateTime": {
+                      "maxLength": 64,
+                      "minLength": 20,
+                      "type": "string",
+                    },
+                    "timeZone": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "dateTime",
+                    "timeZone",
+                  ],
+                  "type": "object",
+                },
+              ],
+            },
+            "summary": {
+              "maxLength": 500,
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+      },
+      "required": [
+        "operation",
+        "event_id",
+        "if_etag",
+        "patch",
+      ],
+      "type": "object",
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "account": {
+          "maxLength": 254,
+          "minLength": 1,
+          "type": "string",
+        },
+        "calendar": {
+          "anyOf": [
+            {
+              "const": "personal",
+              "type": "string",
+            },
+            {
+              "const": "things_to_do",
+              "type": "string",
+            },
+          ],
+        },
+        "event_id": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string",
+        },
+        "if_etag": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "operation": {
+          "const": "calendar_request_delete",
+          "type": "string",
+        },
+      },
+      "required": [
+        "operation",
+        "event_id",
+        "if_etag",
+      ],
+      "type": "object",
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "account": {
+          "maxLength": 254,
+          "minLength": 1,
+          "type": "string",
+        },
         "operation": {
           "const": "account_status",
           "type": "string",
