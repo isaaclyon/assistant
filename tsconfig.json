@@ -19,5 +19,5 @@
     "skipLibCheck": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", ".pi/lib/mutation-lock.mjs"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", ".pi/lib/mutation-lock.mjs", ".pi/skills/personal-memory/scripts/*.mjs"]
 }
