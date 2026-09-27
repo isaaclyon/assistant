@@ -279,7 +279,8 @@ export function registerGoogleWorkspaceTool(
           ...commonArgs(account!),
           "calendar",
           "events",
-          ...selectedCalendars,
+          // gog accepts one positional calendar ID; multiple calendars use repeated --cal.
+          ...selectedCalendars.map((id) => `--cal=${id}`),
           `--from=${window.from}`,
           `--to=${window.to}`,
           `--max=${maximum}`,
