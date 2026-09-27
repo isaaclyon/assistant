@@ -80,6 +80,9 @@ capability profiles.
    TypeSafe API key file, used for `semantic-match` heartbeats and opted-in
    conversation routing; see ADR-0031 and ADR-0033). The optional
    `PI_TELEGRAM_SESSION_ROUTING` accepts `jev` or `off`.
+   `PI_TELEGRAM_OPENAI_API_KEY_FILE` enables hosted semantic memory search for
+   that instance through a private mode-`0600` OpenAI API-key file; see the
+   [search setup](search-index.md#hosted-semantic-memory-search).
    Validation reports key names, never values.
 
    Port `0` requests an ephemeral listener and may be reused. Any fixed

@@ -1,4 +1,5 @@
 import type { MemoryScanStore } from "./memory-scan-store.js";
+import type { MemorySemanticStore } from "./memory-semantic.js";
 
 export interface SearchIndexStatus {
   schemaVersion: number;
@@ -15,6 +16,7 @@ export interface CorpusOperationStatus {
 
 export interface SearchIndex {
   memoryScan: MemoryScanStore;
+  semantic: MemorySemanticStore;
   withRefreshLock<T>(corpus: SearchCorpus, operation: () => Promise<T>): Promise<T>;
   sessionScanCursor(instanceId: string, principalId: string): string | undefined;
   setSessionScanCursor(instanceId: string, principalId: string, path: string): void;
@@ -106,6 +108,10 @@ export interface MemoryDocumentSearchPage {
   results: MemoryDocumentSearchMatch[];
   truncated: boolean;
   warning?: "invalid_fts_query_fallback";
+  retrieval?: {
+    mode: "keyword" | "hybrid";
+    semantic: "disabled" | "ready" | "partial" | "unavailable";
+  };
 }
 
 export interface MemorySearchPage {
