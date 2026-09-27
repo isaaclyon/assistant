@@ -1,6 +1,6 @@
 # Pi Telegram Bridge Host
 
-A systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](https://github.com/isaaclyon/pi-telegram/commit/d9877050370219d69b56bcc3a510d45905101c03). It runs a manifest-defined household fleet whose bots share one immutable capability release while keeping conversations, workspaces, credentials, and memory views distinct.
+A systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](https://github.com/isaaclyon/pi-telegram/commit/56f37ecfe75861dc636a1f593a524f7dba6dfc18). It runs a manifest-defined household fleet whose bots share one immutable capability release while keeping conversations, workspaces, credentials, and memory views distinct.
 
 ## Runtime shape
 
@@ -15,6 +15,12 @@ one systemd user service per instance
 Instances use separate mutable workspaces, but all extension, skill, and instruction code is selected from the shared immutable release through `.pi/capabilities.json`. The host disables hierarchical discovery; the root `AGENTS.md` remains developer guidance. Fleet conversations and inboxes live under `~/.local/state/pi-telegram-bridge/instances/<id>`.
 
 ## Initial setup
+
+Optional [Jev conversation routing](docs/household-fleet.md#inactivity-based-session-rotation)
+checks whether a message after a 15-minute gap continues the current discussion.
+Each instance opts in with `PI_TELEGRAM_SESSION_ROUTING=jev` and its private
+TypeSafe key-file setting. New topics start fresh history; uncertain decisions
+and API failures keep the current session.
 
 Requirements:
 
