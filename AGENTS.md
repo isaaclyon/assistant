@@ -5,6 +5,9 @@
 - Treat `~/.pi/agent/telegram.json` and Pi credential files as secrets; never print their contents.
 - Preserve the dedicated bridge session directory and same-cwd restart behavior.
 - Run `npm run check` and `npm run build` after code changes.
+- Upgrade the four Pi runtime packages together with exact pins. Review weekly
+  grouped update PRs using `docs/pi-upgrades.md`; preserve the compatibility
+  gates and source-checked install patches, and do not auto-merge updates.
 - Do not enable or restart the live service during tests unless explicitly working on deployment.
 
 ## Extension & skill filtering (why the bridge can't see global Pi resources)

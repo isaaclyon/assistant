@@ -42,7 +42,22 @@ describe("Codex conversion extension", () => {
       );
       return readPackageVersion(manifestPath);
     });
-    expect(new Set(versions)).toEqual(new Set(["0.80.10"]));
+    const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    const pins = packages.map((name) => manifest.dependencies[`@earendil-works/${name}`]);
+    for (const pin of pins) expect(pin).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(new Set(pins).size).toBe(1);
+    expect(versions).toEqual(pins);
+
+    // Pi's published shrinkwrap can install nested SDK copies. They must stay
+    // aligned as well; checking only the four top-level dependencies misses them.
+    const lock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8"));
+    for (const path of Object.keys(lock.packages)) {
+      const name = packages.find((name) => path.endsWith(`node_modules/@earendil-works/${name}`));
+      if (!name) continue;
+      const expected = manifest.dependencies[`@earendil-works/${name}`];
+      expect(lock.packages[path].version).toBe(expected);
+      expect(readPackageVersion(join(root, path, "package.json"))).toBe(expected);
+    }
   });
 
   it("resolves the pinned repo dependency entrypoint", () => {

@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "npm run clean && tsc -p tsconfig.json && node --input-type=module -e \"await import('./dist/src/memory-application.js')\"",
-    "check": "npm run typecheck && npm run typecheck:extensions && npm test",
+    "check": "npm run typecheck && npm run typecheck:extensions && npm run typecheck:telegram && npm test",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "deploy": "bash scripts/deploy.sh",
     "jobs:check": "node dist/src/jobs-check.js",
@@ -19,16 +19,18 @@
     "start": "node dist/src/daemon.js",
     "telegram:setup": "npm run build && node dist/src/setup.js",
     "test": "vitest run --exclude '.worktrees/**'",
+    "test:pi-compat": "vitest run tests/pi-compatibility.test.ts tests/codex-extension.test.ts tests/host.integration.test.ts tests/retry-extension.test.ts tests/telegram-new-session.test.ts tests/subagent-process.test.ts tests/conversation-session-policy.test.ts tests/conversation-routing.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "typecheck:extensions": "tsc -p tsconfig.extensions.json"
+    "typecheck:extensions": "tsc -p tsconfig.extensions.json",
+    "typecheck:telegram": "tsc -p node_modules/@llblab/pi-telegram/tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.80.10",
-    "@earendil-works/pi-ai": "0.80.10",
-    "@earendil-works/pi-coding-agent": "0.80.10",
-    "@earendil-works/pi-tui": "0.80.10",
+    "@earendil-works/pi-agent-core": "0.87.1",
+    "@earendil-works/pi-ai": "0.87.1",
+    "@earendil-works/pi-coding-agent": "0.87.1",
+    "@earendil-works/pi-tui": "0.87.1",
     "@howaboua/pi-codex-conversion": "2.2.13",
-    "@llblab/pi-telegram": "https://codeload.github.com/isaaclyon/pi-telegram/tar.gz/56f37ecfe75861dc636a1f593a524f7dba6dfc18",
+    "@llblab/pi-telegram": "https://codeload.github.com/isaaclyon/pi-telegram/tar.gz/dc84d2038ce80d83406f1ea767df2fd99906cc3c",
     "@narumitw/pi-retry": "0.22.0",
     "croner": "^10.0.1",
     "marked": "18.0.5",
