@@ -290,7 +290,7 @@ describe("google workspace extension", () => {
       [
         "--no-input", "--readonly", "--gmail-no-send", "--wrap-untrusted", "--json",
         "--account", "personal", "calendar", "events",
-        "--cal=primary", "--cal=team@example.com",
+        "primary", "team@example.com",
         "--from=2026-08-01T00:00:00-06:00", "--to=2026-08-08T00:00:00-06:00",
         "--max=20", "--timezone=America/New_York", "--sort=start",
       ],
@@ -380,7 +380,8 @@ describe("google workspace extension", () => {
     });
 
     expect(run.mock.calls[0]?.[1]).toContain("--query=dentist");
-    expect(run.mock.calls[0]?.[1]).toContain("--cal=primary");
+    expect(run.mock.calls[0]?.[1]).toContain("primary");
+    expect(run.mock.calls[0]?.[1]).not.toContain("--cal=primary");
     expect(result.details).toMatchObject({
       ok: true,
       result: {
