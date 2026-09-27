@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { GoogleRuntime } from "./google-transport.ts";
+import { GoogleCommandError } from "./google-operations.ts";
 
 export interface CalendarWriteConfig { account: string; personal: string; thingsToDo: string }
 type Run = (runtime: GoogleRuntime, args: string[], signal?: AbortSignal) => Promise<unknown>;
@@ -25,6 +26,10 @@ function string(value: unknown, max: number, empty = false): string {
   return value;
 }
 function hash(value: string) { return createHash("sha256").update(value).digest("hex"); }
+
+function throwDefiniteRejection(error: unknown) {
+  if (error instanceof CalendarWriteError && ["CALENDAR_AUTH_REQUIRED", "CALENDAR_WRITE_FORBIDDEN", "CALENDAR_REQUEST_REJECTED"].includes(error.code)) throw error;
+}
 
 export function parseCalendarWriteConfig(value: string | undefined, instance: string | undefined): CalendarWriteConfig | undefined {
   if (!value || !instance) return undefined;
@@ -156,12 +161,20 @@ export class CalendarWrites {
     const write = method === "events.insert" || method === "events.patch" || method === "events.delete";
     // All API names, methods, scopes and query fields are owned here. Raw API
     // output stays internal; the public result is bounded and marked untrusted.
-    const result = await this.run(target.runtime, ["--no-input", "--gmail-no-send", "--json", "--account", target.account,
+    let result: unknown;
+    try { result = await this.run(target.runtime, ["--no-input", "--gmail-no-send", "--json", "--account", target.account,
       ...(write ? ["--force"] : ["--readonly"]), "api", "call", "calendar", "v3", `calendar.${method}`,
       `--scope=https://www.googleapis.com/auth/calendar`,
       `--params=${JSON.stringify({ calendarId: target.calendarId, ...(id ? { eventId: id } : {}), ...(write ? { sendUpdates: "none" } : {}) })}`,
       ...(write ? ["--allow-write"] : []), ...(body ? [`--body=${JSON.stringify(body)}`] : []),
-    ], signal);
+    ], signal); } catch (error) {
+      if (error instanceof GoogleCommandError) {
+        if (error.code === "AUTH_REQUIRED") throw new CalendarWriteError("CALENDAR_AUTH_REQUIRED", "Google rejected the request because Calendar authorization is missing or insufficient. Reauthorize this account with Calendar write access before trying again");
+        if (error.code === "FORBIDDEN") throw new CalendarWriteError("CALENDAR_WRITE_FORBIDDEN", "Google denied Calendar access. Check this account's Calendar grant and editor/owner permission");
+        if (error.code === "INVALID_REQUEST") throw new CalendarWriteError("CALENDAR_REQUEST_REJECTED", "Google rejected the Calendar request. Review the requested event fields before retrying");
+      }
+      throw error;
+    }
     return object(result);
   }
   private async permission(target: Target, signal?: AbortSignal) {
@@ -196,7 +209,7 @@ export class CalendarWrites {
       if (operation === "calendar_create") {
         const fingerprint = hash(JSON.stringify(patch));
         let existing: Json | undefined;
-        try { existing = await this.read(target, id, signal); } catch { /* Insert with the same ID is safe even when this read fails. */ }
+        try { existing = await this.read(target, id, signal); } catch (error) { throwDefiniteRejection(error); /* Insert with the same ID is safe when existence is unknown. */ }
         const verify = (event: Json) => {
           const props = event.extendedProperties as { private?: Json } | undefined;
           if (props?.private?.assistantDraft !== fingerprint || !matches(event, patch!)) throw new CalendarWriteError("CALENDAR_OPERATION_CONFLICT", "This operation_key already belongs to another or changed event. Read that event before proceeding");
@@ -206,7 +219,7 @@ export class CalendarWrites {
         if (existing) return verify(existing);
         this.current(generation, signal);
         try { await this.api(target, "events.insert", undefined, { ...patch, id, extendedProperties: { private: { assistantDraft: fingerprint } } }, signal); }
-        catch { /* Reconcile even when the response was lost; never invent a new ID. */ }
+        catch (error) { throwDefiniteRejection(error); /* Reconcile a lost response; never invent a new ID. */ }
         let saved: Json;
         try { saved = await this.read(target, id); } catch { return this.unresolved(); }
         return verify(saved);
@@ -224,7 +237,7 @@ export class CalendarWrites {
       }
       validateInterval(object(patch!.start ?? event.start), object(patch!.end ?? event.end));
       this.current(generation, signal);
-      try { await this.api(target, "events.patch", id, patch, signal); } catch { /* Read back once; do not blindly replay a patch. */ }
+      try { await this.api(target, "events.patch", id, patch, signal); } catch (error) { throwDefiniteRejection(error); /* Read back once; do not blindly replay a patch. */ }
       let saved: Json;
       try { saved = await this.read(target, id); } catch { return this.unresolved(); }
       if (!matches(saved, patch!)) return this.unresolved();
@@ -244,7 +257,8 @@ export class CalendarWrites {
       try {
         await this.api(target, "events.delete", id);
         return { deleted: true };
-      } catch {
+      } catch (error) {
+        throwDefiniteRejection(error);
         // A returned tombstone proves deletion. A generic read error does not.
         try { if ((await this.read(target, id)).status === "cancelled") return { deleted: true }; } catch { /* unresolved */ }
         return this.unresolved();

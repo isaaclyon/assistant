@@ -104,6 +104,7 @@ describe("google workspace extension", () => {
         account: "owner@example.com",
         authenticated: true,
         services: ["calendar", "contacts"],
+        calendarWriteScopeGranted: false,
       },
       error: null,
     });
@@ -216,7 +217,7 @@ describe("google workspace extension", () => {
     expect(run.mock.calls[1]?.[1]).toEqual(expect.arrayContaining(["auth", "alias", "list"]));
     expect(result.details).toEqual({
       ok: true,
-      result: { operation: "account_status", account: "work", authenticated: true, services: ["calendar"] },
+      result: { operation: "account_status", account: "work", authenticated: true, services: ["calendar"], calendarWriteScopeGranted: null },
       error: null,
     });
     expect(JSON.stringify(result)).not.toContain("private-work-address@example.com");
