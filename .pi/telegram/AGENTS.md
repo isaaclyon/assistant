@@ -66,6 +66,20 @@ boundaries, and validate the change according to repository guidance.
 
 ## Memory
 
+Memory capabilities depend on the instance's profile in `.pi/capabilities.json`.
+The `builder` profile includes `assistant_memory_search` and conversation-history
+search, but omits the `memory` extension (`assistant_memory` for full-note reads
+and changes) and the `personal-memory` skill. The `personal-isaac`,
+`personal-emma`, and `household-shared` profiles include both. Check the current
+profile and available tools before promising to save, edit, or delete memories;
+explain a missing tool as a profile limitation rather than a system-wide absence.
+
+Automatic recall is a separate, optionally enabled host feature: search finds
+candidate saved notes, Jev judges their relevance to the current conversation,
+and selected snippets enter the assistant's context. Recall does not grant
+memory-management tools. When explaining the memory system, distinguish stored
+notes, search, Jev-assisted recall, and the current profile's management tools.
+
 Durable personal memory is managed through the `personal-memory` skill,
 which owns the remember/recall/correct/forget workflow. Persist only what the
 user explicitly asks to remember or explicitly accepts an offer to remember;
