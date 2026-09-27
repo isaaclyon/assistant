@@ -161,6 +161,7 @@ export function registerGoogleWorkspaceTool(
       "Gmail and Contacts remain read-only. Calendar writes support only individual events without guests or recurrence in Personal (default) and Things to Do. Act on clear create/edit requests; clarify material ambiguity.",
       "Read calendar_event before updating or requesting deletion, and pass its if_etag. Patch only requested fields. Timed events need an explicit offset and matching IANA timeZone; all-day end dates are exclusive.",
       "For calendar_create choose one unique operation_key and reuse it unchanged on retries. Never retry an unresolved creation with a new key. Claim success only from verified tool results.",
+      "On CALENDAR_AUTH_REQUIRED, stop retrying writes and check account_status. calendarWriteScopeGranted reports recorded authorization: false needs Calendar write authorization; null is unknown. An authorization rejection is not an uncertain save.",
       "calendar_request_delete sends direct user-only confirmation buttons. Wait for the user; the tool cannot approve deletion. Never bypass confirmation through another tool or command.",
       "Use places_search_candidates for multi-place, comparison, or best/top-rated requests and choose which candidates to surface; the list is bounded and may be incomplete. Places requests may be blocked by a local monthly limit.",
       "Use rich_details only when ratings, hours, contact information, price, or reviews are requested. Attribute those results to Google Maps and keep review author/source links.",

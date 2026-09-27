@@ -33,6 +33,20 @@ it("accepts an empty HTTP-success body only for an explicitly selected adapter",
   await expect(transport.runGogJson({ ...options, allowEmptyOutput: true })).rejects.toThrow("Google Workspace command failed");
 });
 
+it.each([
+  ['calendar.events.insert: {"error":{"code":403,"message":"Request had insufficient authentication scopes.","private":"secret"}}', "AUTH_REQUIRED"],
+  ['OAuth grant for private@example.com is missing required calendar scope: private-scope', "AUTH_REQUIRED"],
+  ['calendar.events.insert: {"error":{"code":403,"message":"Forbidden","private":"secret"}}', "FORBIDDEN"],
+  ['calendar.events.insert: {"error":{"code":400,"message":"private invalid data"}}', "INVALID_REQUEST"],
+  ['calendar.events.get: {"error":{"code":404,"message":"private missing event"}}', "NOT_FOUND"],
+  ['calendar.events.insert: {"error":{"code":409,"message":"private conflict"}}', "CONFLICT"],
+  ['private unknown failure', "UNKNOWN"],
+])("classifies rejected commands without exposing stderr: %s", async (stderr, code) => {
+  const options = await fixture();
+  options.args = ["-e", `process.stderr.write(${JSON.stringify(stderr)});process.exit(1)`];
+  await expect(transport.runGogJson(options)).rejects.toMatchObject({ code, message: "Google Workspace command failed" });
+});
+
 describe.each([
   {
     operation: "rich details",

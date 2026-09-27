@@ -10,11 +10,26 @@ export const MAX_CONTACT_RESULTS = 10;
 const MAX_CONTACT_VALUES = 20;
 const FAILURE_MESSAGE = "Google Workspace command failed";
 
+export class GoogleCommandError extends Error {
+  constructor(readonly code: "AUTH_REQUIRED" | "FORBIDDEN" | "INVALID_REQUEST" | "NOT_FOUND" | "CONFLICT" | "UNKNOWN") {
+    super(FAILURE_MESSAGE);
+  }
+}
+
+/** Inspect bounded stderr privately; only a fixed classification leaves transport. */
+export function classifyGoogleFailure(stderr: string): GoogleCommandError {
+  if (/insufficient.*scope|insufficientPermissions|missing required .*scope|invalid_grant|auth required|unauthenticated/i.test(stderr)) return new GoogleCommandError("AUTH_REQUIRED");
+  const status = stderr.match(/"code"\s*:\s*(400|401|403|404|409)\b|(?:HTTP|Error)\s+(400|401|403|404|409)\b/i);
+  const code = Number(status?.[1] ?? status?.[2]);
+  return new GoogleCommandError(code === 401 ? "AUTH_REQUIRED" : code === 403 ? "FORBIDDEN" : code === 400 ? "INVALID_REQUEST" : code === 404 ? "NOT_FOUND" : code === 409 ? "CONFLICT" : "UNKNOWN");
+}
+
 export function parseAccountStatus(payload: unknown, account: string, resolvedAccount = account): {
   operation: "account_status";
   account: string;
   authenticated: boolean;
   services: string[];
+  calendarWriteScopeGranted: boolean | null;
 } {
   if (!payload || typeof payload !== "object" || !Array.isArray((payload as { accounts?: unknown }).accounts)) {
     throw new Error(FAILURE_MESSAGE);
@@ -24,7 +39,7 @@ export function parseAccountStatus(payload: unknown, account: string, resolvedAc
     return (candidate as { email?: unknown }).email?.toString().toLowerCase() === resolvedAccount.toLowerCase();
   });
   if (!match || typeof match !== "object") {
-    return { operation: "account_status", account, authenticated: false, services: [] };
+    return { operation: "account_status", account, authenticated: false, services: [], calendarWriteScopeGranted: false };
   }
   const services = Array.isArray((match as { services?: unknown }).services)
     ? (match as { services: unknown[] }).services
@@ -33,7 +48,9 @@ export function parseAccountStatus(payload: unknown, account: string, resolvedAc
         .sort()
         .slice(0, 32)
     : [];
-  return { operation: "account_status", account, authenticated: true, services };
+  const scopes = (match as { scopes?: unknown }).scopes;
+  const calendarWriteScopeGranted = Array.isArray(scopes) ? scopes.includes("https://www.googleapis.com/auth/calendar") : null;
+  return { operation: "account_status", account, authenticated: true, services, calendarWriteScopeGranted };
 }
 
 export function parseAccountAlias(payload: unknown, alias: string): string | undefined {

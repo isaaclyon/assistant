@@ -224,9 +224,11 @@ headers can close that gap without changing the user flow.
 ## Verify
 
 Ask the assistant to check Google account status. The typed result reports only
-the selected account, whether it has a stored authorization, and its configured
-service names. It omits OAuth subjects, scopes, client names, token paths, and
-raw diagnostics.
+the selected account, whether it has a stored authorization, its configured
+service names, and `calendarWriteScopeGranted` (true/false, or null when scope
+metadata is unavailable). That flag describes the stored full Calendar grant;
+it does not prove the token remains valid. Results omit OAuth subjects, raw
+scope lists, client names, token paths, and raw diagnostics.
 
 For Calendar, ask it to list calendars, show events for a bounded date range,
 search a bounded range, or check availability across configured aliases. The
@@ -239,6 +241,10 @@ must use an explicitly identified disposable event; deletion still uses its
 confirmation button. Automated tests use synthetic events and transports.
 Authorization failures require the interactive account setup above; an
 unresolved result must not be presented as success.
+The transport retains only a fixed classification of a rejected command's
+bounded stderr. Definite authorization, permission, and invalid-request
+rejections return actionable errors; lost responses and unknown failures still
+use read-back reconciliation. Raw upstream errors never enter tool results.
 
 For Gmail, ask it to search a focused Gmail query, triage unread or actionable
 threads, summarize one returned thread, or propose a reply. Thread search and

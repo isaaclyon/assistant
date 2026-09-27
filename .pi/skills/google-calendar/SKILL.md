@@ -74,6 +74,11 @@ outside this tool's scope. Clear creates and edits need no confirmation.
 Report success only after a verified result. An unresolved result means the
 write may have happened: inspect the event before another attempt. Missing
 configuration or authorization needs setup in `docs/google-workspace.md`.
+On `CALENDAR_AUTH_REQUIRED`, stop retrying the write. `account_status` reports
+`calendarWriteScopeGranted`: true means the stored grant includes the required
+scope, false means it does not, and null means scope metadata is unavailable.
+This metadata check does not prove the token remains valid. Explain the need
+for reauthorization instead of saying Google could not verify a save.
 
 ## Interpreting results
 

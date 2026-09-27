@@ -4,6 +4,7 @@ import { access, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { parseCalendarWriteConfig, type CalendarWriteConfig } from "./google-calendar-writes.ts";
+import { classifyGoogleFailure, GoogleCommandError } from "./google-operations.ts";
 
 export const DEFAULT_TIMEOUT_MS = 10_000;
 export const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
@@ -114,13 +115,14 @@ export async function runGogJson(options: {
       let stdoutBytes = 0;
       let stderrBytes = 0;
       const stdout: Buffer[] = [];
-      const fail = () => {
+      const stderr: Buffer[] = [];
+      const fail = (error: Error = new Error(FAILURE_MESSAGE)) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         options.signal?.removeEventListener("abort", abort);
         killChildTree();
-        reject(new Error(FAILURE_MESSAGE));
+        reject(error instanceof GoogleCommandError ? error : new Error(FAILURE_MESSAGE));
       };
       const abort = () => fail();
       const child = spawn(options.binary, options.args, {
@@ -150,14 +152,16 @@ export async function runGogJson(options: {
       });
       child.stderr.on("data", (chunk: Buffer) => {
         stderrBytes += chunk.length;
-        if (stderrBytes > maxOutputBytes) fail();
+        if (stderrBytes > maxOutputBytes) return fail();
+        stderr.push(chunk);
       });
       child.once("error", fail);
       child.once("close", (code) => {
         if (settled) return;
         clearTimeout(timer);
         options.signal?.removeEventListener("abort", abort);
-        if (code !== 0 || stderrBytes > 0) return fail();
+        if (code !== 0) return fail(classifyGoogleFailure(Buffer.concat(stderr).toString("utf8")));
+        if (stderrBytes > 0) return fail();
         try {
           const output = Buffer.concat(stdout).toString("utf8");
           const parsed: unknown = options.allowEmptyOutput && !output.trim() ? {} : JSON.parse(output);
@@ -169,7 +173,8 @@ export async function runGogJson(options: {
         }
       });
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof GoogleCommandError) throw error;
     throw new Error(FAILURE_MESSAGE);
   }
 }

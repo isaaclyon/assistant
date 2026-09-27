@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, expect, it, vi } from "vitest";
 
 const calendar = await import(pathToFileURL(join(import.meta.dirname, "../.pi/lib/google-calendar-writes.ts")).href);
+const operations = await import(pathToFileURL(join(import.meta.dirname, "../.pi/lib/google-operations.ts")).href);
 afterEach(() => vi.useRealTimers());
 
 it("enables writes only with complete stable IDs bound to this instance", () => {
@@ -140,4 +141,23 @@ it("reports unresolved writes without false success or a blind retry", async () 
   f.app.bind(pending.token, 11);
   await expect(f.app.confirm(pending.token, 11)).rejects.toMatchObject({ code: "CALENDAR_WRITE_UNRESOLVED" });
   expect(f.run.mock.calls.filter(([, args]) => args.includes("calendar.events.delete"))).toHaveLength(1);
+});
+
+it("reports missing write authorization as a rejection, preserving uncertainty for a lost response", async () => {
+  const f = fixture();
+  f.run.mockImplementation(async (_runtime, args) => {
+    if (args.includes("calendar.calendarList.get")) return { id: "personal-id", accessRole: "owner" };
+    if (args.includes("calendar.events.get")) throw new operations.GoogleCommandError("NOT_FOUND");
+    throw new operations.GoogleCommandError("AUTH_REQUIRED");
+  });
+  await expect(f.create()).rejects.toMatchObject({ code: "CALENDAR_AUTH_REQUIRED" });
+  expect(f.run.mock.calls.filter(([, args]) => args.includes("calendar.events.insert"))).toHaveLength(1);
+});
+
+it("reports the recorded Calendar grant without exposing OAuth scopes or credentials", () => {
+  const status = (scopes?: string[]) => operations.parseAccountStatus({ accounts: [{ email: "owner@example.com", services: ["calendar"], ...(scopes ? { scopes } : {}) }] }, "owner@example.com");
+  expect(status(["https://www.googleapis.com/auth/calendar.readonly"]).calendarWriteScopeGranted).toBe(false);
+  expect(status(["https://www.googleapis.com/auth/calendar"]).calendarWriteScopeGranted).toBe(true);
+  expect(status().calendarWriteScopeGranted).toBeNull();
+  expect(JSON.stringify(status(["https://www.googleapis.com/auth/calendar", "private-scope"]))).not.toContain("private-scope");
 });
