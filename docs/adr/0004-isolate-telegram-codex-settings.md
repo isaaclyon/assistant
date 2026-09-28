@@ -17,3 +17,18 @@ Install pinned `@howaboua/pi-codex-conversion` as a repo dependency, load its en
 - Telegram gets independent Codex settings without duplicating credentials or ownership state.
 - Extension upgrades must deliberately update and verify the narrow patch.
 - A dedicated agent directory and shared Codex settings remain rejected because they respectively split Telegram ownership state or couple unrelated Pi sessions.
+
+## Telegram fast-mode control
+
+The repo-local `/fast on|off|status` command forwards validated arguments to
+`/codex fast` through Telegram's existing command queue. A source-checked
+addition to the same install patch handles these arguments only when the
+bridge config path is set. It uses Codex conversion's own settings writer and
+deferred application lifecycle, preserving active responses and applying the
+change once the run settles. Every capability profile includes this command.
+
+The preference is stored as `openai.fast` in the instance's Codex settings.
+Status reports the active and saved values, pending application, and conflicting
+project/environment overrides. Invalid config files are preserved and reported.
+Fast mode requests priority processing where supported and may consume more
+quota or cost more; adding the command does not enable it by default.
