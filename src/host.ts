@@ -14,6 +14,7 @@ import { join, sep } from "node:path";
 
 import { loadCapabilityProfile } from "./capabilities.js";
 import { bindCodexFast } from "./codex-fast.js";
+import { bindDateContextHandoff, createDateContextHandoff } from "./date-context-runtime.js";
 import { CONVERSATION_ROUTING_IDLE_MS, lastTelegramMessageTime, shouldStartNewConversation } from "./conversation-routing.js";
 import { createTypeSafeJudge } from "./semantic-judge.js";
 import {
@@ -419,27 +420,31 @@ export async function startBridgeHost({
       const result = await replaceSession("manual");
       return { cancelled: result.cancelled };
     }));
-    if (conversationSessionPolicy) {
-      bindings.push(bindTelegramHostPromptPreparation(
-        async ({ prompt }) => {
-          const branch = semanticRouting ? runtime.session.sessionManager.getBranch() : [];
-          return conversationSessionPolicy.prepare(
-            "telegram",
-            runtime.session.sessionId,
-            () => replaceSession("telegram"),
-            semanticRouting ? {
-              ...(prompt?.sentAtMs !== undefined ? { sentAtMs: prompt.sentAtMs } : {}),
-              previousHumanAtMs: lastTelegramMessageTime(branch),
-              shouldStartNew: () => shouldStartNewConversation(
-                branch,
-                prompt?.text ?? "",
-                conversationJudge,
-              ),
-            } : undefined,
-          );
-        },
-      ));
-    }
+    const dateContextHandoff = createDateContextHandoff();
+    bindings.push(bindDateContextHandoff(dateContextHandoff));
+    bindings.push(bindTelegramHostPromptPreparation(
+      async ({ prompt }) => {
+        const branch = semanticRouting ? runtime.session.sessionManager.getBranch() : [];
+        const result = conversationSessionPolicy ? await conversationSessionPolicy.prepare(
+          "telegram",
+          runtime.session.sessionId,
+          () => replaceSession("telegram"),
+          semanticRouting ? {
+            ...(prompt?.sentAtMs !== undefined ? { sentAtMs: prompt.sentAtMs } : {}),
+            previousHumanAtMs: lastTelegramMessageTime(branch),
+            shouldStartNew: () => shouldStartNewConversation(
+              branch,
+              prompt?.text ?? "",
+              conversationJudge,
+            ),
+          } : undefined,
+        ) : { sessionReplaced: false };
+        // Prepare after any replacement has completed; the fork keeps the
+        // durable turn queued until this callback returns.
+        dateContextHandoff.prepare(prompt);
+        return result;
+      },
+    ));
   } catch (error) {
     await releaseAll();
     throw error;

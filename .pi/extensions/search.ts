@@ -34,6 +34,9 @@ import {
 } from "../../src/memory-recall.ts";
 import { createTypeSafeJudge } from "../../src/semantic-judge.ts";
 import { isBridgeRuntime } from "../lib/bridge-runtime.ts";
+import { renderDateContext, type DateContext } from "../../src/date-context.ts";
+import { takePreparedDateContext } from "../../src/date-context-runtime.ts";
+import { mergeTemporalCandidates, searchTemporalMemories } from "../../src/memory-temporal.ts";
 
 const MemoryTypeSchema = StringEnum([
   "person",
@@ -231,6 +234,7 @@ export default function searchExtension(pi: ExtensionAPI): void {
   const retrieveRecallCandidates = async (
     context: SearchContext,
     queries: string[],
+    dates?: DateContext,
   ): Promise<RecallCandidate[]> => {
     const activeIndex = getIndex(context);
     const request = {
@@ -244,7 +248,11 @@ export default function searchExtension(pi: ExtensionAPI): void {
       prepareMemoryQueryEmbeddings(activeIndex, request, queries, createOpenAIEmbedder()),
     );
     if (semantic.status !== "disabled") await requireFreshMemory(activeIndex, context);
-    return searchHybridMemoriesForQueries(activeIndex, request, queries, semantic)
+    return mergeTemporalCandidates(
+      searchHybridMemoriesForQueries(activeIndex, request, queries, semantic),
+      searchTemporalMemories(activeIndex, request, dates?.ranges ?? []),
+      RECALL_CANDIDATE_LIMIT,
+    )
       .map(({ id, revision, type, title, snippet }) => ({ id, revision, type, title, snippet }));
   };
 
@@ -257,26 +265,39 @@ export default function searchExtension(pi: ExtensionAPI): void {
   };
 
   pi.on("before_agent_start", async (event, ctx) => {
-    if (!isBridgeRuntime() || !isMemoryRecallEnabled() || !classifyRecallPrompt(event.prompt)) return;
+    if (!isBridgeRuntime() || !classifyRecallPrompt(event.prompt)) return;
+    const dates = takePreparedDateContext(event.prompt);
+    const dateText = dates ? renderDateContext(dates) : "";
+    const dateMessage = dateText ? { message: {
+      customType: "date-context", content: dateText, display: false,
+      details: { dates },
+    } } : undefined;
+    // Date interpretation works in every profile, including memoryView=none,
+    // and without Jev, an embedding key, or a working vault.
+    if (!isMemoryRecallEnabled()) return dateMessage;
     let context: SearchContext;
     try {
       context = resolveContext();
     } catch {
-      return;
+      return dateMessage;
     }
-    if (context.memoryView === "none") return;
+    if (context.memoryView === "none") return dateMessage;
     const message = await trackRefresh(recallMemories({
       prompt: event.prompt,
       entries: ctx.sessionManager.buildContextEntries(),
       sessionId: ctx.sessionManager.getSessionId(),
+      ...(dates ? { dates } : {}),
     }, {
-      retrieve: (queries) => retrieveRecallCandidates(context, queries),
+      retrieve: (queries) => retrieveRecallCandidates(context, queries, dates),
       currentRevisions: () => currentRecallRevisions(context),
       // Built per turn so it reads the current environment and global fetch.
       judge: createTypeSafeJudge({ timeoutMs: 3_000, maxAttempts: 1 }),
       log: (record) => appendRecallLog(context.stateDir, record),
     }));
-    return message ? { message } : undefined;
+    return message ? { message: { ...message,
+      content: [dateText, message.content].filter(Boolean).join("\n\n"),
+      details: { ...message.details, ...(dates ? { dates } : {}) },
+    } } : dateMessage;
   });
 
   pi.registerTool({

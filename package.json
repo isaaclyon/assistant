@@ -33,6 +33,7 @@
     "@howaboua/pi-codex-web-run": "0.0.4",
     "@llblab/pi-telegram": "https://codeload.github.com/isaaclyon/pi-telegram/tar.gz/dc84d2038ce80d83406f1ea767df2fd99906cc3c",
     "@narumitw/pi-retry": "0.31.0",
+    "chrono-node": "2.10.1",
     "croner": "^10.0.1",
     "marked": "18.0.5",
     "yaml": "2.9.0"
