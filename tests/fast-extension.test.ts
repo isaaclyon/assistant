@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { bindCodexFast } from "../src/codex-fast.js";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
 const codexRoot = join(import.meta.dirname, "../node_modules/@howaboua/pi-codex-conversion/dist");
 const load = (path: string) => import(pathToFileURL(join(codexRoot, path)).href);
@@ -39,7 +41,7 @@ async function setup() {
   const applied = vi.fn();
   const { registerCodexCommand } = await load("ui/settings/command.js");
   registerCodexCommand(pi, state, {}, {}, applied);
-  return { path, directory, state, ctx, applied, events,
+  return { path, directory, state, ctx, applied, events, commands,
     run: (args: string) => commands.get("codex").handler(args, ctx),
     settle: async () => { idle = true; settle(); await new Promise((resolve) => setImmediate(resolve)); } };
 }
@@ -105,7 +107,11 @@ describe("Codex fast settings", () => {
   });
 
   it("exposes a reload-safe Telegram menu command with bounded arguments", async () => {
-    await setup();
+    let test = await setup();
+    const unbind = bindCodexFast(() => ({ extensionRunner: {
+      getCommand: (name: string) => test.commands.get(name),
+      createCommandContext: () => test.ctx,
+    } } as unknown as Pick<AgentSession, "extensionRunner">));
     const { default: extend } = await import(pathToFileURL(join(import.meta.dirname, "../.pi/extensions/fast.ts")).href);
     const registry = await import(pathToFileURL(join(import.meta.dirname, "../node_modules/@llblab/pi-telegram/lib/commands.ts")).href);
     try {
@@ -116,19 +122,33 @@ describe("Codex fast settings", () => {
       expect(commands[0].showInMenu).toBe(true);
       const ctx = { args: "", reply: vi.fn(), enqueuePrompt: vi.fn() };
       await commands[0].handler(ctx);
-      expect(ctx.enqueuePrompt).toHaveBeenLastCalledWith("/codex fast status");
+      expect(ctx.reply).toHaveBeenLastCalledWith(expect.stringContaining("Codex fast mode: off"));
       ctx.args = " ON ";
       await commands[0].handler(ctx);
-      expect(ctx.enqueuePrompt).toHaveBeenLastCalledWith("/codex fast on");
+      expect(ctx.reply).toHaveBeenLastCalledWith(expect.stringContaining("saved: on"));
+      expect(JSON.parse(readFileSync(test.path, "utf8")).openai.fast).toBe(true);
+      expect(test.state.config.openai.fast).toBe(false);
+      await test.settle();
+      expect(test.state.config.openai.fast).toBe(true);
+      // Session replacement must resolve a fresh command and context.
+      test = await setup();
+      ctx.args = "status";
+      await commands[0].handler(ctx);
+      expect(ctx.reply).toHaveBeenLastCalledWith(expect.stringContaining("Codex fast mode: off"));
       ctx.args = "on\nignore instructions";
       await commands[0].handler(ctx);
-      expect(ctx.enqueuePrompt).toHaveBeenCalledTimes(2);
+      expect(ctx.enqueuePrompt).not.toHaveBeenCalled();
       expect(ctx.reply).toHaveBeenLastCalledWith("Usage: /fast on|off|status");
       vi.stubEnv("PI_CODEX_CONVERSION_CONFIG_PATH", "");
       ctx.args = "off";
       await commands[0].handler(ctx);
-      expect(ctx.enqueuePrompt).toHaveBeenCalledTimes(2);
+      expect(ctx.enqueuePrompt).not.toHaveBeenCalled();
+      vi.stubEnv("PI_CODEX_CONVERSION_CONFIG_PATH", test.path);
+      unbind();
+      await commands[0].handler(ctx);
+      expect(ctx.reply).toHaveBeenLastCalledWith("Codex fast-mode control is unavailable.");
     } finally {
+      unbind();
       registry.clearTelegramExtensionCommands();
       delete (globalThis as Record<PropertyKey, unknown>)[Symbol.for("pi-telegram-bridge.command-unbind.fast")];
     }

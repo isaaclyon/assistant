@@ -380,6 +380,11 @@ describe("startBridgeHost", () => {
         ]),
       );
       expect(host.runtime.session.getActiveToolNames()).not.toContain("imagegen");
+      const fastKey = Symbol.for("pi-telegram-bridge.codex-fast");
+      const fast = (globalThis as Record<PropertyKey, unknown>)[fastKey] as (action: string) => Promise<string>;
+      await expect(fast("on")).resolves.toContain("saved: on");
+      await expect(fast("status")).resolves.toContain("Codex fast mode: on");
+      expect(host.runtime.session.messages).toHaveLength(0);
       const messages: string[] = [];
       host.runtime.session.setThinkingLevel("low");
       const priorModel = host.runtime.session.model;
@@ -400,6 +405,9 @@ describe("startBridgeHost", () => {
       expect(messages).toContain("✅ New session started in this thread.");
       expect(host.runtime.session.model).toEqual(priorModel);
       expect(host.runtime.session.thinkingLevel).toBe("low");
+      await expect(fast("status")).resolves.toContain("Codex fast mode: on");
+      await expect(fast("off")).resolves.toContain("saved: off");
+      expect(host.runtime.session.messages).toHaveLength(0);
 
       const replacementSessionFile = host.runtime.session.sessionFile;
       expect(replacementSessionFile).toContain(join(root, "state", "sessions"));
@@ -423,6 +431,7 @@ describe("startBridgeHost", () => {
     expect(
       (globalThis as Record<PropertyKey, unknown>)[BRIDGE_RUNTIME_REGISTRY],
     ).toEqual({ version: 1 });
+    expect((globalThis as Record<PropertyKey, unknown>)[Symbol.for("pi-telegram-bridge.codex-fast")]).toBeUndefined();
     const unregister = registerTelegramHostNewSession(async () => ({ cancelled: false }));
     unregister();
   }, 40_000);
