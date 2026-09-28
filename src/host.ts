@@ -13,6 +13,7 @@ import { mkdir, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
 
 import { loadCapabilityProfile } from "./capabilities.js";
+import { bindCodexFast } from "./codex-fast.js";
 import { CONVERSATION_ROUTING_IDLE_MS, lastTelegramMessageTime, shouldStartNewConversation } from "./conversation-routing.js";
 import { createTypeSafeJudge } from "./semantic-judge.js";
 import {
@@ -400,6 +401,7 @@ export async function startBridgeHost({
   };
   try {
     bindings.push(bindBridgeRuntimeMarker());
+    bindings.push(bindCodexFast(() => runtime.session));
     // Publish the restart trigger for the repo-local /restart command. Deferring
     // to waitForIdle mirrors the shutdownHandler below so disposal never races an
     // in-flight turn; the daemon exits non-zero on this reason so systemd restarts.

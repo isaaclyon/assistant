@@ -17,7 +17,18 @@ export default function fastExtension(_pi: ExtensionAPI): void {
         await ctx.reply("Fast mode unavailable outside the assistant runtime.");
         return;
       }
-      await ctx.enqueuePrompt(`/codex fast ${action}`);
+      const control = (globalThis as Record<PropertyKey, unknown>)[
+        Symbol.for("pi-telegram-bridge.codex-fast")
+      ] as ((action: string) => Promise<string>) | undefined;
+      if (!control) {
+        await ctx.reply("Codex fast-mode control is unavailable.");
+        return;
+      }
+      try {
+        await ctx.reply(await control(action));
+      } catch {
+        await ctx.reply("Could not change Codex fast mode. Check the assistant logs and try /fast status.");
+      }
     },
   });
 }

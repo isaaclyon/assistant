@@ -20,8 +20,13 @@ Install pinned `@howaboua/pi-codex-conversion` as a repo dependency, load its en
 
 ## Telegram fast-mode control
 
-The repo-local `/fast on|off|status` command forwards validated arguments to
-`/codex fast` through Telegram's existing command queue. A source-checked
+The repo-local `/fast on|off|status` command calls a narrow, process-local host
+capability. The host resolves the current session's registered Codex command
+and creates a fresh official command context for each call, returning command
+notifications directly to Telegram. The capability accepts only these three
+actions and is removed during host disposal. It exposes no runtime object.
+Telegram's prompt queue decorates text for model delivery, so it cannot carry
+this control command. A source-checked
 addition to the same install patch handles these arguments only when the
 bridge config path is set. It uses Codex conversion's own settings writer and
 deferred application lifecycle, preserving active responses and applying the

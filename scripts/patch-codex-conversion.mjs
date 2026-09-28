@@ -43,7 +43,7 @@ await patchFile(
 );
 
 // Reuse the adapter's own deferred settings application in RPC mode. The
-// Telegram command only forwards validated arguments; it never reloads Pi.
+// Host capability invokes the registered command with a fresh command context.
 await patchFile(
   join(packageRoot, "dist", "ui", "settings", "command.js"),
   `            const arg = args.trim().toLowerCase();`,
