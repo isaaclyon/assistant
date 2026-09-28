@@ -217,6 +217,14 @@ hidden `memory-recall` session message. It leaves the system prompt
 unchanged to preserve prompt caching, and it fails open. See
 [ADR-0037](docs/adr/0037-recall-memory-with-jev-before-each-turn.md).
 
+Before human turns, the host resolves bounded English date phrases with
+Chrono using the original Telegram timestamp and instance timezone. The search
+extension consumes a matching, one-shot process-local handoff and supplies
+hidden date context even when memory recall is disabled. Opted-in recall also
+retrieves visible notes with explicit overlapping date intervals and gives
+Jev the resolved ranges. No canonical memory is written automatically. See
+[ADR-0038](docs/adr/0038-resolve-date-context-before-memory-recall.md).
+
 ## Startup
 
 1. Load the private instance manifest, select the instance named by `PI_TELEGRAM_BRIDGE_INSTANCE_ID`, validate its invariants, and resolve separate release, workspace, config, and state paths.

@@ -183,6 +183,16 @@ changed.
 Update the existing note's body rather than creating one note per list item or
 detail. There is no automatic event expiry and no behavioral inference.
 
+When explicitly asked to save a dated plan, anchor relative phrases to the
+original message's date context and write the actual dates in the body:
+`Dates: YYYY-MM-DD to YYYY-MM-DD (inclusive)`. Include the location when known.
+Automatic date hints are interpretations: preserve uncertainty and resolve
+material ambiguity before saving a definite date. Do not infer attendance from
+a weather question. Keep the user's original relative wording when useful.
+Recall can match explicit date intervals in active notes; it never interprets
+an old note's "next weekend" against today's date. Existing notes are not
+rewritten automatically.
+
 ## Happenings
 
 Entity notes may contain a strict, Obsidian-friendly history section:

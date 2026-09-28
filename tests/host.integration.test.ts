@@ -18,6 +18,7 @@ import {
   resolveBridgeInstanceConfig,
 } from "../src/config.js";
 import { startBridgeHost } from "../src/host.js";
+import { takePreparedDateContext } from "../src/date-context-runtime.js";
 import { parseBridgeInstanceManifest } from "../src/instances.js";
 import { enqueueJobHandoff } from "../src/job-handoff.js";
 import {
@@ -226,9 +227,10 @@ describe("startBridgeHost", () => {
       host.runtime.session.sessionManager.appendMessage({ role: "user", content: "[telegram] Coffee tips?", timestamp: now });
       const originalId = host.runtime.session.sessionId;
       now += 900_001;
-      const incoming = { historyText: "Plan a birthday party", sentAtMs: now };
+      const incoming = { historyText: "Plan a birthday party next weekend", sentAtMs: now };
       await expect(fork.prepareTelegramHostPrompt(incoming)).resolves.toEqual({ sessionReplaced: true });
       expect(host.runtime.session.sessionId).not.toBe(originalId);
+      expect(takePreparedDateContext(`[telegram] ${incoming.historyText}`)?.reference).toBe(new Date(now).toISOString());
       const judgeCalls = () => fetcher.mock.calls.filter(([url]) => url === "https://api.typesafe.ai/v1/systemone");
       const [, init] = judgeCalls()[0]!;
       expect(JSON.parse(init!.body as string).state.incoming_user_message).toBe(incoming.historyText);
@@ -868,6 +870,10 @@ describe("startBridgeHost", () => {
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining("Telegram is not configured"),
       );
+      const fork = await import(pathToFileURL(join(dirname(resolveTelegramExtensionPath()), "lib/host.ts")).href);
+      const sentAtMs = Date.parse("2026-09-28T05:12:17Z");
+      await expect(fork.prepareTelegramHostPrompt({ historyText: "tomorrow", sentAtMs })).resolves.toEqual({ sessionReplaced: false });
+      expect(takePreparedDateContext("[telegram] tomorrow")?.reference).toBe("2026-09-28T05:12:17.000Z");
     } finally {
       await host.dispose();
       if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
@@ -876,6 +882,7 @@ describe("startBridgeHost", () => {
     expect(
       (globalThis as Record<PropertyKey, unknown>)[TELEGRAM_HOST_REGISTRY],
     ).not.toHaveProperty("replacementGuard");
+    expect(takePreparedDateContext("[telegram] tomorrow")).toBeUndefined();
   }, 20_000);
 
   it("opens the durable inbox under stateDir, registers it, and releases it on dispose", async () => {
