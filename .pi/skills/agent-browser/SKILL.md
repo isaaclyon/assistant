@@ -37,11 +37,32 @@ the session's profile and debugging port. If it reports uncertain process
 identity, ask for operator inspection; do not kill that PID manually or delete
 its state to bypass the check.
 
-Start, status, and stop serialize through a crash-safe per-session lock. `start`
+Start, status, stop, and complete browser commands serialize through a crash-safe per-session lock. `start`
 reports `created` and a `launchId`; automation that created the session can use
 `stop default --if-launch <launchId>` to avoid stopping a later replacement.
-This is cleanup ownership, not an exclusive browsing lease. Do not run
-independent browser tasks in the same session concurrently.
+Protected input holds that lock across the entire handoff. Do not run independent
+browser tasks in the same session concurrently or bypass the helper with raw CDP.
+
+## Private Telegram sign-in input
+
+When `private_browser_input` is available, use it for user-authorized passwords
+or verification codes on ordinary HTTPS, same-origin POST forms. Inspect a single
+tab first; provide its exact URL, CSS selectors, and a same-origin `resumeUrl`
+without query or fragment. Never put values in tool arguments or chat. Tell the
+user to keep Tailscale connected and use the **Enter securely** button.
+
+The tool waits for input and then resumes the same turn. It disconnects the normal
+browser observer before entry and destroys sensitive page documents after a fill
+attempt, opening the requested clean resume page. `submitted` does not prove
+login succeeded: inspect that clean page afterward. This discards transient page
+state, so use SSH handoff for challenges that cannot survive reopening, JavaScript-only
+forms, embedded fields, multiple tabs, passkeys, or CAPTCHA.
+
+While private input is active, do not run parallel browser work, inspect runtime
+or profile files, or access raw CDP. If `browser_blocked` is returned, use the
+stock helper's `stop` command, then reopen the browser. Never delete its gate file
+or work around it. Old default agent-browser observers may require stop/reopen
+after upgrading; do not kill unrelated daemons.
 
 ## 1Password login credentials
 
@@ -67,9 +88,9 @@ agent-browser; it does not return TOTP seeds or other item fields. Never call
 `op item get` directly, print plugin responses, or place a service-account token
 in a command, environment variable, Telegram message, or repository file.
 
-Agent-browser does not currently provide a protected TOTP-fill protocol. If a
-site requests TOTP or another second factor, stop and use the secure interactive
-browser handoff rather than exposing the code to the model or process arguments.
+For a supported second-factor form, use `private_browser_input`. Otherwise use
+the secure interactive browser handoff rather than exposing the code to the model
+or process arguments. The 1Password provider still does not return TOTP seeds.
 
 Initial token installation is an operator action from a trusted local terminal,
 not Telegram. It writes private mode-`0600` files outside releases:

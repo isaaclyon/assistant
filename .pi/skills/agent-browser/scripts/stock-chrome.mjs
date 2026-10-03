@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { withMutationLock } from "../../../lib/mutation-lock.mjs";
 import {
   access,
@@ -13,7 +13,7 @@ import {
 } from "node:fs/promises";
 import { constants } from "node:fs";
 import { homedir } from "node:os";
-import { basename, delimiter, join } from "node:path";
+import { basename, delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
 
@@ -33,7 +33,8 @@ function safeName(value, fallback) {
   return normalized && SESSION_PATTERN.test(normalized) ? normalized : fallback;
 }
 
-function paths(session) {
+export function paths(session) {
+  if (!safeName(session)) throw new Error("Invalid browser session name");
   const instance = safeName(
     process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID,
     "local",
@@ -55,10 +56,21 @@ function paths(session) {
     statePath: join(runtimeDir, "state.json"),
     logPath: join(runtimeDir, "chrome.log"),
     devtoolsPath: join(profilePath, "DevToolsActivePort"),
+    protectedPath: join(runtimeDir, "protected-input.json"),
   };
 }
 
-async function executable(name, override) {
+export function agentSessionName(session) {
+  return `bridge-${createHash("sha256").update(paths(session).profilePath).digest("hex").slice(0, 24)}`;
+}
+
+export async function assertUnprotected(session) {
+  try { await access(paths(session).protectedPath); }
+  catch (error) { if (error.code === "ENOENT") return; throw error; }
+  throw new Error("Browser has protected input pending. Wait, or stop this browser to discard the protected page.");
+}
+
+export async function executable(name, override) {
   const candidates = override
     ? [override]
     : (process.env.PATH || "")
@@ -143,23 +155,26 @@ async function reserveLoopbackPort() {
   });
 }
 
-async function current(session) {
+export async function current(session) {
   const resolved = paths(session);
   const state = await readState(resolved.statePath);
-  if (state && await requireOwnedProcess(state, resolved) && (await endpointReady(state.port))) {
-    return { ...state, ...resolved, status: "running" };
+  if (state && await requireOwnedProcess(state, resolved)) {
+    if (await endpointReady(state.port)) return { ...state, ...resolved, status: "running" };
+    // Retain identity so stop can still kill a live browser and its sensitive tabs.
+    throw new Error("Browser debugging endpoint is unavailable; stop this browser before reopening it");
   }
   if (state) await rm(resolved.statePath, { force: true });
   return undefined;
 }
 
-async function withSessionLock(session, operation) {
+export async function withSessionLock(session, operation) {
   const { runtimeDir } = paths(session);
   await mkdir(runtimeDir, { recursive: true, mode: 0o700 });
   return withMutationLock(join(runtimeDir, ".lifecycle-lock.sqlite"), operation);
 }
 
 async function start(session) {
+  await assertUnprotected(session);
   const existing = await current(session);
   if (existing) return { ...existing, created: false };
 
@@ -259,6 +274,7 @@ async function stop(session, expectedLaunch) {
     }
   }
   await rm(resolved.statePath, { force: true });
+  await rm(resolved.protectedPath, { force: true });
   process.stdout.write(`${JSON.stringify({ status: "stopped", session })}\n`);
 }
 
@@ -300,39 +316,42 @@ async function main() {
   if (command === "run") {
     const args = rest[0] === "--" ? rest.slice(1) : rest;
     if (args.length === 0) throw new Error("run requires agent-browser arguments");
-    const state = await withSessionLock(session, () => start(session));
-    const agentBrowser = await executable(
-      "agent-browser",
-      process.env.STOCK_BROWSER_AGENT_BROWSER,
-    );
-    let plugins = [];
-    if (process.env.AGENT_BROWSER_PLUGINS) {
-      try {
-        plugins = JSON.parse(process.env.AGENT_BROWSER_PLUGINS);
-      } catch {
-        throw new Error("AGENT_BROWSER_PLUGINS must be valid JSON");
+    return withSessionLock(session, async () => {
+      const state = await start(session);
+      const agentBrowser = await executable(
+        "agent-browser",
+        process.env.STOCK_BROWSER_AGENT_BROWSER,
+      );
+      let plugins = [];
+      if (process.env.AGENT_BROWSER_PLUGINS) {
+        try {
+          plugins = JSON.parse(process.env.AGENT_BROWSER_PLUGINS);
+        } catch {
+          throw new Error("AGENT_BROWSER_PLUGINS must be valid JSON");
+        }
+        if (!Array.isArray(plugins)) {
+          throw new Error("AGENT_BROWSER_PLUGINS must be a JSON array");
+        }
       }
-      if (!Array.isArray(plugins)) {
-        throw new Error("AGENT_BROWSER_PLUGINS must be a JSON array");
-      }
-    }
-    plugins = plugins.filter((plugin) => plugin?.name !== "onepassword");
-    plugins.push({
-      name: "onepassword",
-      command: onePasswordProvider,
-      capabilities: ["credential.read"],
+      plugins = plugins.filter((plugin) => plugin?.name !== "onepassword");
+      plugins.push({
+        name: "onepassword",
+        command: onePasswordProvider,
+        capabilities: ["credential.read"],
+      });
+      const result = spawnSync(agentBrowser, ["--session", agentSessionName(session), "--cdp", String(state.port), ...args], {
+        stdio: "inherit",
+        env: { ...process.env, AGENT_BROWSER_PLUGINS: JSON.stringify(plugins) },
+      });
+      if (result.error) throw result.error;
+      process.exitCode = result.status ?? 1;
     });
-    const result = spawnSync(agentBrowser, ["--cdp", String(state.port), ...args], {
-      stdio: "inherit",
-      env: { ...process.env, AGENT_BROWSER_PLUGINS: JSON.stringify(plugins) },
-    });
-    if (result.error) throw result.error;
-    process.exitCode = result.status ?? 1;
-    return;
   }
   throw new Error(
     `Usage: ${basename(process.argv[1])} <start|status|stop|run> [session] [-- agent-browser args...]`,
   );
 }
 
-main().catch((error) => fail(error instanceof Error ? error.message : String(error)));
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => fail(error instanceof Error ? error.message : String(error)));
+}

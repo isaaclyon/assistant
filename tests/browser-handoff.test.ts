@@ -53,7 +53,7 @@ describe("temporary browser handoff", () => {
     const x11Log = join(root, "x11-args.json");
     const websockifyLog = join(root, "websockify-args.json");
     await Promise.all([
-      mkdir(browserRuntime, { recursive: true }),
+      mkdir(browserRuntime, { recursive: true, mode: 0o700 }),
       mkdir(bin),
       mkdir(webRoot),
     ]);

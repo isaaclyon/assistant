@@ -36,6 +36,7 @@ server.listen(requestedPort, "127.0.0.1", () => {
   fs.writeFileSync(profile + "/DevToolsActivePort", port + "\\n/devtools/browser/test\\n");
 });
 process.on("SIGTERM", () => server.close(() => process.exit(0)));
+process.on("SIGUSR1", () => server.close());
 setInterval(() => {}, 1000);
 `,
     );
@@ -93,6 +94,8 @@ exec "$@"
       );
       const invocation = JSON.parse(run.stdout);
       expect(invocation.args).toEqual([
+        "--session",
+        expect.stringMatching(/^bridge-[a-f0-9]{24}$/),
         "--cdp",
         String(state.port),
         "snapshot",
@@ -109,6 +112,11 @@ exec "$@"
         },
       ]);
 
+      // A crashed protected operation must remain closed until Chrome is stopped.
+      const protectedPath = join(root, "run/pi-agent-browser/test-instance/default/protected-input.json");
+      await writeFile(protectedPath, '{}', { mode: 0o600 });
+      await expect(execFileAsync(process.execPath, [helper, "run", "default", "--", "snapshot"], { env })).rejects.toThrow("protected input");
+
       await writeFile(join(state.profilePath, "persistent-marker"), "kept");
       await execFileAsync(process.execPath, [helper, "stop", "default"], { env });
       const restarted = await execFileAsync(
@@ -121,6 +129,11 @@ exec "$@"
       expect(JSON.parse(staleStop.stdout).status).toBe("not_owner");
       const stillRunning = await execFileAsync(process.execPath, [helper, "status", "default"], { env });
       expect(JSON.parse(stillRunning.stdout).status).toBe("running");
+      const statePath = join(root, "run/pi-agent-browser/test-instance/default/state.json");
+      const liveState = await readFile(statePath, "utf8");
+      process.kill(JSON.parse(liveState).pid, "SIGUSR1");
+      await expect(execFileAsync(process.execPath, [helper, "status", "default"], { env })).rejects.toThrow("endpoint is unavailable");
+      expect(await readFile(statePath, "utf8")).toBe(liveState);
     } finally {
       await execFileAsync(process.execPath, [helper, "stop", "default"], { env }).catch(
         () => undefined,

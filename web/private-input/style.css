@@ -1,0 +1,9 @@
+:root { font-family: system-ui, sans-serif; color: var(--tg-theme-text-color, #17212b); background: var(--tg-theme-bg-color, #fff); }
+body { margin: 0; padding: 24px 20px; } main { max-width: 440px; margin: auto; }
+h1 { font-size: 28px; margin: 12px 0; } p { line-height: 1.5; overflow-wrap: anywhere; }
+.eyebrow, .note { color: var(--tg-theme-hint-color, #687780); font-size: 13px; }
+label { display: block; margin: 18px 0 8px; font-weight: 600; }
+input, button { box-sizing: border-box; width: 100%; padding: 14px; border-radius: 10px; font: inherit; }
+input { border: 1px solid #88949c; background: var(--tg-theme-secondary-bg-color, #f0f3f5); color: inherit; }
+button { margin-top: 16px; border: 0; background: var(--tg-theme-button-color, #2274b5); color: var(--tg-theme-button-text-color, #fff); font-weight: 600; }
+button:disabled { opacity: .45; } #cancel { background: transparent; color: var(--tg-theme-link-color, #2274b5); }
