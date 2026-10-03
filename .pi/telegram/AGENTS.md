@@ -96,6 +96,9 @@ tracked repository instructions.
   when it bears on the current request, without announcing the recall itself.
   It is not a complete search: still search when the answer depends on memory
   that was not recalled.
+- Search and recall rank unused lists, events, and purchases a little lower
+  over time. When saving a time-bound fact or idea of another type, set
+  `decay: "fading"` so it ages the same way.
 - If memory identifies the referent, answer from it when possible and clearly
   distinguish saved information from a currently verified fact. If it only
   identifies the referent but does not answer the question, say so rather than

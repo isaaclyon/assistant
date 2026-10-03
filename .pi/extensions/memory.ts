@@ -10,9 +10,11 @@ const Id = Type.String({ format: "uuid" });
 const Revision = Type.String({ pattern: "^sha256:[0-9a-f]{64}$" });
 const Tags = Type.Array(Type.String({ minLength: 1, maxLength: 80 }), { maxItems: 30 });
 const Status = StringEnum(["active", "superseded", "archived"] as const);
+const Decay = StringEnum(["durable", "fading"] as const);
 const Patch = Type.Object({
   title: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   tags: Type.Optional(Tags), status: Type.Optional(Status),
+  decay: Type.Optional(Type.Union([Decay, Type.Null()])),
   bodyEdits: Type.Optional(Type.Array(Type.Object({
     expectedText: Type.String({ minLength: 1, maxLength: 200_000 }),
     replacementText: Type.String({ maxLength: 200_000 }),
@@ -89,13 +91,15 @@ export default function memoryExtension(pi: ExtensionAPI): void {
     promptGuidelines: [
       "Use assistant_memory for full-note reads and changes. Persist only memories the user explicitly asks to save.",
       "Before creating, call prepare_create and inspect possibleDuplicates. Update an existing note when it covers the same fact; use the creationToken only for a distinct new note. Reuse that token when checking a retried creation.",
+      "Notes rank by usage. Person, preference, recipe, and reference notes are durable; list, event, and purchase notes fade when unused. Set decay to fading for a time-bound fact or idea of a durable type, or durable for a list or event that stays relevant; null restores the type default.",
       "Read the current revision before updating. Use bodyEdits with expectedText that occurs exactly once and replacementText; preserve unrelated content. Reread on REVISION_CONFLICT or TEXT_CONFLICT.",
       "For deletion or sharing a personal note with the household, call request_delete or request_share. The direct Telegram buttons own confirmation. Wait for the user and never claim success while confirmation is pending; never bypass this through the CLI.",
     ],
     parameters: Type.Union([
       Type.Object({ action: Type.Literal("read"), id: Id }, { additionalProperties: false }),
       Type.Object({ action: Type.Literal("prepare_create"), type: StringEnum(["person", "preference", "event", "list", "recipe", "purchase", "reference"] as const),
-        title: Type.String({ minLength: 1, maxLength: 200 }), tags: Type.Optional(Tags), body: Type.String({ maxLength: 200_000 }) }, { additionalProperties: false }),
+        title: Type.String({ minLength: 1, maxLength: 200 }), tags: Type.Optional(Tags), body: Type.String({ maxLength: 200_000 }),
+        decay: Type.Optional(Decay) }, { additionalProperties: false }),
       Type.Object({ action: Type.Literal("create"), creationToken: Id }, { additionalProperties: false }),
       Type.Object({ action: Type.Literal("update"), id: Id, ifRevision: Revision, patch: Patch }, { additionalProperties: false }),
       Type.Object({ action: Type.Literal("request_delete"), id: Id, ifRevision: Revision }, { additionalProperties: false }),

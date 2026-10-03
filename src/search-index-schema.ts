@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 interface SchemaVersionRow { schema_version: number }
 
@@ -38,7 +38,8 @@ function initializeSchema(db: DatabaseSync): void {
       scope         TEXT NOT NULL,
       owner         TEXT,
       created_at    TEXT NOT NULL,
-      updated_at    TEXT NOT NULL
+      updated_at    TEXT NOT NULL,
+      decay         TEXT CHECK (decay IS NULL OR decay IN ('durable', 'fading'))
     ) STRICT;
 
     CREATE TABLE IF NOT EXISTS memory_embedding (
@@ -169,7 +170,7 @@ export function initializeSearchSchema(db: DatabaseSync): void {
     const existing = db
       .prepare("SELECT schema_version FROM search_index_metadata WHERE singleton = 1")
       .get() as unknown as SchemaVersionRow | undefined;
-    if (existing !== undefined && ![1, 2, SCHEMA_VERSION].includes(existing.schema_version)) {
+    if (existing !== undefined && ![1, 2, 3, SCHEMA_VERSION].includes(existing.schema_version)) {
       throw new Error(
         `Search index schema version ${existing.schema_version} is not supported; rebuild the derived index`,
       );
@@ -183,6 +184,12 @@ export function initializeSearchSchema(db: DatabaseSync): void {
     const columns = db.prepare("PRAGMA table_info(source_file_state)").all();
     if (!columns.some((column) => column.name === "scan_progress")) {
       db.exec("ALTER TABLE source_file_state ADD COLUMN scan_progress TEXT");
+    }
+    const memoryColumns = db.prepare("PRAGMA table_info(memory_document)").all();
+    if (!memoryColumns.some((column) => column.name === "decay")) {
+      db.exec("ALTER TABLE memory_document ADD COLUMN decay TEXT CHECK (decay IS NULL OR decay IN ('durable', 'fading'))");
+      // Cached parses predate the decay header; force a reparse on refresh.
+      db.exec("DELETE FROM memory_scan_source");
     }
     const sessionSchema = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'session_document'").get();
     if (String(sessionSchema?.sql).includes("UNIQUE (instance_id, session_id, entry_id)")) {

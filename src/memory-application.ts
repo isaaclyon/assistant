@@ -7,10 +7,11 @@ import { openSearchIndex, type MemoryDocumentSearchPage } from "./search-index.j
 import { rebuildMemoryIndex } from "./search-coordinator.js";
 import { prepareMemoryEmbeddings, searchHybridMemories } from "./memory-semantic.js";
 import { createOpenAIEmbedder } from "./openai-embeddings.js";
+import { appendMemoryRead, type MemoryDecay } from "./memory-usage.js";
 
-export interface MemoryDraft { type: string; title: string; tags?: string[]; body: string }
+export interface MemoryDraft { type: string; title: string; tags?: string[]; body: string; decay?: MemoryDecay }
 export interface MemoryPatch {
-  title?: string; tags?: string[]; status?: string;
+  title?: string; tags?: string[]; status?: string; decay?: MemoryDecay | null;
   bodyEdits?: Array<{ expectedText: string; replacementText: string }>;
 }
 export type MemoryConfirmationOperation = "delete" | "share";
@@ -54,7 +55,14 @@ export class MemoryApplication {
     return executeMemoryOperation(command, request, { env: this.env, cwd: this.cwd, confirmed });
   }
 
-  read(id: string) { return this.run("read", { id }); }
+  /** An agent read; also a usage signal for ranking (ADR-0043). */
+  async read(id: string) {
+    const note = await this.run("read", { id });
+    // Usage is a ranking hint; a failed log write never fails the read.
+    await appendMemoryRead(this.env.PI_TELEGRAM_BRIDGE_STATE_DIR!, String(note.id), new Date(this.now()))
+      .catch(() => undefined);
+    return note;
+  }
 
   private prune<T extends { expiresAt: number }>(map: Map<string, T>) {
     for (const [token, item] of map) if (item.expiresAt <= this.now()) map.delete(token);
@@ -62,7 +70,7 @@ export class MemoryApplication {
   }
 
   async prepareCreate(request: MemoryDraft) {
-    if (!request || Object.keys(request).some(key => !["type", "title", "tags", "body"].includes(key))) {
+    if (!request || Object.keys(request).some(key => !["type", "title", "tags", "body", "decay"].includes(key))) {
       fail("INVALID_INPUT", "Memory draft is invalid");
     }
     const draft = validateMemoryDraft(request) as MemoryDraft;
@@ -85,7 +93,7 @@ export class MemoryApplication {
 
   update(id: string, ifRevision: string, patch: MemoryPatch) {
     if (!patch || Object.keys(patch).length === 0 ||
-        Object.keys(patch).some(key => !["title", "tags", "status", "bodyEdits"].includes(key))) {
+        Object.keys(patch).some(key => !["title", "tags", "status", "decay", "bodyEdits"].includes(key))) {
       fail("INVALID_INPUT", "Use targeted text edits or metadata changes; sharing requires confirmation");
     }
     return this.run("update", { id, ifRevision, patch });
@@ -93,7 +101,7 @@ export class MemoryApplication {
 
   async requestConfirmation(operation: MemoryConfirmationOperation, id: string, revision: string) {
     if (operation !== "delete" && operation !== "share") fail("INVALID_INPUT", "Unknown memory operation");
-    const note = await this.read(id);
+    const note = await this.run("read", { id });
     if (note.revision !== revision) fail("REVISION_CONFLICT", "Memory changed since it was read");
     if (operation === "share" && note.scope !== "personal") fail("INVALID_INPUT", "This note is already household-visible");
     this.prune(this.confirmations);

@@ -15,7 +15,8 @@ or interpolate user text into shell commands.
 ## Typed memory operations
 
 - `read`: pass the stable `id`; the result includes the body and current revision.
-- `prepare_create`: pass `type`, `title`, `body`, and optional `tags`. Inspect
+- `prepare_create`: pass `type`, `title`, `body`, and optional `tags` and
+  `decay` (see Ranking and decay). Inspect
   `possibleDuplicates`, which uses current hybrid search when configured.
   Related results are suggestions, not proven duplicates. Read candidates when
   needed; update a matching note instead of creating another.
@@ -23,8 +24,8 @@ or interpolate user text into shell commands.
   Preparation saves no note. Tokens bind the draft, expire after ten minutes,
   and return the same result on retries within that session. A reset invalidates
   them; search again before preparing a replacement.
-- `update`: pass `id`, `ifRevision`, and a patch of `title`, `tags`, `status`, or
-  `bodyEdits`. Each edit contains `expectedText` and `replacementText`; expected
+- `update`: pass `id`, `ifRevision`, and a patch of `title`, `tags`, `status`,
+  `decay`, or `bodyEdits`. Each edit contains `expectedText` and `replacementText`; expected
   text must occur exactly once. Edits apply sequentially and all must succeed
   before anything is written. To append text, replace a unique ending passage
   with itself plus the addition.
@@ -132,6 +133,19 @@ changed.
   status.
 - Only active notes contribute `#core` blocks. Use Markdown links to explain
   what supersedes what; there is no structured supersession target.
+
+## Ranking and decay
+
+- Search and recall rank by match first, then by usage. Person, preference,
+  recipe, and reference notes are `durable` and never move. List, event, and
+  purchase notes are `fading`: after 30 days, one that is not read, recalled,
+  or edited drifts down up to three places.
+- When saving a time-bound fact or idea of a durable type (a current goal, a
+  temporary plan, a how-to that may go stale), pass `decay: "fading"`. Pass
+  `decay: "durable"` for a list or event that stays relevant regardless of use.
+  An update with `decay: null` restores the type default. The user may also edit
+  the `decay` header in Obsidian.
+- Usage never changes a note. Archive or supersede stale notes explicitly.
 
 ## Relationships and links
 

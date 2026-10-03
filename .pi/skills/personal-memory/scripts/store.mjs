@@ -27,6 +27,8 @@ export const MEMORY_TYPES = Object.freeze([
 export const MEMORY_STATUSES = Object.freeze(["active", "superseded", "archived"]);
 export const MEMORY_SCOPES = Object.freeze(["personal", "household"]);
 export const MEMORY_OWNERS = Object.freeze(["isaac", "emma"]);
+/** Optional ranking override; each type has a default (ADR-0043). */
+export const MEMORY_DECAYS = Object.freeze(["durable", "fading"]);
 
 export const MEMORY_TYPE_FOLDERS = Object.freeze({
   person: "people",
@@ -39,7 +41,7 @@ export const MEMORY_TYPE_FOLDERS = Object.freeze({
 });
 const NOTE_SCHEMA_VERSION = 2;
 const REQUIRED_MANAGED_KEYS = new Set(["schema", "id", "type", "title", "tags", "created", "updated"]);
-const MANAGED_KEYS = new Set([...REQUIRED_MANAGED_KEYS, "status", "scope", "owner"]);
+const MANAGED_KEYS = new Set([...REQUIRED_MANAGED_KEYS, "status", "decay", "scope", "owner"]);
 export const MEMORY_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const MAX_MEMORY_NOTE_BYTES = 256 * 1024;
 const MAX_TITLE_LENGTH = 200;
@@ -133,6 +135,11 @@ function validateStatus(status) {
   return status;
 }
 
+function validateDecay(decay) {
+  if (!MEMORY_DECAYS.includes(decay)) fail("INVALID_INPUT", "Memory decay is invalid");
+  return decay;
+}
+
 function validateScope(scope) {
   if (!MEMORY_SCOPES.includes(scope)) fail("INVALID_INPUT", "Memory scope is invalid");
   return scope;
@@ -212,7 +219,8 @@ function validateBody(body) {
 export function validateMemoryDraft(request) {
   const body = validateBody(request?.body ?? "");
   if (Buffer.byteLength(body, "utf8") > MAX_MEMORY_NOTE_BYTES - 4096) fail("INVALID_INPUT", "Memory body is too large");
-  return { type: validateType(request?.type), title: validateTitle(request?.title), tags: validateTags(request?.tags), body };
+  return { type: validateType(request?.type), title: validateTitle(request?.title), tags: validateTags(request?.tags), body,
+    ...(request?.decay === undefined ? {} : { decay: validateDecay(request.decay) }) };
 }
 
 function applyBodyEdits(body, edits) {
@@ -387,6 +395,7 @@ export function parseMarkdownMemoryNote(raw, expected = {}) {
     values.id = validateId(values.id);
     values.type = validateType(values.type);
     values.status = validateStatus(Object.hasOwn(values, "status") ? values.status : "active");
+    if (Object.hasOwn(values, "decay")) values.decay = validateDecay(values.decay);
     if (values.schema === 1) {
       values.scope = "personal";
       values.owner = "isaac";
@@ -433,6 +442,7 @@ function renderNote(note) {
     id: note.id,
     type: note.type,
     status: note.status,
+    ...(note.decay ? { decay: note.decay } : {}),
     scope: note.scope,
     ...(note.scope === "personal" ? { owner: note.owner } : {}),
     title: note.title,
@@ -444,6 +454,7 @@ function renderNote(note) {
   if (note.frontmatterDocument) {
     const document = note.frontmatterDocument.clone();
     if (note.scope === "household") document.delete("owner");
+    if (!note.decay) document.delete("decay");
     for (const [key, value] of Object.entries(managed)) {
       if (JSON.stringify(note.frontmatterValues?.[key]) === JSON.stringify(value)) continue;
       const sourceNode = document.get(key, true);
@@ -482,6 +493,7 @@ function renderNote(note) {
       `id: ${JSON.stringify(note.id)}`,
       `type: ${JSON.stringify(note.type)}`,
       `status: ${JSON.stringify(note.status)}`,
+      ...(note.decay ? [`decay: ${JSON.stringify(note.decay)}`] : []),
       `scope: ${JSON.stringify(note.scope)}`,
       ...(note.scope === "personal" ? [`owner: ${JSON.stringify(note.owner)}`] : []),
       `title: ${JSON.stringify(note.title)}`,
@@ -501,6 +513,7 @@ function publicMetadata(note, relativePath) {
     id: note.id,
     type: note.type,
     status: note.status,
+    ...(note.decay ? { decay: note.decay } : {}),
     scope: note.scope,
     ...(note.scope === "personal" ? { owner: note.owner } : {}),
     title: note.title,
@@ -695,6 +708,7 @@ export function createMarkdownMemoryStore(options) {
       const title = validateTitle(request?.title);
       const tags = validateTags(request?.tags);
       const body = validateBody(request?.body ?? "");
+      const decay = request?.decay === undefined ? undefined : validateDecay(request.decay);
       const scope = resolveNewScope(request);
       const id = validateId(randomUUID());
       const timestamp = now().toISOString();
@@ -703,7 +717,7 @@ export function createMarkdownMemoryStore(options) {
       const relativePath = join(MEMORY_TYPE_FOLDERS[type], `${id}.md`);
       const destination = join(root, relativePath);
       if (await assertRegularFile(destination)) fail("DUPLICATE_ID", "Memory id is duplicated");
-      const raw = renderNote({ schema: NOTE_SCHEMA_VERSION, id, type, status, ...scope, title, tags, created: timestamp, updated: timestamp, body });
+      const raw = renderNote({ schema: NOTE_SCHEMA_VERSION, id, type, status, ...(decay ? { decay } : {}), ...scope, title, tags, created: timestamp, updated: timestamp, body });
       const tempPath = await writeTemp(directory, id, raw);
       try {
         await link(tempPath, destination);
@@ -759,7 +773,7 @@ export function createMarkdownMemoryStore(options) {
       if (typeof ifRevision !== "string" || !patch || typeof patch !== "object" || Array.isArray(patch)) {
         fail("INVALID_INPUT", "Memory update is invalid");
       }
-      const allowed = new Set(["status", "scope", "title", "tags", "body", "bodyEdits"]);
+      const allowed = new Set(["status", "decay", "scope", "title", "tags", "body", "bodyEdits"]);
       if (Object.keys(patch).some((key) => !allowed.has(key))) fail("INVALID_INPUT", "Memory update is invalid");
       if (Object.hasOwn(patch, "body") && Object.hasOwn(patch, "bodyEdits")) fail("INVALID_INPUT", "Choose body replacement or targeted edits");
       const location = await locate(id);
@@ -777,6 +791,9 @@ export function createMarkdownMemoryStore(options) {
         scope,
         ...(scope === "personal" ? { owner: view.principal } : { owner: undefined }),
         status: Object.hasOwn(patch, "status") ? validateStatus(patch.status) : note.status,
+        // null clears the override so the type default applies again.
+        decay: Object.hasOwn(patch, "decay")
+          ? (patch.decay === null ? undefined : validateDecay(patch.decay)) : note.decay,
         title: Object.hasOwn(patch, "title") ? validateTitle(patch.title) : note.title,
         tags: Object.hasOwn(patch, "tags") ? validateTags(patch.tags) : note.tags,
         body: Object.hasOwn(patch, "bodyEdits") ? applyBodyEdits(note.body, patch.bodyEdits)

@@ -1,8 +1,10 @@
 # Memory usage and decay plan
 
-Status: approved, not implemented ([#165](https://github.com/isaaclyon/assistant/issues/165); links in [#166](https://github.com/isaaclyon/assistant/issues/166)).
-Write the ADR with the implementation; it
-relates to [ADR-0026](adr/0026-use-derived-fts-indexes-for-memory-and-session-search.md),
+Status: implemented; see
+[ADR-0043](adr/0043-rank-memory-by-usage-and-decay.md) and the
+[usage ranking notes](search-index.md#usage-ranking-and-decay)
+([#165](https://github.com/isaaclyon/assistant/issues/165); links in
+[#166](https://github.com/isaaclyon/assistant/issues/166)). It relates to [ADR-0026](adr/0026-use-derived-fts-indexes-for-memory-and-session-search.md),
 [ADR-0034](adr/0034-hybrid-semantic-memory-search.md), and
 [ADR-0037](adr/0037-recall-memory-with-jev-before-each-turn.md).
 
@@ -32,8 +34,8 @@ such as facts about people, never move.
 - **Grace period.** A `fading` note keeps its rank for 30 days after creation.
 - **Ranking.** After the grace period, a `fading` note drops up to three places
   in the result list: `round(3 * (1 - min(1, points / 3)))`. A note read within
-  the last few weeks drops nothing. A never-used note drops three. Durable
-  notes drop nothing. The same adjustment applies to the search tool and to
+  the last few weeks drops nothing. A never-used note drops one place after a
+  month and reaches three after about eight months. Durable notes drop nothing. The same adjustment applies to the search tool and to
   recall candidates, in hybrid and keyword-only search.
 - **Tuning data.** The recall log records each candidate's drop.
 

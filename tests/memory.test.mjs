@@ -227,6 +227,25 @@ describe("Markdown personal memory store", () => {
     expect(await readFile(path, "utf8")).toMatch(/^status: (?:"active"|active)$/mu);
   });
 
+  it("stores, edits in Obsidian, clears, and validates the optional decay override", async () => {
+    const { root, store } = await fixture();
+    const added = await store.add({ type: "reference", title: "Pi extensions", body: "Search npm.", decay: "fading" });
+    expect(added.decay).toBe("fading");
+    const path = join(root, added.relativePath);
+    expect(await readFile(path, "utf8")).toContain('status: "active"\ndecay: "fading"\n');
+    await writeFile(path, (await readFile(path, "utf8")).replace('decay: "fading"', "decay: durable"));
+    const edited = await store.read({ id: added.id });
+    expect(edited.decay).toBe("durable");
+    const cleared = await store.update({ id: added.id, ifRevision: edited.revision, patch: { decay: null } });
+    expect(cleared).not.toHaveProperty("decay");
+    expect(await readFile(path, "utf8")).not.toContain("decay");
+    const plain = await store.add({ type: "list", title: "Plain", body: "" });
+    expect(plain).not.toHaveProperty("decay");
+    await expectMemoryError(store.add({ type: "list", title: "Bad", body: "", decay: "sometimes" }), "INVALID_INPUT");
+    await writeFile(path, (await readFile(path, "utf8")).replace('status: "active"\n', 'status: "active"\ndecay: soon\n'));
+    await expectMemoryError(store.read({ id: added.id }), "MALFORMED_NOTE");
+  });
+
   it("updates lifecycle status and hides inactive notes unless explicitly requested", async () => {
     const { store } = await fixture();
     const archived = await store.add({ type: "reference", title: "Archived", body: "Old" });
