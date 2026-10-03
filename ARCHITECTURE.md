@@ -126,6 +126,14 @@ absence of a shadowing foreground Serve configuration, plus tailnet HTTPS
 health; see
 [ADR-0028](docs/adr/0028-serve-private-editable-messages-links.md).
 
+An explicitly launched private-form prototype runs outside the Pi host and
+Telegram polling lifecycle. It uses an owned foreground Tailscale Serve process,
+validates signed Telegram Mini App identity for the selected paired private user,
+and accepts only a literal dummy code. It sends only fixed status notifications,
+expires after fifteen minutes, and never controls Chrome. See
+[ADR-0039](docs/adr/0039-prototype-private-telegram-forms.md) and the
+[prototype runbook](docs/secure-input-demo.md).
+
 When `PI_TELEGRAM_SESSION_IDLE_HOURS` is enabled, the host records only accepted
 human prompt time and replacement correlation under each instance state tree.
 Jobs do not advance the clock. Immediately before a qualifying Telegram or job
