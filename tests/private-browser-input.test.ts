@@ -17,7 +17,7 @@ vi.mock("../.pi/skills/agent-browser/scripts/stock-chrome.mjs", () => ({
 vi.mock("../src/protected-browser.js", () => ({
   validateProtectedRequest: () => {}, protectBrowserPage: h.prepare,
 }));
-vi.mock("../src/private-input-server.js", () => ({ startPrivateInputServer: async (options: unknown) => { h.serverOptions = options; return { port: 9999, requestId: "opaque", done: h.done, close: h.serverClose }; } }));
+vi.mock("../src/private-input-server.js", () => ({ startPrivateInputServer: async (options: unknown) => { h.serverOptions = options; return { port: 9999, requestId: "opaque", expiresAt: Date.now() + 600_000, done: h.done, close: h.serverClose }; } }));
 vi.mock("../src/secure-input-demo-launch.js", async (original) => ({
   ...await original<object>(), readDemoTelegramProfile: async () => ({ botToken: "test-token", userId: 123 }), demoTelegramRequest: h.send,
 }));

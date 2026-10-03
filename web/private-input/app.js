@@ -3,12 +3,12 @@ const requestId = new URLSearchParams(location.hash.slice(1)).get("request");
 const initData = app?.initData ?? "";
 const form = document.querySelector("#input"), fields = document.querySelector("#fields");
 const status = document.querySelector("#status"), submit = document.querySelector("#submit"), cancel = document.querySelector("#cancel");
-let inputs = [], pending = false, step;
+let inputs = [], pending = false, step, canLookupEmail = false;
 const disable = () => { pending = false; submit.disabled = true; cancel.disabled = true; inputs.forEach((input) => { input.disabled = true; }); };
 const clear = () => inputs.forEach((input) => { input.value = ""; });
 async function request(action, extra = {}) {
   const response = await fetch(`/api/${action}`, { method: "POST", credentials: "omit", cache: "no-store",
-    headers: { "content-type": "application/json" }, body: JSON.stringify({ requestId, initData, ...extra }), signal: AbortSignal.timeout(30_000) });
+    headers: { "content-type": "application/json" }, body: JSON.stringify({ requestId, initData, ...extra }), signal: AbortSignal.timeout(75_000) });
   if (!response.ok) throw new Error("This request could not be completed. Return to chat and ask for a fresh form; do not resend values in chat.");
   return response.json();
 }
@@ -16,7 +16,7 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault(); if (!pending) return;
   const values = inputs.map((input) => input.value);
   let submitted = false;
-  disable(); clear(); status.textContent = "Submitting to the website…";
+  disable(); clear(); status.textContent = canLookupEmail ? "Submitting to the website… A matching email code may be filled automatically if your inbox is connected." : "Submitting to the website…";
   try {
     const result = await request("submit", { values, step });
     submitted = result.status === "submitted";
@@ -42,7 +42,8 @@ function render(result) {
     if (result.status !== "pending") { status.textContent = "This request has already ended. Return to chat."; return; }
     clear(); fields.replaceChildren(); inputs = []; step = result.step;
     const opentable = result.flow === "opentable";
-    status.textContent = opentable ? (result.fields[0] === "username" ? "Sign in to your existing OpenTable account. Enter your email to continue." :
+    canLookupEmail = opentable && result.fields[0] !== "code";
+    status.textContent = opentable ? (result.fields[0] === "username" ? "Sign in to your existing OpenTable account. Enter your email to continue. If this is your connected inbox, a matching verification code can be filled automatically." :
       result.fields[0] === "code" ? "Enter the six-digit verification code OpenTable sends you." : "Enter your OpenTable password to continue.") : "";
     for (const kind of result.fields) {
       const label = document.createElement("label"), input = document.createElement("input");

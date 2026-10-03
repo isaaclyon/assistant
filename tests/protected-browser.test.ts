@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PrivateCdp, protectBrowserPage, type ProtectedInputRequest } from "../src/protected-browser.js";
 import { openTableRequest } from "../src/opentable-private-flow.js";
+import { createPrivateLoginSubmission } from "../src/private-login-submission.js";
 
 const exec = promisify(execFile);
 const chrome = "/usr/bin/google-chrome";
@@ -45,7 +46,7 @@ describe.skipIf(!available)("protected CDP against real Chrome and a synthetic H
         res.setHeader("content-type", "text/html");
         if (req.url === "/") { res.end(signedIn ? "Safe home page" : '<iframe title="Sign in" src="/authenticate/start"></iframe>'); return; }
         res.end(`<div id="reflect"></div><main></main><script>
-          let kind = 'username';
+          let kind = 'username', destination = '';
           function render(next) {
             kind = next;
             if (next === 'register') { history.pushState({}, '', '/authenticate/register-1'); document.querySelector('main').innerHTML = '<h2>Create account</h2>'; return; }
@@ -53,11 +54,13 @@ describe.skipIf(!available)("protected CDP against real Chrome and a synthetic H
             const type = next === 'username' ? 'email' : next === 'code' ? 'text' : 'password';
             if (next !== 'username') history.pushState({}, '', '/authenticate/' + (next === 'code' ? 'verify-medium' : 'verify-credentials-2'));
             document.querySelector('main').innerHTML = '<form><input id="' + id + '" type="' + type + '"><button type="submit" data-test="continue-button" disabled>Continue</button></form>';
+            if (next === 'code') { const p = document.createElement('p'); p.id = 'delivery'; p.textContent = "We've sent a code to " + destination + ". Enter the code to continue."; document.querySelector('main').prepend(p); }
             const input = document.querySelector('input'), button = document.querySelector('button');
             input.addEventListener('input', () => { button.disabled = !input.value; if (kind === 'code' && input.value.length === 6) void send(input.value); });
             document.querySelector('form').onsubmit = event => { event.preventDefault(); void send(input.value); };
           }
           async function send(value) {
+            if (kind === 'username') destination = value;
             document.querySelector('#reflect').textContent += value; console.log(value); void fetch('/echo?value=' + encodeURIComponent(value));
             const response = await fetch(kind === 'username' ? '/stage' : '/complete', {method:'POST',body:JSON.stringify({kind,value})});
             if (kind === 'username') render((await response.json()).next); else parent.location.reload();
@@ -207,5 +210,25 @@ describe.skipIf(!available)("protected CDP against real Chrome and a synthetic H
       const output = (await agent(...args)).stdout;
       expect(output).not.toContain("synthetic@example.invalid"); expect(output).not.toContain("123456");
     }
+  }, 30_000);
+  it("fills a privately retrieved email code in the bound browser without returning it", async () => {
+    const f = await fixture(false, "code"), page = await protectBrowserPage(f.port, f.spec);
+    const flow = createPrivateLoginSubmission(page, async () => ({ takeCode: async () => "123456" }));
+    expect(await flow.submit(["synthetic@example.invalid"], new AbortController().signal)).toBeUndefined();
+    flow.close(); await page.close();
+    expect(f.steps).toEqual([{ kind: "username", value: "synthetic@example.invalid" }, { kind: "code", value: "123456" }]);
+  }, 30_000);
+  it.each(["+15555550123", "other@example.invalid"])("rejects an automatic code if the destination changes to %s during lookup", async (destination) => {
+    const f = await fixture(false, "code"), page = await protectBrowserPage(f.port, f.spec);
+    await page.submit(["synthetic@example.invalid"]);
+    expect(await page.isEmailCodeFor("synthetic@example.invalid")).toBe(true);
+    const edit = await PrivateCdp.connect(f.port);
+    const targetId = (await edit.request("Target.getTargets")).targetInfos.find((t: any) => t.type === "page").targetId;
+    const sessionId = (await edit.request("Target.attachToTarget", { targetId, flatten: true })).sessionId;
+    await edit.request("Runtime.evaluate", { expression: `document.querySelector('iframe').contentDocument.querySelector('#delivery').textContent = ${JSON.stringify(`We've sent a code to ${destination}. Enter the code to continue.`)}` }, sessionId);
+    edit.close();
+    expect(await page.isEmailCodeFor("synthetic@example.invalid")).toBe(false);
+    await expect(page.submit(["123456"], "synthetic@example.invalid")).rejects.toThrow();
+    await page.close(); expect(f.steps).toHaveLength(1);
   }, 30_000);
 });

@@ -57,6 +57,7 @@ export default function privateBrowserInput(pi: ExtensionAPI) {
     promptGuidelines: [
       "Use private_opentable_login for user-authorized OpenTable sign-in. Open its homepage, click Sign in, and select Use email instead before calling. Do not ask for email, password or code in chat.",
       "Tell the user to keep Tailscale connected and fill the Telegram form; it asks for each step while you wait. Do not inspect the browser during entry. Registration, account changes, CAPTCHA and unexpected steps stop the flow and need manual handoff.",
+      "In Gmail-enabled profiles, a fresh matching email code can be retrieved and filled privately when the receiving address matches the configured default inbox. Uncertain or unavailable lookup leaves manual input. Do not read an email thread into model context just to retrieve a code for this flow.",
     ],
     parameters: Type.Object({ session: Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,62}$" }) }, { additionalProperties: false }),
     async execute(_id, request, signal, update) {

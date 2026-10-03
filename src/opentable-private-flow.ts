@@ -45,6 +45,12 @@ export const OPENTABLE_FORM = String.raw`function(operation) {
   if (operation !== kind || !good()) return null;
   const setter = Object.getOwnPropertyDescriptor(page.HTMLInputElement.prototype, 'value').set;
   return {
+    emailCodeFor(email) {
+      if (kind !== 'code' || !good() || typeof email !== 'string') return false;
+      const expected = "we've sent a code to " + email.trim().toLowerCase() + ". enter the code to continue.";
+      return Array.from(doc.querySelectorAll('p')).some(p => p.getClientRects().length > 0 &&
+        p.innerText?.replace(/\s+/g, ' ').replace(/\u2019/g, "'").trim().toLowerCase() === expected);
+    },
     async fill(values) {
       if (!good() || values.length !== 1) return false;
       setter.call(input, values[0]);

@@ -102,7 +102,7 @@ export async function startPrivateInputServer(options: {
   if (options.signal.aborted) abort();
   timer = setTimeout(() => { if (state === "pending") finish("expired"); }, duration);
   return {
-    port: (server.address() as { port: number }).port, requestId, done,
+    port: (server.address() as { port: number }).port, requestId, expiresAt, done,
     async close() {
       clearTimeout(timer); options.signal.removeEventListener("abort", abort);
       if (state === "processing") await done;
