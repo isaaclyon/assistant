@@ -1,6 +1,7 @@
 # Memory usage and decay plan
 
-Status: approved, not implemented. Write the ADR with the implementation; it
+Status: approved, not implemented ([#165](https://github.com/isaaclyon/assistant/issues/165); links in [#166](https://github.com/isaaclyon/assistant/issues/166)).
+Write the ADR with the implementation; it
 relates to [ADR-0026](adr/0026-use-derived-fts-indexes-for-memory-and-session-search.md),
 [ADR-0034](adr/0034-hybrid-semantic-memory-search.md), and
 [ADR-0037](adr/0037-recall-memory-with-jev-before-each-turn.md).
