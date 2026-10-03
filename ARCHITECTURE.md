@@ -156,6 +156,15 @@ website delivery checks bind it to the protected step; no email content or code
 reaches Pi. Unavailable or ambiguous lookup retains manual input. See
 [ADR-0042](docs/adr/0042-private-email-verification-codes.md).
 
+The same private extension exposes `browser_takeover`: a signed Telegram Mini
+App displays the selected stock-Chrome Xvfb session through an authenticated
+WebSocket gateway and the existing owned VNC supervisor. The browser observer
+stays disconnected and the crash gate stays held until viewer revocation and
+cleanup. The user chooses a clean private return or explicitly shares the
+current website so in-page state can survive. Only a fixed status reaches Pi;
+see [ADR-0044](docs/adr/0044-telegram-browser-takeover.md) and
+[the takeover guide](docs/browser-takeover.md).
+
 When `PI_TELEGRAM_SESSION_IDLE_HOURS` is enabled, the host records only accepted
 human prompt time and replacement correlation under each instance state tree.
 Jobs do not advance the clock. Immediately before a qualifying Telegram or job
