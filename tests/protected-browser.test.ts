@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:https";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PrivateCdp, protectBrowserPage, type ProtectedInputRequest } from "../src/protected-browser.js";
 
 const exec = promisify(execFile);
@@ -74,8 +74,10 @@ describe.skipIf(!available)("protected CDP against real Chrome and a synthetic H
     expect(f.posted()).toBe("password=synthetic-secret-123");
     const inspect = await PrivateCdp.connect(f.port);
     try {
-      const pages = (await inspect.request("Target.getTargets")).targetInfos.filter((target: any) => target.type === "page");
-      expect(pages).toHaveLength(1); expect(pages[0].url).toBe(f.spec.resumeUrl);
+      await vi.waitFor(async () => {
+        const pages = (await inspect.request("Target.getTargets")).targetInfos.filter((target: any) => target.type === "page");
+        expect(pages).toHaveLength(1); expect(pages[0].url).toBe(f.spec.resumeUrl);
+      }, { timeout: 5_000, interval: 100 });
     } finally { inspect.close(); }
   }, 30_000);
   it("rejects a swapped field before transmitting a value", async () => {
