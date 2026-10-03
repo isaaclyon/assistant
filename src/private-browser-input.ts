@@ -10,6 +10,8 @@ import { protectBrowserPage, validateProtectedRequest, type ProtectedInputReques
 import { startPrivateInputServer, type PrivateInputStatus } from "./private-input-server.js";
 import type { BridgeInstanceConfig } from "./config.js";
 import { withMutationLock } from "../.pi/lib/mutation-lock.mjs";
+import { preparePrivateEmailCode } from "./private-email-code.js";
+import { createPrivateLoginSubmission } from "./private-login-submission.js";
 
 const exec = promisify(execFile);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -35,6 +37,7 @@ export async function runPrivateBrowserInput(options: {
     const browser = await current(request.session);
     if (!browser || options.signal.aborted) return { status: "unavailable" as const };
     let protectedPage: Awaited<ReturnType<typeof protectBrowserPage>> | undefined;
+    let privateSubmission: ReturnType<typeof createPrivateLoginSubmission> | undefined;
     let server: Awaited<ReturnType<typeof startPrivateInputServer>> | undefined;
     let proxy: ChildProcess | undefined;
     let messageId: number | undefined;
@@ -49,6 +52,8 @@ export async function runPrivateBrowserInput(options: {
       const binary = await executable("agent-browser", process.env.STOCK_BROWSER_AGENT_BROWSER);
       await exec(binary, ["--session", agentSessionName(request.session), "--cdp", String(browser.port), "close"], { timeout: 10_000, maxBuffer: 32_000 });
       protectedPage = await protectBrowserPage(browser.port, request);
+      if (request.flow === "opentable") privateSubmission = createPrivateLoginSubmission(protectedPage,
+        (recipient, signal) => preparePrivateEmailCode(config, recipient, signal));
       if (options.signal.aborted) controller.abort();
       if (controller.signal.aborted) throw new Error();
       // A single fixed private port serializes temporary input across instances.
@@ -62,7 +67,8 @@ export async function runPrivateBrowserInput(options: {
         assetsDir: join(config.resourceRoot, "web/private-input"),
         submit: async (values) => {
           if (controller.signal.aborted || (await current(request.session))?.launchId !== browser.launchId) throw new Error();
-          return protectedPage!.submit(values);
+          const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(Math.max(1, server!.expiresAt - Date.now()))]);
+          return privateSubmission ? privateSubmission.submit(values, signal) : protectedPage!.submit(values);
         },
       });
       const target = `http://127.0.0.1:${server.port}`;
@@ -87,6 +93,7 @@ export async function runPrivateBrowserInput(options: {
     finally {
       controller.abort(); options.signal.removeEventListener("abort", abort);
       await server?.close();
+      privateSubmission?.close();
       proxy?.kill("SIGTERM");
       try {
         await protectedPage?.close();

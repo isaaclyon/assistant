@@ -176,17 +176,24 @@ export async function protectBrowserPage(port: number, request: ProtectedInputRe
     throw new Error("Protected input requires one unattached HTTPS tab with a supported same-origin POST form");
   }
   return {
-    async submit(values: string[]): Promise<void | Array<"password" | "code">> {
+    async isEmailCodeFor(email: string): Promise<boolean> {
+      if (request.flow !== "opentable" || fieldKind !== "code" || consumed) return false;
+      const result = await cdp.request("Runtime.callFunctionOn", { objectId,
+        functionDeclaration: "function(email) { return this.emailCodeFor(email); }", arguments: [{ value: email }], returnByValue: true }, sessionId).catch(() => undefined);
+      return result?.result?.value === true && !result.exceptionDetails;
+    },
+    async submit(values: string[], expectedEmail?: string, signal?: AbortSignal): Promise<void | Array<"password" | "code">> {
       const fields = request.flow === "opentable" ? [{ kind: fieldKind, selector: "" }] : request.fields;
-      if (consumed || !validProtectedValues({ ...request, fields }, values)) throw new Error("Protected input rejected");
+      if (signal?.aborted || consumed || !validProtectedValues({ ...request, fields }, values)) throw new Error("Protected input rejected");
       consumed = true;
       const pages = (await cdp.request("Target.getTargets")).targetInfos.filter((target: any) => target.type === "page");
+      if (signal?.aborted) throw new Error("Private input ended");
       if (pages.length !== 1 || pages[0].targetId !== targetId || pages[0].url !== request.pageUrl) throw new Error("Protected page changed; request new input");
       // Mark before the command: an uncertain send may already have changed the DOM.
       touched = true;
       const response = await cdp.request("Runtime.callFunctionOn", {
-        objectId, functionDeclaration: "function(values) { return this.fill(values); }",
-        arguments: [{ value: values }], returnByValue: true, awaitPromise: true,
+        objectId, functionDeclaration: "function(values, email) { if (email && (!this.emailCodeFor || !this.emailCodeFor(email))) return false; return this.fill(values); }",
+        arguments: [{ value: values }, ...(expectedEmail ? [{ value: expectedEmail }] : [])], returnByValue: true, awaitPromise: true,
       }, sessionId);
       if (response.exceptionDetails || response.result?.value !== true) throw new Error("Protected page changed; request new input");
       if (request.flow === "opentable") {

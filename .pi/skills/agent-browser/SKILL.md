@@ -73,6 +73,13 @@ inside the sign-in iframe. Call the tool with only the session name. Tell the
 user to keep Tailscale connected and fill the **Enter securely** form; it asks
 for email, then password or a six-digit code while the same turn waits.
 
+In Gmail-enabled profiles, the protected operation can retrieve and fill a fresh
+email code automatically when the entered email matches the configured default
+mailbox and the website clearly names that recipient. Codes stay outside model
+context and chat. Unavailable or ambiguous lookup leaves the manual code form;
+do not use a model-facing email read to copy a code into the browser. The builder
+and profiles without a Google connection retain manual entry.
+
 This closed adapter keeps browser access paused across all steps. Never inspect
 the browser between steps or ask for values in chat. After `submitted`, verify
 login on the fresh homepage. Registration, phone entry, repeated challenges,

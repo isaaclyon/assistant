@@ -3,8 +3,8 @@ import { constants } from "node:fs";
 import { access, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
-import { parseCalendarWriteConfig, type CalendarWriteConfig } from "./google-calendar-writes.ts";
-import { classifyGoogleFailure, GoogleCommandError } from "./google-operations.ts";
+import { parseCalendarWriteConfig, type CalendarWriteConfig } from "./google-calendar-writes.js";
+import { classifyGoogleFailure, GoogleCommandError } from "./google-operations.js";
 
 export const DEFAULT_TIMEOUT_MS = 10_000;
 export const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;

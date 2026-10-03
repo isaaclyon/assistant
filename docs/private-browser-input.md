@@ -39,6 +39,8 @@ Use `private_opentable_login` for an existing OpenTable account:
 3. The Mini App asks for email, then the password or six-digit code requested by
    the website. The agent waits through all steps. Never ask for those values in
    chat or inspect the protected browser between steps.
+   In a Gmail-enabled profile, a fresh matching email code can be filled privately
+   without another form. The code never appears in the Mini App or agent results.
 4. After `submitted`, inspect the fresh homepage to verify the account is signed
    in. Stop the stock-Chrome session when finished; profile cookies persist.
 
@@ -46,6 +48,21 @@ This adapter supports the inspected same-origin sign-in frame and known login
 routes only. It rejects changed frames/fields, registration, repeated challenges,
 and unexpected steps. Interactive CAPTCHA, phone entry and unsupported screens
 need the existing SSH handoff. It never resends a code or retries a submission.
+
+### Automatic email codes
+
+Automatic lookup uses only the current instance's configured default Gmail
+account, and only when its capability profile already includes Google Workspace.
+The entered email must match that mailbox exactly, and the website's visible
+delivery notice must name that same email. There is no cross-profile credential
+sharing or account discovery. The builder currently has no Gmail connection.
+
+The private adapter checks sender authentication, recipient, receipt time and
+uniqueness; it never follows email instructions, opens links or attachments, or
+modifies messages. Lookup is brief and bounded. Missing mail, uncertain matches,
+SMS, aliases, unfamiliar templates or disconnected accounts leave a manual code
+field in the same protected Mini App. Do not retrieve a Gmail thread into model
+context just to copy a verification code into the browser.
 
 ## Status and recovery
 

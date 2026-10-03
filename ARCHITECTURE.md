@@ -149,6 +149,13 @@ pause across all steps; authenticated Mini App submissions use single-use step
 nonces. Only fixed terminal status reaches Pi. See
 [ADR-0041](docs/adr/0041-protected-opentable-sign-in.md).
 
+For profiles already authorized for Google Workspace, the OpenTable operation
+can retrieve a fresh, uniquely matching email code through the instance's own
+read-only Google transport and fill it privately. Exact mailbox/recipient and
+website delivery checks bind it to the protected step; no email content or code
+reaches Pi. Unavailable or ambiguous lookup retains manual input. See
+[ADR-0042](docs/adr/0042-private-email-verification-codes.md).
+
 When `PI_TELEGRAM_SESSION_IDLE_HOURS` is enabled, the host records only accepted
 human prompt time and replacement correlation under each instance state tree.
 Jobs do not advance the clock. Immediately before a qualifying Telegram or job
