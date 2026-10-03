@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
+import { isFeatureEnabled } from "./feature-flags.js";
 
 export const EMBEDDING_MODEL = "text-embedding-3-small";
 export const EMBEDDING_DIMENSIONS = 1536;
@@ -50,7 +51,7 @@ export function createOpenAIEmbedder({
   fetcher?: (url: string, init: RequestInit) => Promise<Response>;
   timeoutMs?: number;
 } = {}): EmbedTexts | undefined {
-  if (!env[OPENAI_EMBEDDING_KEY_FILE_ENV]?.trim()) return undefined;
+  if (!isFeatureEnabled("PI_TELEGRAM_MEMORY_SEMANTIC", env) || !env[OPENAI_EMBEDDING_KEY_FILE_ENV]?.trim()) return undefined;
   return async (inputs) => {
     if (inputs.length === 0 || inputs.length > 33 ||
         inputs.some((text) => !text.trim() || Buffer.byteLength(text) > 6000)) {

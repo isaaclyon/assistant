@@ -36,6 +36,15 @@ it("uses the fixed OpenAI contract and reorders and normalizes returned vectors"
   });
 });
 
+it("lets the semantic feature flag disable embeddings while retaining the key", async () => {
+  const fetcher = vi.fn();
+  expect(createOpenAIEmbedder({
+    env: { ...await config(), PI_TELEGRAM_MEMORY_SEMANTIC: "off" }, fetcher,
+  })).toBeUndefined();
+  expect(createOpenAIEmbedder({ env: { PI_TELEGRAM_MEMORY_SEMANTIC: "on" }, fetcher })).toBeUndefined();
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
 it("disables without configuration and rejects unsafe key files before networking", async () => {
   const fetcher = vi.fn();
   expect(createOpenAIEmbedder({ env: {}, fetcher })).toBeUndefined();

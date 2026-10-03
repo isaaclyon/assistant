@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { isRecord, isTelegramText, stripTelegramHeader, visibleText } from "./conversation-text.js";
 import type { SemanticJudge, SemanticJudgeRequest } from "./semantic-judge.js";
 import type { DateContext } from "./date-context.js";
+import { isFeatureEnabled } from "./feature-flags.js";
 
 /** ADR-0037: automatic memory recall before qualifying turns. */
 export const MEMORY_RECALL_ENV = "PI_TELEGRAM_MEMORY_RECALL";
@@ -70,6 +71,8 @@ export interface RecallLogRecord {
   trigger: RecallTrigger;
   outcome: RecallOutcome;
   model?: string;
+  /** Jev usage only; failures and older responses may not report it. */
+  inputTokens?: number;
   queries: number;
   ms: { search?: number; judge?: number; total: number };
   candidates: RecallDecision[];
@@ -93,7 +96,7 @@ export interface MemoryRecallDependencies {
 }
 
 export function isMemoryRecallEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env[MEMORY_RECALL_ENV]?.trim() === "jev";
+  return isFeatureEnabled(MEMORY_RECALL_ENV, env);
 }
 
 /**
@@ -295,6 +298,7 @@ export async function recallMemories(
     try {
       const judged = await dependencies.judge(buildRecallJudgeRequest(window, candidates));
       record.model = judged.model;
+      if (judged.inputTokens !== undefined) record.inputTokens = judged.inputTokens;
       probabilities = judged.probabilities;
     } catch {
       record.ms.judge = elapsed(judgeStarted);
