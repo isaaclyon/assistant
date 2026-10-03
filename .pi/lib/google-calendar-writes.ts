@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { GoogleRuntime } from "./google-transport.ts";
-import { GoogleCommandError } from "./google-operations.ts";
+import type { GoogleRuntime } from "./google-transport.js";
+import { GoogleCommandError } from "./google-operations.js";
 
 export interface CalendarWriteConfig { account: string; personal: string; thingsToDo: string }
 type Run = (runtime: GoogleRuntime, args: string[], signal?: AbortSignal) => Promise<unknown>;

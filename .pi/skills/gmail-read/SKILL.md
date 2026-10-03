@@ -61,6 +61,15 @@ proof that the message never existed.
   a message requires action. Infer actionability from the user's goals and the
   thread context, and label uncertain judgments.
 
+## Browser verification codes
+
+For an authorized OpenTable sign-in, use `private_opentable_login`. Its protected
+flow can read a uniquely matching code from the configured default inbox without
+putting the code or message into model context. It falls back to private manual
+entry when the account, recipient, sender, timing or message match is uncertain.
+Do not call `gmail_thread` merely to copy a login code into browser commands or
+chat. Other websites need their supported private-input flow or manual handoff.
+
 ## Proposed replies
 
 When asked to draft or propose a reply, read the relevant thread and write the
