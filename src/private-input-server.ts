@@ -8,17 +8,22 @@ import { validProtectedValues, type ProtectedInputRequest } from "./protected-br
 export type PrivateInputStatus = "submitted" | "cancelled" | "expired" | "failed";
 export async function startPrivateInputServer(options: {
   origin: string; botToken: string; userId: number; request: ProtectedInputRequest;
-  assetsDir: string; signal: AbortSignal; submit(values: string[]): Promise<void>;
+  assetsDir: string; signal: AbortSignal; submit(values: string[]): Promise<void | Array<"password" | "code">>;
   durationMs?: number;
 }) {
   const duration = options.durationMs ?? 10 * 60_000;
   const expiresAt = Date.now() + duration;
   const requestId = randomBytes(24).toString("base64url");
+  let step = randomBytes(24).toString("base64url");
+  let fields = options.request.fields;
+  const usedKinds = new Set(fields.map(({ kind }) => kind));
   let state: PrivateInputStatus | "pending" | "processing" = "pending";
   let settle!: (status: PrivateInputStatus) => void;
   const done = new Promise<PrivateInputStatus>((resolve) => { settle = resolve; });
   const finish = (status: PrivateInputStatus) => { state = status; settle(status); };
   const abort = () => { if (state === "pending") finish("cancelled"); };
+  const metadata = () => ({ status: state, origin: new URL(options.request.pageUrl).origin,
+    fields: fields.map(({ kind }) => kind), step, ...(options.request.flow ? { flow: options.request.flow } : {}) });
   let timer: ReturnType<typeof setTimeout> | undefined;
   const files = new Map(await Promise.all([
     ["/", "index.html", "text/html"], ["/app.js", "app.js", "text/javascript"], ["/style.css", "style.css", "text/css"],
@@ -53,21 +58,30 @@ export async function startPrivateInputServer(options: {
       const body = Buffer.concat(chunks);
       try { input = JSON.parse(body.toString("utf8")); } finally { body.fill(0); }
       if (!input || typeof input !== "object" || Array.isArray(input) ||
-          Object.keys(input).some((key) => !["requestId", "initData", ...(req.url === "/api/submit" ? ["values"] : [])].includes(key))) { reply(res, 400, { error: "invalid_request" }); return; }
+          Object.keys(input).some((key) => !["requestId", "initData", ...(req.url === "/api/submit" ? ["values", "step"] : [])].includes(key))) { reply(res, 400, { error: "invalid_request" }); return; }
       if (input.requestId !== requestId || typeof input.initData !== "string" ||
           !validateMiniAppIdentity(input.initData, options.botToken, options.userId, Date.now())) { reply(res, 403, { error: "unauthorized" }); return; }
       if (Date.now() >= expiresAt || options.signal.aborted) { reply(res, 410, { error: "expired" }); return; }
       if (req.url === "/api/auth") {
-        reply(res, 200, { status: state, origin: new URL(options.request.pageUrl).origin,
-          fields: options.request.fields.map(({ kind }) => kind) }); return;
+        reply(res, 200, metadata()); return;
       }
       if (state !== "pending") { reply(res, 409, { error: "already_used" }); return; }
       if (req.url === "/api/cancel") { reply(res, 200, { status: "cancelled" }); finish("cancelled"); return; }
-      if (!validProtectedValues(options.request, input.values)) { reply(res, 400, { error: "invalid_fields" }); return; }
+      if (input.step !== step) { reply(res, 409, { error: "stale_step" }); return; }
+      if (!validProtectedValues({ ...options.request, fields }, input.values)) { reply(res, 400, { error: "invalid_fields" }); return; }
       state = "processing"; // Consume before awaiting browser work; retries never fill twice.
       try {
-        await options.submit(input.values);
-        reply(res, 200, { status: "submitted" }); finish("submitted");
+        const next = await options.submit(input.values);
+        const ended = options.signal.aborted ? "cancelled" : Date.now() >= expiresAt ? "expired" : undefined;
+        if (ended) { reply(res, 200, { status: ended }); finish(ended); return; }
+        if (next !== undefined) {
+          if (options.request.flow !== "opentable" || !Array.isArray(next) || next.length !== 1 ||
+              !["password", "code"].includes(next[0]!) || usedKinds.has(next[0]!) || usedKinds.size >= 3) throw new Error();
+          usedKinds.add(next[0]!);
+          fields = next.map((kind) => ({ kind, selector: "" }));
+          step = randomBytes(24).toString("base64url"); state = "pending";
+          reply(res, 200, metadata());
+        } else { reply(res, 200, { status: "submitted" }); finish("submitted"); }
       } catch {
         reply(res, 409, { error: "page_changed_or_unavailable" }); finish("failed");
       }
@@ -93,7 +107,12 @@ export async function startPrivateInputServer(options: {
       clearTimeout(timer); options.signal.removeEventListener("abort", abort);
       if (state === "processing") await done;
       if (state === "pending") finish("cancelled");
-      await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); });
+      // Let the final response flush before ending the owned proxy. Bound shutdown
+      // even if another tailnet client leaves an incomplete request open.
+      await new Promise<void>((resolve) => {
+        const force = setTimeout(() => server.closeAllConnections(), 1_000);
+        server.close(() => { clearTimeout(force); resolve(); });
+      });
     },
   };
 }

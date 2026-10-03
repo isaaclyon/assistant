@@ -62,7 +62,7 @@ export async function runPrivateBrowserInput(options: {
         assetsDir: join(config.resourceRoot, "web/private-input"),
         submit: async (values) => {
           if (controller.signal.aborted || (await current(request.session))?.launchId !== browser.launchId) throw new Error();
-          await protectedPage!.submit(values);
+          return protectedPage!.submit(values);
         },
       });
       const target = `http://127.0.0.1:${server.port}`;
