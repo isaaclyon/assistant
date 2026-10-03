@@ -5,13 +5,15 @@ import { loadBridgeInstanceConfig } from "../../src/config.ts";
 import { runPrivateBrowserInput } from "../../src/private-browser-input.ts";
 import { openTableRequest } from "../../src/opentable-private-flow.ts";
 import type { ProtectedInputRequest } from "../../src/protected-browser.ts";
+import { runBrowserTakeover } from "../../src/browser-takeover.ts";
+import type { TakeoverRequest } from "../../src/browser-takeover-protection.ts";
 
 export default function privateBrowserInput(pi: ExtensionAPI) {
   let active: AbortController | undefined;
   let settling: Promise<unknown> | undefined;
   pi.on("session_shutdown", async () => { active?.abort(); await settling?.catch(() => {}); });
   pi.on("tool_call", () => active ? { block: true, reason: "Private browser input is active. Wait for its result." } : undefined);
-  async function execute(request: ProtectedInputRequest, signal: AbortSignal | undefined, notifyWaiting: () => void) {
+  async function execute(request: ProtectedInputRequest | TakeoverRequest, signal: AbortSignal | undefined, notifyWaiting: () => void) {
     if (active) throw new Error("Private input is already active");
     const controller = new AbortController(); active = controller;
     const abort = () => controller.abort();
@@ -22,14 +24,29 @@ export default function privateBrowserInput(pi: ExtensionAPI) {
       const registry = (globalThis as any)[Symbol.for("pi-telegram-bridge.target-scope-registry")];
       const target = registry?.provider?.getActiveTarget();
       if (!target) throw new Error();
-      const work = runPrivateBrowserInput({ config: await loadBridgeInstanceConfig(), request,
-        chatId: target.chatId, ...(target.threadId ? { threadId: target.threadId } : {}), signal: controller.signal, notifyWaiting });
+      const common = { config: await loadBridgeInstanceConfig(), chatId: target.chatId,
+        ...(target.threadId ? { threadId: target.threadId } : {}), signal: controller.signal, notifyWaiting };
+      const work = "fields" in request ? runPrivateBrowserInput({ ...common, request }) : runBrowserTakeover({ ...common, request });
       settling = work;
       details = await work;
     } catch { details = { status: "unavailable" }; }
     finally { signal?.removeEventListener("abort", abort); settling = undefined; if (active === controller) active = undefined; }
     return { content: [{ type: "text" as const, text: JSON.stringify(details) }], details };
   }
+  pi.registerTool(defineTool({
+    name: "browser_takeover", label: "Browser takeover",
+    description: "Let the paired user control a live stock-Chrome window inside a private Telegram Mini App. Pauses agent browser access until Hand back, cancellation or expiry. Requires one HTTPS tab and a clean same-origin resume URL. Only a fixed status returns; never browser images, keys or credentials.",
+    promptGuidelines: [
+      "Use browser_takeover for an authorized human-only browser step or when the user requests control. Tell them to keep Tailscale connected, tap Take over, and tap Hand back when finished. Wait for the tool result; do not run other tools or inspect the protected browser/runtime/profile.",
+      "Provide a clean HTTPS resumeUrl on the current site's origin without query or fragment. Return privately reopens it and discards tabs/unsaved page state while retaining cookies. Continue from this page is an explicit user choice that shares the visible website, including form contents; it preserves in-page state. Verify the resulting page afterward.",
+      "The human makes any consequential changes directly. A takeover does not authorize the assistant to make additional purchases, account changes or payments. Passkeys still need a compatible authenticator in that browser; takeover alone does not install or unlock 1Password.",
+      "If browser_blocked is returned, stop that session with the stock helper before reopening. Never delete the crash gate or bypass it with raw CDP. On cancelled or expired results, private cleanup reopens resumeUrl; do not infer that the user's task succeeded.",
+    ],
+    parameters: Type.Object({ session: Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,62}$" }), resumeUrl: Type.String({ maxLength: 2000 }) }, { additionalProperties: false }),
+    async execute(_id, request, signal, update) {
+      return execute(request, signal, () => update?.({ content: [{ type: "text", text: "Takeover sent. Waiting for the user to hand back the browser." }], details: undefined }));
+    },
+  }));
   pi.registerTool(defineTool({
     name: "private_browser_input",
     label: "Private browser input",
@@ -38,7 +55,7 @@ export default function privateBrowserInput(pi: ExtensionAPI) {
       "Use only for user-authorized sign-in or verification, never purchases, account changes, or payments. Never ask for values in chat or tool parameters.",
       "Inspect the form first. Provide CSS selectors, exact pageUrl and a same-origin resumeUrl without query/fragment. Tell the user you will wait while they fill the Telegram form.",
       "Do not run parallel browser work, bypass the stock-Chrome gate, inspect browser runtime/profile files, or call raw CDP. If browser_blocked, stop that browser with the stock helper before reopening it.",
-      "The generic private_browser_input supports ordinary same-origin POST forms. Use private_opentable_login for OpenTable's embedded email login. Other unsupported forms, frames, CAPTCHA, or passkeys need SSH handoff.",
+      "The generic private_browser_input supports ordinary same-origin POST forms. Use private_opentable_login for OpenTable's embedded email login. Use browser_takeover for authorized manual steps in other forms, frames or CAPTCHA; passkeys still require a compatible authenticator in that browser. SSH handoff remains a fallback.",
     ],
     parameters: Type.Object({
       session: Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,62}$" }),

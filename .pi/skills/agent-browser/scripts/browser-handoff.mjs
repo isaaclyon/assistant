@@ -15,7 +15,7 @@ import {
 } from "node:fs/promises";
 import { constants } from "node:fs";
 import { homedir } from "node:os";
-import { basename, delimiter, isAbsolute, join } from "node:path";
+import { basename, delimiter, isAbsolute, join, resolve } from "node:path";
 import { connect, createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { assertUnprotected, withSessionLock } from "./stock-chrome.mjs";
@@ -468,7 +468,7 @@ function parseMinutes(args) {
   return minutes;
 }
 
-async function start(session, args) {
+async function start(session, args, privateViewer = false) {
   const minutes = parseMinutes(args);
   const existing = await current(session);
   if (existing) return publicState(existing, session);
@@ -519,6 +519,7 @@ async function start(session, args) {
       String(webPort),
       "--expires-at-ms",
       String(expiresAtMs),
+      ...(privateViewer ? ["--no-clipboard"] : []),
     ],
     { detached: true, stdio: "ignore", env: helperEnvironment() },
   );
@@ -618,6 +619,7 @@ async function serve(session, args) {
       "-nevershared",
       "-noxdamage",
       "-quiet",
+      ...(args.includes("--no-clipboard") ? ["-nosel"] : []),
     ],
     { stdio: ["ignore", log.fd, log.fd] },
   );
@@ -708,7 +710,30 @@ async function main() {
   );
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exitCode = 1;
-});
+/** Internal use only: caller holds the stock-Chrome lock and crash gate. */
+export async function hasActiveHandoff(session) {
+  return !!(await current(session));
+}
+
+export async function startPrivateHandoff(session) {
+  if (await current(session)) throw new Error("Another handoff is active");
+  return start(session, ["--minutes", "10"], true);
+}
+
+export async function stopPrivateHandoff(session) {
+  const state = await readJson(paths(session).handoffStatePath);
+  await stop(session);
+  if (validHandoffState(state)) {
+    for (const kind of ["websockify", "x11vnc"]) {
+      if (!(await waitUntilStopped(() => trustedHandoffChild(state, kind), 1_000))) throw new Error("Handoff cleanup incomplete");
+    }
+    if (await supervisorAlive(state.supervisorPid, session)) throw new Error("Handoff cleanup incomplete");
+  }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === scriptPath) {
+  main().catch((error) => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
+}
