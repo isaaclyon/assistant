@@ -15,13 +15,20 @@ async function request(action, extra = {}) {
 form.addEventListener("submit", async (event) => {
   event.preventDefault(); if (!pending) return;
   const values = inputs.map((input) => input.value);
+  let submitted = false;
   disable(); clear(); status.textContent = "Submitting to the website…";
   try {
     const result = await request("submit", { values, step });
+    submitted = result.status === "submitted";
     if (result.status === "pending") render(result);
     else status.textContent = result.status === "submitted" ? "Sign-in form submitted. Return to chat while the assistant checks the result." : "Private input ended. Return to chat.";
   } catch (error) { status.textContent = error.message; }
   finally { values.fill(""); if (!pending) app?.disableClosingConfirmation(); }
+  if (submitted) {
+    // Clear input and disable the confirmation prompt before returning to chat.
+    // Keep the completion message as a fallback if the client cannot close.
+    try { app?.close(); } catch {}
+  }
 });
 cancel.addEventListener("click", async () => {
   if (!pending) return; disable(); clear();
