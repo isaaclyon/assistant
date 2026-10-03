@@ -26,13 +26,15 @@ describe.skipIf(available.some(value => !value))("real authenticated noVNC takeo
     // Only this synthetic fixture relaxes Chrome's sandbox for CI runners.
     // The stock helper's production flags stay unchanged.
     const testChrome = join(root, "chrome-test.sh");
-    await writeFile(testChrome, `#!/bin/sh\nexec "${chrome}" --no-sandbox "$@"\n`, { mode: 0o700 });
+    await writeFile(testChrome, `#!/bin/sh\nexec "${chrome}" --no-sandbox --ignore-certificate-errors "$@"\n`, { mode: 0o700 });
     vi.stubEnv("STOCK_BROWSER_CHROME", testChrome);
     await exec("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(root, "key"), "-out", join(root, "cert"), "-days", "1", "-subj", "/CN=localhost"]);
     let gatewayPort = 0;
     const statuses: string[] = [];
+    const received = new Set<string>();
     const proxy = createServer({ key: await readFile(join(root, "key")), cert: await readFile(join(root, "cert")) }, (req, res) => {
-      if (req.url === "/form") { res.setHeader("content-type", "text/html"); res.end('<h1>Takeover test</h1><input id="entry" autofocus><input id="password" type="password">'); return; }
+      if (req.url === "/form") { res.setHeader("content-type", "text/html"); res.end(`<h1>Takeover test</h1><input id="entry" style="width:600px;height:200px" autofocus><input id="password" type="password"><script>document.querySelector('#entry').oninput=()=>fetch('/typed',{method:'POST',body:document.querySelector('#entry').value})</script>`); return; }
+      if (req.url === "/typed") { let text = ""; req.on("data", chunk => { text += chunk; }); req.on("end", () => { received.add(text); res.end("ok"); }); return; }
       if (req.url === "/home") { res.end("Safe home"); return; }
       void (async () => {
         const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(chunk);
@@ -68,7 +70,7 @@ describe.skipIf(available.some(value => !value))("real authenticated noVNC takeo
     await remote.request("Page.navigate", { url: `${origin}/form` }, remoteSession);
     await vi.waitFor(async () => expect((await remote.request("Runtime.evaluate", { expression: "!!document.querySelector('#entry')", returnByValue: true }, remoteSession)).result.value).toBe(true));
     await remote.request("Runtime.evaluate", { expression: "document.querySelector('#entry').focus()" }, remoteSession);
-    const point = (await remote.request("Runtime.evaluate", { expression: "(()=>{const r=document.querySelector('#entry').getBoundingClientRect();return [screenX+r.x+10,screenY+outerHeight-innerHeight+r.y+10]})()", returnByValue: true }, remoteSession)).result.value;
+    const point = (await remote.request("Runtime.evaluate", { expression: "(()=>{const r=document.querySelector('#entry').getBoundingClientRect();return [screenX+r.x+r.width/2,screenY+outerHeight-innerHeight+r.y+r.height/2]})()", returnByValue: true }, remoteSession)).result.value;
     await remote.request("Target.detachFromTarget", { sessionId: remoteSession }); remote.close();
     const protectedPage = await protectBrowserTakeover(started.port, { session: "viewer", resumeUrl: `${origin}/home` });
     let restored = false;
@@ -99,7 +101,9 @@ describe.skipIf(available.some(value => !value))("real authenticated noVNC takeo
     await control.request("Input.dispatchMouseEvent", { type: "mousePressed", ...click, button: "left", clickCount: 1 }, sessionId);
     await control.request("Input.dispatchMouseEvent", { type: "mouseReleased", ...click, button: "left", clickCount: 1 }, sessionId);
     await evaluate("document.querySelector('#typing').value='synthetic-typed'; document.querySelector('#typing').dispatchEvent(new InputEvent('input',{bubbles:true}))");
-    await new Promise(r => setTimeout(r, 400));
+    // Wait for the synthetic site to acknowledge input, as a user would wait for
+    // their completed step, instead of racing VNC input with a fixed sleep.
+    await vi.waitFor(() => expect(received.has("synthetic-typed")).toBe(true), { timeout: 5_000 });
     await evaluate("document.querySelector('#handback').click(); document.querySelector('#share').click()");
     expect(await server.done).toEqual({ status: "handed_back", mode: "share" });
     await server.close(); await stopPrivateHandoff("viewer"); await protectedPage.finish("share"); restored = true;
