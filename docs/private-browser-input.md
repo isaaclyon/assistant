@@ -15,7 +15,11 @@ must be connected on the phone. No persistent listener or bot menu is installed.
    agent can verify login afterward. Never include values in tool arguments.
 3. The user taps **Enter securely**, checks the displayed website, enters values,
    and taps **Fill and submit sign-in form**. This explicitly submits that form.
-4. The tool waits and returns a fixed status. After `submitted`, inspect the
+4. After the final successful submission, the Mini App closes and returns the
+   user to chat. Intermediate steps and errors stay open; if the Telegram client
+   cannot close, the completion message remains visible. The user does not need
+   to send a separate “done” message.
+5. The tool waits and returns a fixed status. After `submitted`, inspect the
    clean resume page to verify sign-in. A new code challenge needs a new request.
 
 Supported pages must use HTTPS and an ordinary same-origin POST form. Inputs
