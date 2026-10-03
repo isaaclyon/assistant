@@ -33,7 +33,7 @@ describe.skipIf(available.some(value => !value))("real authenticated noVNC takeo
     const statuses: string[] = [];
     const received = new Set<string>();
     const proxy = createServer({ key: await readFile(join(root, "key")), cert: await readFile(join(root, "cert")) }, (req, res) => {
-      if (req.url === "/form") { res.setHeader("content-type", "text/html"); res.end(`<h1>Takeover test</h1><input id="entry" style="width:600px;height:200px" autofocus><input id="password" type="password"><script>document.querySelector('#entry').oninput=()=>fetch('/typed',{method:'POST',body:document.querySelector('#entry').value})</script>`); return; }
+      if (req.url === "/form") { res.setHeader("content-type", "text/html"); res.end(`<h1>Takeover test</h1><input id="entry" style="width:600px;height:200px;background:rgb(255,0,160)" autofocus><input id="password" type="password"><script>document.querySelector('#entry').oninput=()=>fetch('/typed',{method:'POST',body:document.querySelector('#entry').value})</script>`); return; }
       if (req.url === "/typed") { let text = ""; req.on("data", chunk => { text += chunk; }); req.on("end", () => { received.add(text); res.end("ok"); }); return; }
       if (req.url === "/home") { res.end("Safe home"); return; }
       void (async () => {
@@ -70,7 +70,6 @@ describe.skipIf(available.some(value => !value))("real authenticated noVNC takeo
     await remote.request("Page.navigate", { url: `${origin}/form` }, remoteSession);
     await vi.waitFor(async () => expect((await remote.request("Runtime.evaluate", { expression: "!!document.querySelector('#entry')", returnByValue: true }, remoteSession)).result.value).toBe(true));
     await remote.request("Runtime.evaluate", { expression: "document.querySelector('#entry').focus()" }, remoteSession);
-    const point = (await remote.request("Runtime.evaluate", { expression: "(()=>{const r=document.querySelector('#entry').getBoundingClientRect();return [screenX+r.x+r.width/2,screenY+outerHeight-innerHeight+r.y+r.height/2]})()", returnByValue: true }, remoteSession)).result.value;
     await remote.request("Target.detachFromTarget", { sessionId: remoteSession }); remote.close();
     const protectedPage = await protectBrowserTakeover(started.port, { session: "viewer", resumeUrl: `${origin}/home` });
     let restored = false;
@@ -95,15 +94,36 @@ describe.skipIf(available.some(value => !value))("real authenticated noVNC takeo
     const evaluate = async (expression: string) => (await control.request("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, sessionId)).result?.value;
     try { await vi.waitFor(async () => expect(await evaluate("document.querySelector('#status')?.textContent")).toContain("Assistant paused"), { timeout: 15_000 }); }
     catch { throw new Error(`Synthetic viewer failed: ${statuses.join(', ')}; ${JSON.stringify(await evaluate('window.clientErrors'))}`); }
-    expect(await evaluate("document.querySelector('#screen canvas').width > 0")).toBe(true);
-    await new Promise(r => setTimeout(r, 300));
-    const click = await evaluate(`(()=>{const c=document.querySelector('#screen canvas'),r=c.getBoundingClientRect(); return {x:r.x+${point[0]}*r.width/c.width,y:r.y+${point[1]}*r.height/c.height}})()`);
-    await control.request("Input.dispatchMouseEvent", { type: "mousePressed", ...click, button: "left", clickCount: 1 }, sessionId);
-    await control.request("Input.dispatchMouseEvent", { type: "mouseReleased", ...click, button: "left", clickCount: 1 }, sessionId);
-    await evaluate("document.querySelector('#typing').value='synthetic-typed'; document.querySelector('#typing').dispatchEvent(new InputEvent('input',{bubbles:true}))");
-    // Wait for the synthetic site to acknowledge input, as a user would wait for
-    // their completed step, instead of racing VNC input with a fixed sleep.
-    await vi.waitFor(() => expect(received.has("synthetic-typed")).toBe(true), { timeout: 5_000 });
+    try {
+      // Locate the fixture's pink input in actual received VNC pixels. This waits
+      // for rendering and avoids guessing native window borders or browser bars.
+      let click: { x: number; y: number } | null = null;
+      await vi.waitFor(async () => {
+        click = await evaluate(`(()=>{
+          const c=document.querySelector('#screen canvas'); if(!c?.width)return null;
+          const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data, points=[];
+          const pink=(x,y)=>{const p=(y*c.width+x)*4; return d[p]>220&&d[p+1]<40&&d[p+2]>120&&d[p+2]<200};
+          for(let y=8;y<c.height-8;y+=16)for(let x=8;x<c.width-8;x+=16)
+            if(pink(x,y)&&pink(x+8,y)&&pink(x,y+8))points.push([x+4,y+4]);
+          if(points.length<50)return null;
+          const [x,y]=points[Math.floor(points.length/2)], r=c.getBoundingClientRect();
+          return {x:r.x+x*r.width/c.width,y:r.y+y*r.height/c.height};
+        })()`);
+        expect(click).not.toBeNull();
+      }, { timeout: 10_000 });
+      await control.request("Input.dispatchMouseEvent", { type: "mousePressed", ...click!, button: "left", clickCount: 1 }, sessionId);
+      await control.request("Input.dispatchMouseEvent", { type: "mouseReleased", ...click!, button: "left", clickCount: 1 }, sessionId);
+      await evaluate("document.querySelector('#typing').value='synthetic-typed'; document.querySelector('#typing').dispatchEvent(new InputEvent('input',{bubbles:true}))");
+      await vi.waitFor(() => expect(received.has("synthetic-typed")).toBe(true), { timeout: 5_000 });
+    } catch (error) {
+      // Synthetic fixture diagnostics only; production never captures frames.
+      const image = await evaluate("document.querySelector('#screen canvas')?.toDataURL('image/png')");
+      if (image) {
+        await mkdir("/tmp/pi-takeover-test-diagnostics", { recursive: true, mode: 0o700 });
+        await writeFile("/tmp/pi-takeover-test-diagnostics/viewer.png", Buffer.from(image.split(",")[1], "base64"));
+      }
+      throw error;
+    }
     await evaluate("document.querySelector('#handback').click(); document.querySelector('#share').click()");
     expect(await server.done).toEqual({ status: "handed_back", mode: "share" });
     await server.close(); await stopPrivateHandoff("viewer"); await protectedPage.finish("share"); restored = true;
