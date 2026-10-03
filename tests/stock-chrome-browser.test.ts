@@ -36,6 +36,7 @@ server.listen(requestedPort, "127.0.0.1", () => {
   fs.writeFileSync(profile + "/DevToolsActivePort", port + "\\n/devtools/browser/test\\n");
 });
 process.on("SIGTERM", () => server.close(() => process.exit(0)));
+process.on("SIGUSR1", () => server.close());
 setInterval(() => {}, 1000);
 `,
     );
@@ -128,6 +129,11 @@ exec "$@"
       expect(JSON.parse(staleStop.stdout).status).toBe("not_owner");
       const stillRunning = await execFileAsync(process.execPath, [helper, "status", "default"], { env });
       expect(JSON.parse(stillRunning.stdout).status).toBe("running");
+      const statePath = join(root, "run/pi-agent-browser/test-instance/default/state.json");
+      const liveState = await readFile(statePath, "utf8");
+      process.kill(JSON.parse(liveState).pid, "SIGUSR1");
+      await expect(execFileAsync(process.execPath, [helper, "status", "default"], { env })).rejects.toThrow("endpoint is unavailable");
+      expect(await readFile(statePath, "utf8")).toBe(liveState);
     } finally {
       await execFileAsync(process.execPath, [helper, "stop", "default"], { env }).catch(
         () => undefined,

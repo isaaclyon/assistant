@@ -96,7 +96,7 @@ describe.skipIf(!available)("protected CDP against real Chrome and a synthetic H
     try { await expect(protectBrowserPage(f.port, f.spec)).rejects.toThrow("unattached"); }
     finally { observer.close(); }
   }, 20_000);
-  it.each(['formaction="https://other.invalid/"', 'formmethod="get"'])("rejects submit-button override %s", async (attribute) => {
+  it.each(['formaction="https://other.invalid/"', 'formmethod="get"', 'formmethod=""'])("rejects submit-button override %s", async (attribute) => {
     const f = await fixture();
     const edit = await PrivateCdp.connect(f.port);
     const targetId = (await edit.request("Target.getTargets")).targetInfos.find((t: any) => t.type === "page").targetId;

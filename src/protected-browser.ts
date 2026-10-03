@@ -86,7 +86,7 @@ const BIND_FORM = String.raw`function(spec) {
   const good = () => page.location.href === spec.pageUrl && form?.isConnected && form.method.toLowerCase() === "post" &&
     new URL(form.action).origin === page.location.origin && form.action === action && button?.isConnected && !button.disabled &&
     button.getAttribute('formaction') === overrideAction && button.getAttribute('formmethod') === overrideMethod &&
-    (!overrideAction || new URL(button.formAction).origin === page.location.origin) && (!overrideMethod || overrideMethod.toLowerCase() === 'post') &&
+    (overrideAction === null || new URL(button.formAction).origin === page.location.origin) && (overrideMethod === null || overrideMethod.toLowerCase() === 'post') &&
     unique(spec.submitSelector) === button && button.form === form &&
     inputs.every((input, index) => input instanceof page.HTMLInputElement && input.isConnected && input.form === form && !input.disabled && !input.readOnly &&
       unique(spec.fields[index].selector) === input && input.getClientRects().length > 0 &&

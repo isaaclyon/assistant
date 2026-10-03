@@ -158,8 +158,10 @@ async function reserveLoopbackPort() {
 export async function current(session) {
   const resolved = paths(session);
   const state = await readState(resolved.statePath);
-  if (state && await requireOwnedProcess(state, resolved) && (await endpointReady(state.port))) {
-    return { ...state, ...resolved, status: "running" };
+  if (state && await requireOwnedProcess(state, resolved)) {
+    if (await endpointReady(state.port)) return { ...state, ...resolved, status: "running" };
+    // Retain identity so stop can still kill a live browser and its sensitive tabs.
+    throw new Error("Browser debugging endpoint is unavailable; stop this browser before reopening it");
   }
   if (state) await rm(resolved.statePath, { force: true });
   return undefined;
