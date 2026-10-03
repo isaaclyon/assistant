@@ -18,6 +18,7 @@ import { homedir } from "node:os";
 import { basename, delimiter, isAbsolute, join } from "node:path";
 import { connect, createServer } from "node:net";
 import { fileURLToPath } from "node:url";
+import { assertUnprotected, withSessionLock } from "./stock-chrome.mjs";
 
 const SESSION_PATTERN = /^[a-z0-9][a-z0-9._-]{0,62}$/;
 const DISPLAY_PATTERN = /^:\d+(?:\.\d+)?$/;
@@ -680,7 +681,11 @@ async function main() {
   const session = safeName(requestedSession);
   if (!session) throw new Error(`Invalid browser session name: ${requestedSession}`);
   if (command === "start") {
-    process.stdout.write(`${JSON.stringify(await start(session, args))}\n`);
+    const result = await withSessionLock(session, async () => {
+      await assertUnprotected(session);
+      return start(session, args);
+    });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
     return;
   }
   if (command === "status") {

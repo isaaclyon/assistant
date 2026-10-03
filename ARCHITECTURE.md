@@ -134,6 +134,15 @@ expires after fifteen minutes, and never controls Chrome. See
 [ADR-0039](docs/adr/0039-prototype-private-telegram-forms.md) and the
 [prototype runbook](docs/secure-input-demo.md).
 
+Private personal and builder profiles also expose a bounded active-turn
+`private_browser_input` tool. It owns a temporary authenticated Mini App and a
+direct private CDP fill operation under the stock-Chrome session mutex. A durable
+gate blocks ordinary browser commands after uncertain cleanup. The normal
+agent-browser daemon disconnects before entry; after submission the sensitive
+tabs are destroyed and an explicit safe page is opened before the agent resumes.
+See [ADR-0040](docs/adr/0040-protected-telegram-browser-input.md) and
+[the workflow and recovery guide](docs/private-browser-input.md).
+
 When `PI_TELEGRAM_SESSION_IDLE_HOURS` is enabled, the host records only accepted
 human prompt time and replacement correlation under each instance state tree.
 Jobs do not advance the clock. Immediately before a qualifying Telegram or job

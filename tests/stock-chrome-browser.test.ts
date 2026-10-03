@@ -93,6 +93,8 @@ exec "$@"
       );
       const invocation = JSON.parse(run.stdout);
       expect(invocation.args).toEqual([
+        "--session",
+        expect.stringMatching(/^bridge-[a-f0-9]{24}$/),
         "--cdp",
         String(state.port),
         "snapshot",
@@ -108,6 +110,11 @@ exec "$@"
           capabilities: ["credential.read"],
         },
       ]);
+
+      // A crashed protected operation must remain closed until Chrome is stopped.
+      const protectedPath = join(root, "run/pi-agent-browser/test-instance/default/protected-input.json");
+      await writeFile(protectedPath, '{}', { mode: 0o600 });
+      await expect(execFileAsync(process.execPath, [helper, "run", "default", "--", "snapshot"], { env })).rejects.toThrow("protected input");
 
       await writeFile(join(state.profilePath, "persistent-marker"), "kept");
       await execFileAsync(process.execPath, [helper, "stop", "default"], { env });
