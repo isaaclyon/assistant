@@ -41,10 +41,11 @@ describe.skipIf(!available)("protected CDP against real Chrome and a synthetic H
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     cleanup.push(() => new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); }));
     const origin = `https://127.0.0.1:${(server.address() as { port: number }).port}`;
-    const chromeArgs = ["--no-sandbox", "--disable-gpu", "--ignore-certificate-errors", "--no-first-run", `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", `${origin}/form`];
+    const chromeArgs = ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--ignore-certificate-errors", "--no-first-run", `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", `${origin}/form`];
     child = spawn(headed ? "xvfb-run" : chrome, headed ? ["-a", chrome, ...chromeArgs] : ["--headless", ...chromeArgs], { stdio: "ignore", detached: true });
     let port = 0;
-    for (let attempt = 0; attempt < 80; attempt++) {
+    const startupDeadline = Date.now() + 15_000;
+    while (Date.now() < startupDeadline && child.exitCode === null && child.signalCode === null) {
       try { port = Number((await readFile(join(root, "profile/DevToolsActivePort"), "utf8")).split("\n")[0]); break; } catch { await delay(50); }
     }
     if (!port) throw new Error("Test Chrome did not start");
@@ -76,7 +77,7 @@ describe.skipIf(!available)("protected CDP against real Chrome and a synthetic H
       const pages = (await inspect.request("Target.getTargets")).targetInfos.filter((target: any) => target.type === "page");
       expect(pages).toHaveLength(1); expect(pages[0].url).toBe(f.spec.resumeUrl);
     } finally { inspect.close(); }
-  }, 20_000);
+  }, 30_000);
   it("rejects a swapped field before transmitting a value", async () => {
     const f = await fixture();
     const page = await protectBrowserPage(f.port, f.spec);
@@ -87,7 +88,7 @@ describe.skipIf(!available)("protected CDP against real Chrome and a synthetic H
     mutation.close();
     await expect(page.submit(["synthetic-secret-123"])).rejects.toThrow("page changed");
     await page.close(); expect(f.posted()).toBe("");
-  }, 20_000);
+  }, 30_000);
   it("refuses an existing debugger before accepting private input", async () => {
     const f = await fixture();
     const observer = await PrivateCdp.connect(f.port);
@@ -95,7 +96,7 @@ describe.skipIf(!available)("protected CDP against real Chrome and a synthetic H
     await observer.request("Target.attachToTarget", { targetId, flatten: true });
     try { await expect(protectBrowserPage(f.port, f.spec)).rejects.toThrow("unattached"); }
     finally { observer.close(); }
-  }, 20_000);
+  }, 30_000);
   it.each(['formaction="https://other.invalid/"', 'formmethod="get"', 'formmethod=""'])("rejects submit-button override %s", async (attribute) => {
     const f = await fixture();
     const edit = await PrivateCdp.connect(f.port);
@@ -106,7 +107,7 @@ describe.skipIf(!available)("protected CDP against real Chrome and a synthetic H
     await edit.request("Target.detachFromTarget", { sessionId }); edit.close();
     await expect(protectBrowserPage(f.port, f.spec)).rejects.toThrow("supported");
     expect(f.posted()).toBe("");
-  }, 20_000);
+  }, 30_000);
   it.skipIf(!agentAvailable || !xvfbAvailable)("disconnects the real observer and resumes headed Chrome without leaked DOM or console output", async () => {
     const f = await fixture(true);
     const session = `private-input-test-${f.port}`;
