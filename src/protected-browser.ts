@@ -1,3 +1,5 @@
+import { OPENTABLE_FORM, openTableRequest } from "./opentable-private-flow.js";
+
 /** Narrow CDP client. Protocol errors, events, URLs, and page values never escape. */
 export class PrivateCdp {
   private sequence = 0;
@@ -47,6 +49,7 @@ export class PrivateCdp {
 }
 
 export interface ProtectedInputRequest {
+  flow?: "opentable";
   session: string;
   pageUrl: string;
   resumeUrl: string;
@@ -58,6 +61,12 @@ export function validateProtectedRequest(request: ProtectedInputRequest): void {
   if (!/^[a-z0-9][a-z0-9._-]{0,62}$/.test(request.session)) throw new Error("Invalid browser session");
   const page = new URL(request.pageUrl), resume = new URL(request.resumeUrl);
   if (page.protocol !== "https:" || page.username || page.password || resume.origin !== page.origin || resume.username || resume.password || resume.search || resume.hash) throw new Error("Use HTTPS and a same-origin resume URL without query or fragment");
+  if (request.flow !== undefined) {
+    const expected = openTableRequest(request.session);
+    if (request.flow !== "opentable" || request.pageUrl !== expected.pageUrl || request.resumeUrl !== expected.resumeUrl ||
+        JSON.stringify(request.fields) !== JSON.stringify(expected.fields) || request.submitSelector !== expected.submitSelector) throw new Error("Invalid protected flow");
+    return;
+  }
   if (request.fields.length < 1 || request.fields.length > 3 || new Set(request.fields.map((field) => field.kind)).size !== request.fields.length ||
       new Set(request.fields.map((field) => field.selector)).size !== request.fields.length ||
       request.fields.some((field) => !["username", "password", "code"].includes(field.kind)) ||
@@ -65,10 +74,11 @@ export function validateProtectedRequest(request: ProtectedInputRequest): void {
       [...request.fields.map((field) => field.selector), request.submitSelector].some((selector) => !selector || selector.length > 300)) throw new Error("Invalid protected fields");
 }
 
-export function validProtectedValues(request: ProtectedInputRequest, values: unknown): values is string[] {
+export function validProtectedValues(request: Pick<ProtectedInputRequest, "fields" | "flow">, values: unknown): values is string[] {
   return Array.isArray(values) && values.length === request.fields.length && values.every((value, index) =>
     typeof value === "string" && value.length > 0 && value.length <= 1024 &&
-    (request.fields[index]!.kind !== "code" || /^[a-zA-Z0-9 -]{3,32}$/.test(value)));
+    (request.fields[index]!.kind !== "code" || (request.flow === "opentable" ? /^\d{6}$/ : /^[a-zA-Z0-9 -]{3,32}$/).test(value)) &&
+    (request.flow !== "opentable" || request.fields[index]!.kind !== "username" || (value.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))));
 }
 
 // This function runs in a Chrome isolated world, never in the model's context.
@@ -119,6 +129,29 @@ export async function protectBrowserPage(port: number, request: ProtectedInputRe
   let objectId: string | undefined;
   let touched = false;
   let consumed = false;
+  let context: number;
+  let fieldKind: "username" | "password" | "code" = "username";
+  const usedKinds = new Set<string>();
+  let flowFrame: { id: string; loaderId: string; topLoaderId: string } | undefined;
+  const evaluateFlow = async (operation: string, returnByValue = false) => {
+    const tree = (await cdp.request("Page.getFrameTree", {}, sessionId)).frameTree;
+    const frame = tree.frame;
+    if (!flowFrame) {
+      const matches = (tree.childFrames ?? []).filter((child: any) => {
+        const url = new URL(child.frame.url);
+        return url.origin === "https://www.opentable.com" && url.pathname === "/authenticate/start";
+      });
+      if (matches.length !== 1) throw new Error("Unsupported sign-in frame");
+      flowFrame = { id: matches[0].frame.id, loaderId: matches[0].frame.loaderId, topLoaderId: frame.loaderId };
+    }
+    const sameFrame = frame.loaderId === flowFrame.topLoaderId && (tree.childFrames ?? [])
+      .some((child: any) => child.frame.id === flowFrame!.id && child.frame.loaderId === flowFrame!.loaderId);
+    if (operation !== "state" && !sameFrame) throw new Error("Protected frame changed");
+    context = (await cdp.request("Page.createIsolatedWorld", { frameId: frame.id, worldName: "bridge-protected-input" }, sessionId)).executionContextId;
+    const result = await cdp.request("Runtime.evaluate", { expression: `(${OPENTABLE_FORM})(${JSON.stringify(operation)})`, contextId: context, returnByValue }, sessionId);
+    if (!sameFrame && result.result?.value !== "complete") throw new Error("Protected frame changed");
+    return result;
+  };
   try {
     let targets = (await cdp.request("Target.getTargets")).targetInfos;
     // The CLI can acknowledge close before Chrome processes websocket detachment.
@@ -133,8 +166,9 @@ export async function protectBrowserPage(port: number, request: ProtectedInputRe
     targetId = pages[0].targetId;
     sessionId = (await cdp.request("Target.attachToTarget", { targetId, flatten: true })).sessionId;
     const frame = (await cdp.request("Page.getFrameTree", {}, sessionId)).frameTree.frame;
-    const context = (await cdp.request("Page.createIsolatedWorld", { frameId: frame.id, worldName: "bridge-protected-input" }, sessionId)).executionContextId;
-    const result = await cdp.request("Runtime.evaluate", { expression: `(${BIND_FORM})(${JSON.stringify(request)})`, contextId: context }, sessionId);
+    context = (await cdp.request("Page.createIsolatedWorld", { frameId: frame.id, worldName: "bridge-protected-input" }, sessionId)).executionContextId;
+    const result = request.flow === "opentable" ? await evaluateFlow("username") :
+      await cdp.request("Runtime.evaluate", { expression: `(${BIND_FORM})(${JSON.stringify(request)})`, contextId: context }, sessionId);
     objectId = result.result?.objectId;
     if (!objectId || result.exceptionDetails) throw new Error();
   } catch {
@@ -142,16 +176,37 @@ export async function protectBrowserPage(port: number, request: ProtectedInputRe
     throw new Error("Protected input requires one unattached HTTPS tab with a supported same-origin POST form");
   }
   return {
-    async submit(values: string[]) {
-      if (consumed || !validProtectedValues(request, values)) throw new Error("Protected input rejected");
+    async submit(values: string[]): Promise<void | Array<"password" | "code">> {
+      const fields = request.flow === "opentable" ? [{ kind: fieldKind, selector: "" }] : request.fields;
+      if (consumed || !validProtectedValues({ ...request, fields }, values)) throw new Error("Protected input rejected");
       consumed = true;
+      const pages = (await cdp.request("Target.getTargets")).targetInfos.filter((target: any) => target.type === "page");
+      if (pages.length !== 1 || pages[0].targetId !== targetId || pages[0].url !== request.pageUrl) throw new Error("Protected page changed; request new input");
       // Mark before the command: an uncertain send may already have changed the DOM.
       touched = true;
       const response = await cdp.request("Runtime.callFunctionOn", {
         objectId, functionDeclaration: "function(values) { return this.fill(values); }",
-        arguments: [{ value: values }], returnByValue: true,
+        arguments: [{ value: values }], returnByValue: true, awaitPromise: true,
       }, sessionId);
       if (response.exceptionDetails || response.result?.value !== true) throw new Error("Protected page changed; request new input");
+      if (request.flow === "opentable") {
+        usedKinds.add(fieldKind);
+        const deadline = Date.now() + 15_000;
+        while (Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          const state = (await evaluateFlow("state", true).catch(() => undefined))?.result?.value;
+          if (state === "complete") return;
+          if (state === "unsupported") throw new Error("Unsupported sign-in step");
+          if ((state === "password" || state === "code") && state !== fieldKind) {
+            if (usedKinds.has(state)) throw new Error("Repeated sign-in step");
+            const next = await evaluateFlow(state);
+            if (next.exceptionDetails || !next.result?.objectId) throw new Error("Protected page changed");
+            objectId = next.result.objectId; fieldKind = state; consumed = false;
+            return [state];
+          }
+        }
+        throw new Error("Sign-in did not advance");
+      }
       // Allow the POST/navigation to finish before closing its response document.
       // No response body, console, network, or landing URL enters a tool result.
       const deadline = Date.now() + 10_000;

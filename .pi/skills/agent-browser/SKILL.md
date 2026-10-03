@@ -64,6 +64,21 @@ stock helper's `stop` command, then reopen the browser. Never delete its gate fi
 or work around it. Old default agent-browser observers may require stop/reopen
 after upgrading; do not kill unrelated daemons.
 
+## OpenTable's private email sign-in
+
+When `private_opentable_login` is available, use it for an existing OpenTable
+account. Open `https://www.opentable.com/` in one stock-Chrome tab, wait for the
+page to load, click **Sign in**, then **Use email instead**. Snapshot refs work
+inside the sign-in iframe. Call the tool with only the session name. Tell the
+user to keep Tailscale connected and fill the **Enter securely** form; it asks
+for email, then password or a six-digit code while the same turn waits.
+
+This closed adapter keeps browser access paused across all steps. Never inspect
+the browser between steps or ask for values in chat. After `submitted`, verify
+login on the fresh homepage. Registration, phone entry, repeated challenges,
+CAPTCHA and unexpected screens need the SSH handoff. If `browser_blocked`, stop
+the helper before reopening it. Generic embedded forms remain unsupported.
+
 ## 1Password login credentials
 
 The stock-Chrome helper automatically registers the tracked `onepassword`

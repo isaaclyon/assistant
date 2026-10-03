@@ -55,6 +55,9 @@ with the same browser mutex so it cannot race protected input.
 
 ## Consequences
 
+ADR-0041 adds one closed OpenTable adapter for an embedded, multi-step login.
+The restrictions below continue to apply to the generic form tool.
+
 - This first version supports ordinary top-level POST sign-in/verification forms.
   JavaScript-only forms, passkeys, CAPTCHA, embedded fields, multi-tab flows, and
   challenges that cannot survive reopening need the existing SSH handoff.

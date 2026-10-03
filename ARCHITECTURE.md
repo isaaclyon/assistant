@@ -143,6 +143,12 @@ tabs are destroyed and an explicit safe page is opened before the agent resumes.
 See [ADR-0040](docs/adr/0040-protected-telegram-browser-input.md) and
 [the workflow and recovery guide](docs/private-browser-input.md).
 
+The same extension exposes a closed `private_opentable_login` adapter for
+OpenTable's embedded email/password/code flow. It keeps the mutex and observer
+pause across all steps; authenticated Mini App submissions use single-use step
+nonces. Only fixed terminal status reaches Pi. See
+[ADR-0041](docs/adr/0041-protected-opentable-sign-in.md).
+
 When `PI_TELEGRAM_SESSION_IDLE_HOURS` is enabled, the host records only accepted
 human prompt time and replacement correlation under each instance state tree.
 Jobs do not advance the clock. Immediately before a qualifying Telegram or job
