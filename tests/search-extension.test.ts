@@ -154,6 +154,7 @@ describe("search extension", () => {
     const typesafeBodies: string[] = [];
     let judge: (questions: string[]) => Response = (questions) => new Response(JSON.stringify({
       model: "jev-1.13.0",
+      usage: { input_tokens: 4096 },
       answers: Object.fromEntries(questions.map((id) => [id, { type: "noul", noul: 0.91 }])),
     }));
     const fetcher = vi.fn(async (url: string, init: RequestInit) => {
@@ -201,12 +202,14 @@ describe("search extension", () => {
       // embeddings disabled, interval overlap is the only way to find it.
       await storeModule.createMarkdownMemoryStore({ root: vault, principal: "isaac", memoryView: "owner-and-household" })
         .add({ type: "event", title: "Austin City Limits", body: "ACL outdoors: 2026-10-02 to 2026-10-04." });
-      vi.stubEnv("PI_TELEGRAM_OPENAI_API_KEY_FILE", "");
+      vi.stubEnv("PI_TELEGRAM_MEMORY_SEMANTIC", "off");
+      const embeddingCallsBeforeDisable = fetcher.mock.calls.filter(([url]) => !url.includes("typesafe")).length;
       dateHandoff.prepare({ text: "what should I pack next weekend", sentAtMs: Date.parse("2026-09-28T05:12:17Z") });
       const dated = await beforeAgentStart({ prompt: "[telegram] what should I pack next weekend" }, {
         sessionManager: { buildContextEntries: () => [], getSessionId: () => "dated-session" },
       });
       expect(dated?.message?.content).toContain("Austin City Limits");
+      expect(fetcher.mock.calls.filter(([url]) => !url.includes("typesafe"))).toHaveLength(embeddingCallsBeforeDisable);
       expect(dated?.message?.content).toContain('"next weekend" → 2026-10-02 through 2026-10-04');
       expect(JSON.parse(typesafeBodies.at(-1)!).state.conversation.dates.ranges[0]).toMatchObject({
         start: "2026-10-02", end: "2026-10-04",
@@ -225,6 +228,7 @@ describe("search extension", () => {
     }
     const log = (await readFile(join(state, "memory-recall.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     expect(log.map((record) => record.outcome)).toEqual(["injected", "injected", "judge_failed"]);
+    expect(log.map((record) => record.inputTokens)).toEqual([4096, 4096, undefined]);
     expect(JSON.stringify(log)).not.toMatch(/shellfish|crab shack|ok do it/);
   }, 15_000);
 

@@ -111,6 +111,15 @@ describe("memory recall window", () => {
 });
 
 describe("memory recall", () => {
+  it("logs Jev input usage even when no memory is relevant", async () => {
+    const { deps, logs } = dependencies({ judge: vi.fn(async () => ({
+      model: "jev-1.13.0", probabilities: { n0: 0.1 }, inputTokens: 4096,
+    })) });
+    await expect(recallMemories({ prompt: "[telegram] dinner?", entries: [], sessionId: "s" }, deps))
+      .resolves.toBeUndefined();
+    expect(logs[0]).toMatchObject({ outcome: "none_selected", inputTokens: 4096 });
+  });
+
   it("injects the relevant note with its identity and logs no conversation or note text", async () => {
     const { deps, logs } = dependencies({
       retrieve: vi.fn(async () => [candidate("quiet", { snippet: "Prefers quiet restaurants" }),

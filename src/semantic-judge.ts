@@ -26,6 +26,8 @@ export interface SemanticJudgeResult {
   model: string;
   /** P(yes) for each requested question ID. */
   probabilities: Record<string, number>;
+  /** Provider-reported input tokens; absent means unreported, not free. */
+  inputTokens?: number;
 }
 
 export type SemanticJudge = (request: SemanticJudgeRequest) => Promise<SemanticJudgeResult>;
@@ -82,7 +84,11 @@ export function parseJudgeResponse(
     }
     probabilities[id] = answer.noul;
   }
-  return { model: body.model, probabilities };
+  const inputTokens = isRecord(body.usage) ? body.usage.input_tokens : undefined;
+  return { model: body.model, probabilities,
+    ...(typeof inputTokens === "number" && Number.isSafeInteger(inputTokens) && inputTokens >= 0
+      ? { inputTokens } : {}),
+  };
 }
 
 /**

@@ -36,7 +36,7 @@ The host explicitly loads the pinned, repo-installed Codex conversion, Codex web
 | Pending direct place-add draft | `<stateDir>/places-add-draft.json` | Places extension |
 | Personal memory vault | `~/.local/share/pi-telegram-bridge/memory` (override: `PI_TELEGRAM_MEMORY_DIR`) | `personal-memory` skill CLI |
 | Derived memory/session search index | `<stateDir>/search-index.db` | Search extension/coordinator |
-| Memory recall decision log (IDs, timings, probabilities) | `<stateDir>/memory-recall.jsonl` | Search extension |
+| Memory recall decision log (IDs, timings, probabilities, reported Jev input tokens) | `<stateDir>/memory-recall.jsonl` | Search extension |
 | Google Places cache and monthly attempt accounting | `<stateDir>/google-places.db` | Google extension/gateway |
 | Google OAuth client/tokens and keyring | External `gogcli` configuration selected per instance | gogcli / operator |
 | Google keyring password | External mode-`0600` file selected by instance environment | User / Google extension |
@@ -247,6 +247,14 @@ hidden date context even when memory recall is disabled. Opted-in recall also
 retrieves visible notes with explicit overlapping date intervals and gives
 Jev the resolved ranges. No canonical memory is written automatically. See
 [ADR-0038](docs/adr/0038-resolve-date-context-before-memory-recall.md).
+
+Optional recall, semantic-memory search, and conversation routing use the typed
+per-instance feature registry in `src/feature-flags.ts`. Both environment-file
+preflight and process configuration validate it. Existing Jev flags retain
+their `jev`/`off` opt-in; `PI_TELEGRAM_MEMORY_SEMANTIC=off` independently disables
+embeddings while retaining keys and cached vectors. Unset semantic mode preserves
+key-gated behavior. Flags take effect on restart and never widen capability or
+memory boundaries. See [ADR-0043](docs/adr/0043-per-instance-feature-flags.md).
 
 ## Startup
 
