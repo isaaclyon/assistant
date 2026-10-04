@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PrivateCdp } from "../src/protected-browser.js";
 import { protectBrowserTakeover } from "../src/browser-takeover-protection.js";
 import { startTakeoverServer } from "../src/browser-takeover-server.js";
-import { startPrivateHandoff, stopPrivateHandoff } from "../.pi/skills/agent-browser/scripts/browser-handoff.mjs";
+import { startPrivateHandoff, stopPrivateHandoff, resizePrivateHandoff } from "../.pi/skills/agent-browser/scripts/browser-handoff.mjs";
 
 const exec = promisify(execFile), chrome = "/usr/bin/google-chrome";
 const available = await Promise.all([chrome, "/usr/bin/xvfb-run", "/usr/bin/x11vnc", "/usr/bin/websockify"].map(path => access(path).then(() => true, () => false)));
@@ -33,7 +33,7 @@ describe.skipIf(available.some(value => !value))("real authenticated noVNC takeo
     const statuses: string[] = [];
     const received = new Set<string>();
     const proxy = createServer({ key: await readFile(join(root, "key")), cert: await readFile(join(root, "cert")) }, (req, res) => {
-      if (req.url === "/form") { res.setHeader("content-type", "text/html"); res.end(`<h1>Takeover test</h1><input id="entry" style="width:600px;height:200px;background:rgb(255,0,160)" autofocus><input id="password" type="password"><script>document.querySelector('#entry').oninput=()=>fetch('/typed',{method:'POST',body:document.querySelector('#entry').value})</script>`); return; }
+      if (req.url === "/form") { res.setHeader("content-type", "text/html"); res.end(`<meta name="viewport" content="width=device-width,initial-scale=1"><style>#entry{width:80%;height:200px;background:rgb(255,0,160)}@media(min-width:450px){#entry{background:gray}}</style><h1>Takeover test</h1><input id="entry" autofocus><input id="password" type="password"><script>document.querySelector('#entry').oninput=()=>fetch('/typed',{method:'POST',body:document.querySelector('#entry').value})</script>`); return; }
       if (req.url === "/typed") { let text = ""; req.on("data", chunk => { text += chunk; }); req.on("end", () => { received.add(text); res.end("ok"); }); return; }
       if (req.url === "/home") { res.end("Safe home"); return; }
       void (async () => {
@@ -70,14 +70,22 @@ describe.skipIf(available.some(value => !value))("real authenticated noVNC takeo
     await remote.request("Page.navigate", { url: `${origin}/form` }, remoteSession);
     await vi.waitFor(async () => expect((await remote.request("Runtime.evaluate", { expression: "!!document.querySelector('#entry')", returnByValue: true }, remoteSession)).result.value).toBe(true));
     await remote.request("Runtime.evaluate", { expression: "document.querySelector('#entry').focus()" }, remoteSession);
+    const originalWidth = (await remote.request("Page.getLayoutMetrics", {}, remoteSession)).cssLayoutViewport.clientWidth;
     await remote.request("Target.detachFromTarget", { sessionId: remoteSession }); remote.close();
     const protectedPage = await protectBrowserTakeover(started.port, { session: "viewer", resumeUrl: `${origin}/home` });
     let restored = false;
     cleanup.push(async () => { if (!restored) await protectedPage.finish("private").catch(() => {}); });
     const handoff = await startPrivateHandoff("viewer"); cleanup.push(() => stopPrivateHandoff("viewer"));
+    const handoffStatePath = join(root, "run/pi-agent-browser/takeover-test/viewer/handoff.json");
+    const handoffState = await readFile(handoffStatePath, "utf8");
+    try {
+      await writeFile(handoffStatePath, JSON.stringify({ ...JSON.parse(handoffState), controlProperty: `PI_TAKEOVER_${"0".repeat(32)}` }));
+      await expect(resizePrivateHandoff("viewer", 500, 700)).rejects.toThrow("Private viewer unavailable");
+    } finally { await writeFile(handoffStatePath, handoffState); }
     const token = "123:synthetic-only", launch = new URLSearchParams({ auth_date: `${Math.floor(Date.now() / 1000)}`, user: '{"id":123}' }); launch.sort();
     launch.set("hash", createHmac("sha256", createHmac("sha256", "WebAppData").update(token).digest()).update([...launch].map(([k,v]) => `${k}=${v}`).join("\n")).digest("hex"));
     const server = await startTakeoverServer({ origin, botToken: token, userId: 123, resourceRoot: process.cwd(), upstreamPort: handoff.webPort,
+      resize: async viewport => { const size = await protectedPage.resize(viewport); await resizePrivateHandoff("viewer", size.width, size.height); },
       password: (await readFile(handoff.passwordPath, "utf8")).trim(), resumeUrl: `${origin}/home`, signal: new AbortController().signal });
     gatewayPort = server.port; cleanup.push(server.close);
     let client: ChildProcess | undefined;
@@ -89,12 +97,14 @@ describe.skipIf(available.some(value => !value))("real authenticated noVNC takeo
     const clientTarget = (await control.request("Target.getTargets")).targetInfos.find((t: any) => t.type === "page");
     const sessionId = (await control.request("Target.attachToTarget", { targetId: clientTarget.targetId, flatten: true })).sessionId;
     await control.request("Page.enable", {}, sessionId);
+    await control.request("Emulation.setDeviceMetricsOverride", { width: 390, height: 780, deviceScaleFactor: 1, mobile: true }, sessionId);
     await control.request("Page.addScriptToEvaluateOnNewDocument", { source: `window.clientErrors=[]; console.error=(...args)=>window.clientErrors.push(args.map(String).join(' ')); window.addEventListener('error',e=>window.clientErrors.push(e.message)); window.Telegram={WebApp:{initData:${JSON.stringify(launch.toString())},ready(){},expand(){},enableClosingConfirmation(){},disableClosingConfirmation(){},close(){window.didClose=true}}}` }, sessionId);
     await control.request("Page.navigate", { url: `${origin}/#request=${server.requestId}` }, sessionId);
     const evaluate = async (expression: string) => (await control.request("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, sessionId)).result?.value;
     try { await vi.waitFor(async () => expect(await evaluate("document.querySelector('#status')?.textContent")).toContain("Assistant paused"), { timeout: 15_000 }); }
     catch { throw new Error(`Synthetic viewer failed: ${statuses.join(', ')}; ${JSON.stringify(await evaluate('window.clientErrors'))}`); }
     try {
+      await vi.waitFor(async () => expect(await evaluate("document.querySelector('#screen canvas')?.getBoundingClientRect().width")).toBeCloseTo(390, 0), { timeout: 10_000 });
       // Locate the fixture's pink input in actual received VNC pixels. This waits
       // for rendering and avoids guessing native window borders or browser bars.
       let click: { x: number; y: number } | null = null;
@@ -111,10 +121,23 @@ describe.skipIf(available.some(value => !value))("real authenticated noVNC takeo
         })()`);
         expect(click).not.toBeNull();
       }, { timeout: 10_000 });
+      expect(await evaluate("document.querySelector('#screen canvas').width")).toBe(500);
+      expect(await evaluate("document.querySelector('#screen canvas').getBoundingClientRect().width")).toBeCloseTo(390, 0);
       await control.request("Input.dispatchMouseEvent", { type: "mousePressed", ...click!, button: "left", clickCount: 1 }, sessionId);
       await control.request("Input.dispatchMouseEvent", { type: "mouseReleased", ...click!, button: "left", clickCount: 1 }, sessionId);
       await evaluate("document.querySelector('#typing').value='synthetic-typed'; document.querySelector('#typing').dispatchEvent(new InputEvent('input',{bubbles:true}))");
       await vi.waitFor(() => expect(received.has("synthetic-typed")).toBe(true), { timeout: 5_000 });
+      const tall = await evaluate("document.querySelector('#screen canvas').height");
+      // Simulate the visual space left by a phone keyboard, then its dismissal.
+      await control.request("Emulation.setDeviceMetricsOverride", { width: 390, height: 450, deviceScaleFactor: 1, mobile: true }, sessionId);
+      await vi.waitFor(async () => expect(await evaluate("document.querySelector('#screen canvas').height")).toBeLessThan(tall), { timeout: 10_000 });
+      await control.request("Emulation.setDeviceMetricsOverride", { width: 390, height: 780, deviceScaleFactor: 1, mobile: true }, sessionId);
+      await vi.waitFor(async () => expect(await evaluate("document.querySelector('#screen canvas').height")).toBe(tall), { timeout: 10_000 });
+      await evaluate("document.querySelector('#desktop').click()");
+      // x11vnc may exclude the display's last pixel when clipping its full width.
+      await vi.waitFor(async () => expect([1919, 1920]).toContain(await evaluate("document.querySelector('#screen canvas').width")), { timeout: 10_000 });
+      await evaluate("document.querySelector('#desktop').click()");
+      await vi.waitFor(async () => expect(await evaluate("document.querySelector('#screen canvas').width")).toBe(500), { timeout: 10_000 });
     } catch (error) {
       // Synthetic fixture diagnostics only; production never captures frames.
       const image = await evaluate("document.querySelector('#screen canvas')?.toDataURL('image/png')");
@@ -131,6 +154,7 @@ describe.skipIf(available.some(value => !value))("real authenticated noVNC takeo
     const resumedTarget = (await resumed.request("Target.getTargets")).targetInfos.find((t: any) => t.type === "page");
     const resumedSession = (await resumed.request("Target.attachToTarget", { targetId: resumedTarget.targetId, flatten: true })).sessionId;
     expect((await resumed.request("Runtime.evaluate", { expression: "document.querySelector('#entry').value", returnByValue: true }, resumedSession)).result.value).toBe("synthetic-typed");
+    expect((await resumed.request("Page.getLayoutMetrics", {}, resumedSession)).cssLayoutViewport.clientWidth).toBe(originalWidth);
     expect(await evaluate("window.didClose")).toBe(true);
   }, 60_000);
 });

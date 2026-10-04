@@ -81,7 +81,8 @@ and does not keep the host alive; the browser gate remains set for recovery.
 - The takeover capability installs no 1Password account or extension and supplies
   no passkey authenticator. Phone biometrics and cross-device proximity are not
   forwarded. That integration requires its own setup and acceptance test.
-- A desktop display on a phone may need Zoom and panning. Live viewing depends
+- The display fits the viewer automatically; Zoom and Desktop remain available.
+  Live viewing depends
   on Tailscale connectivity and the installed x11vnc/websockify/Xvfb tools.
 - The current shared page can contain secrets; sharing is a human choice, not an
   automatic model decision. Cancellation cannot undo actions already performed.
@@ -89,3 +90,44 @@ and does not keep the host alive; the browser gate remains set for recovery.
   cooperative protection against accidental model exposure, not an OS sandbox.
   A host crash closes the gateway; the browser stays gated until stop-only
   recovery. The detached VNC supervisor retains its own bounded expiry.
+
+## Mobile sizing
+
+The first phone acceptance test showed the full 1920×1080 desktop shrinking into
+a narrow viewport, with Chrome occupying only part of the image. The authenticated
+client now supplies bounded viewport dimensions at connection and on debounced
+layout changes, including the on-screen keyboard. A compact toolbar preserves
+room for the browser and keeps handback visible.
+
+The protected host sizes the original Chrome window at the display origin,
+compensates its minimum native width with a page-only CDP geometry override, and
+clips the owned private x11vnc framebuffer to the window. It retains a private
+page session for these fixed geometry methods; no DOM, frames, input, console or
+network observations are enabled for resizing. The browser identity remains
+desktop Chrome. The user may explicitly choose a full Desktop view for wider
+sites, extension UI or additional windows.
+
+Entry still requires all prior debugger sessions to be disconnected. The sizing
+contract assumes ordinary stock-Chrome geometry; preserving custom pre-existing
+device emulation is unsupported. After explicit shared handback, the existing
+cleanup flow checks page visibility/focus to select the shared page, as described
+above. That consented cleanup is separate from the geometry-only resize path.
+
+Only paired-user authenticated requests can resize. Updates require the current
+consumed viewer ticket and an open stream. Validate an exact width/height/mode
+shape, limit dimensions to the stock display, serialize changes, and retain the
+existing request budget. The helper verifies the owned private supervisor and
+x11vnc process before issuing one fixed, bounded clip command through a random,
+per-supervisor X property. Both process identity and the property binding are
+verified, so another x11vnc on the same display does not receive the command.
+No arbitrary remote-control command or executable is client-selected.
+
+Handback/cancellation immediately revoke the stream and await the active geometry
+operation before cleanup. Clear the page override and restore original bounds
+when its tab survives. Select the user's shared page before restoring geometry,
+since restoring a window can change focus; foreground the selected page and
+discard buffered console activity afterward. Failures in that cleanup retain
+the existing crash gate.
+Tests cover authentication and bounds, resize/handback races, actual mobile
+framebuffer rendering, keyboard-height changes, desktop fallback and shared-page
+state restoration. Native Telegram keyboard behavior still needs phone acceptance.

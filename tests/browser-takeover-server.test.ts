@@ -21,8 +21,9 @@ describe("Telegram browser takeover boundary", () => {
     await new Promise<void>(resolve => http.listen(0, "127.0.0.1", resolve));
     cleanup.push(async () => { for (const ws of upstream.clients) ws.terminate(); upstream.close(); await new Promise<void>(r => http.close(() => r())); });
     const controller = new AbortController();
+    const resize = vi.fn(async (_viewport: { width: number; height: number; desktop: boolean }) => {});
     const server = await startTakeoverServer({ origin, botToken, userId: 123, signal: controller.signal, durationMs,
-      resourceRoot: process.cwd(), upstreamPort: (http.address() as any).port, password: "testOnly", resumeUrl: "https://example.com/" });
+      resourceRoot: process.cwd(), upstreamPort: (http.address() as any).port, password: "testOnly", resumeUrl: "https://example.com/", resize });
     cleanup.push(server.close);
     const post = (path: string, extra: object = {}, from = origin) => fetch(`http://127.0.0.1:${server.port}/api/${path}`, {
       method: "POST", headers: { origin: from, "content-type": "application/json" }, body: JSON.stringify({ initData: signed(), requestId: server.requestId, ...extra }),
@@ -32,8 +33,43 @@ describe("Telegram browser takeover boundary", () => {
       await new Promise<void>((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); });
       return ws;
     };
-    return { server, post, socket, controller, connections: () => connections };
+    return { server, post, socket, controller, resize, connections: () => connections };
   }
+  it("binds bounded viewport changes to the paired user and current viewer", async () => {
+    const f = await fixture(), viewport = { width: 390, height: 650, desktop: false };
+    expect((await f.post("auth", { viewport, initData: signed(456) })).status).toBe(403);
+    expect(f.resize).not.toHaveBeenCalled();
+    for (const bad of [{ ...viewport, width: 99999 }, { ...viewport, height: 1.5 }, { ...viewport, command: "anything" }]) {
+      expect((await f.post("auth", { viewport: bad })).status).toBe(400);
+    }
+    const auth = await (await f.post("auth", { viewport })).json();
+    expect(f.resize).toHaveBeenCalledExactlyOnceWith(viewport);
+    expect((await f.post("viewport", { ticket: auth.ticket, viewport })).status).toBe(409);
+    const ws = await f.socket(), ready = message(ws); ws.send(JSON.stringify({ ticket: auth.ticket })); await ready;
+    expect((await f.post("viewport", { ticket: "wrong", viewport })).status).toBe(403);
+    expect((await f.post("viewport", { ticket: auth.ticket, viewport: { ...viewport, height: 350 } })).status).toBe(200);
+    expect(f.resize).toHaveBeenLastCalledWith({ ...viewport, height: 350 });
+  });
+  it("revokes viewing immediately but waits for an in-flight resize before releasing control", async () => {
+    const f = await fixture(), auth = await (await f.post("auth")).json();
+    const ws = await f.socket(), ready = message(ws); ws.send(JSON.stringify({ ticket: auth.ticket })); await ready;
+    let release!: () => void;
+    f.resize.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve; }));
+    const pending = f.post("viewport", { ticket: auth.ticket, viewport: { width: 390, height: 400, desktop: false } });
+    await vi.waitFor(() => expect(f.resize).toHaveBeenCalled());
+    let ended = false; void f.server.done.then(() => { ended = true; });
+    expect((await f.post("finish", { ticket: auth.ticket, mode: "private" })).status).toBe(200);
+    expect(ended).toBe(false);
+    release(); await pending;
+    expect(await f.server.done).toEqual({ status: "handed_back", mode: "private" });
+  });
+  it("ends privately without releasing credentials when initial sizing fails", async () => {
+    const f = await fixture(); f.resize.mockRejectedValueOnce(new Error("synthetic-private-error"));
+    const response = await f.post("auth", { viewport: { width: 390, height: 650, desktop: false } });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "unavailable" });
+    expect(await f.server.done).toEqual({ status: "failed", mode: "private" });
+  });
   it("requires signed paired-user identity and exact origin before returning private connection credentials", async () => {
     const f = await fixture();
     expect((await f.post("auth", { initData: signed(456) })).status).toBe(403);

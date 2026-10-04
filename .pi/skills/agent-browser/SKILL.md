@@ -139,7 +139,9 @@ private Telegram Mini App and holds the active turn until handback or expiry.
 Start with one HTTPS tab and supply `session` plus a clean same-origin
 `resumeUrl`, without query or fragment. Tell the user to keep Tailscale connected,
 tap **Take over**, tap the remote field and use **Keyboard** as needed, then tap
-**Hand back**. **Zoom** enables a larger view with panning.
+**Hand back**. The view fits the available phone space automatically, including
+keyboard changes. Drag with two fingers to scroll. **Zoom** enables a larger
+view with panning; **Desktop** shows a wider view for sites or popups that need it.
 
 The user chooses **Return privately** (destroy old page documents and reopen the
 safe URL while retaining cookies) or **Continue from this page** (explicitly

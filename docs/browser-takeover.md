@@ -20,8 +20,21 @@ the user controls the browser, then continues after handback and cleanup.
 
 ## Phone controls
 
+The view automatically fits the space inside Telegram, including changes when
+the keyboard opens or the phone rotates. The page uses the viewer's CSS width,
+so responsive sites can display their narrow-screen layout. The host sizes the
+Chrome window and streams only that part of its private display. Chrome's
+minimum native window width is compensated inside the page so text retains its
+intended size on the phone. Browser controls and extension UI remain available.
+
+Use **Desktop** for a wider layout or a popup that extends beyond the fitted
+view, then **Fit view** to return. This is desktop Chrome with a responsive page
+viewport; sites that require a mobile-specific browser identity may still show
+their desktop experience. Extra windows are available in Desktop view.
+
 Tap the remote field before opening **Keyboard**. **Tab** and **Enter** act on the
-remote browser. **Zoom** gives a larger view with drag-to-pan; **Fit** shows the
+remote browser; those buttons appear while the keyboard is open. **Hide keys**
+closes the keyboard. Drag with two fingers to scroll the webpage. **Zoom** gives a larger view with drag-to-pan; **Fit** shows the
 whole display. Closing the Mini App does not hand control back. Reopen/reconnect,
 or let the bounded session expire.
 
@@ -37,6 +50,10 @@ or let the bounded session expire.
 The Mini App closes automatically after a confirmed handback. If a client cannot
 close itself, it leaves a completion message. A disconnected viewer keeps the
 agent paused and offers reconnect/private handback.
+
+Handback waits for any active resize, clears the page size override and restores
+the original window bounds when the original tab still exists. Page sharing
+preserves entered state across those geometry changes.
 
 ## Availability and recovery
 
