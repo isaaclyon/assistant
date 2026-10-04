@@ -122,8 +122,8 @@ describe("memory recall", () => {
 
   it("injects the relevant note with its identity and logs no conversation or note text", async () => {
     const { deps, logs } = dependencies({
-      retrieve: vi.fn(async () => [candidate("quiet", { snippet: "Prefers quiet restaurants" }),
-        candidate("allergy", { title: "Emma food", snippet: "Emma is allergic to shellfish" })]),
+      retrieve: vi.fn(async () => [candidate("quiet", { snippet: "Prefers quiet restaurants", drop: 2 }),
+        candidate("allergy", { title: "Emma food", snippet: "Emma is allergic to shellfish", drop: 0 })]),
     });
     deps.judge.mockImplementationOnce(async () => ({ model: "jev-1.13.0", probabilities: { n0: 0.2, n1: 0.93 } }));
     const result = await recallMemories({ prompt: "[telegram] ok do it", entries: dinnerThread, sessionId: "s1" }, deps);
@@ -142,8 +142,8 @@ describe("memory recall", () => {
       sessionId: "s1", trigger: "telegram", outcome: "injected", model: "jev-1.13.0", queries: 3,
       ms: { search: expect.any(Number), judge: expect.any(Number), total: expect.any(Number) },
       candidates: [
-        { id: "allergy", revision: "r1", probability: 0.93, result: "injected" },
-        { id: "quiet", revision: "r1", probability: 0.2, result: "below_threshold" },
+        { id: "allergy", revision: "r1", drop: 0, probability: 0.93, result: "injected" },
+        { id: "quiet", revision: "r1", drop: 2, probability: 0.2, result: "below_threshold" },
       ],
     })]);
     expect(JSON.stringify(logs)).not.toMatch(/shellfish|quiet restaurants|Kin Khao|ok do it|Emma food/);

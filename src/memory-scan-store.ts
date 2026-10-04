@@ -22,7 +22,8 @@ function parseDocument(raw: string): MemoryIndexDocument {
     return row[key];
   };
   if (!Array.isArray(row.tags) || !row.tags.every((tag): tag is string => typeof tag === "string") ||
-      (row.owner !== null && typeof row.owner !== "string")) {
+      (row.owner !== null && typeof row.owner !== "string") ||
+      (row.decay !== undefined && row.decay !== null && row.decay !== "durable" && row.decay !== "fading")) {
     throw new Error("Invalid staged memory metadata");
   }
   return {
@@ -30,6 +31,7 @@ function parseDocument(raw: string): MemoryIndexDocument {
     title: string("title"), tags: row.tags, body: string("body"), type: string("type"),
     status: string("status"), scope: string("scope"), owner: row.owner,
     createdAt: string("createdAt"), updatedAt: string("updatedAt"),
+    decay: (row.decay as MemoryIndexDocument["decay"]) ?? null,
   };
 }
 

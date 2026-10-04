@@ -91,7 +91,7 @@ it("migrates schema 2, re-embeds edits, and removes deleted vectors", async () =
   legacy.close();
   const migrated = openSearchIndex({ stateDir: roots[0]! });
   indexes.push(migrated);
-  expect(migrated.status()).toMatchObject({ schemaVersion: 3, memoryDocuments: 1 });
+  expect(migrated.status()).toMatchObject({ schemaVersion: 4, memoryDocuments: 1 });
   const embed = vi.fn(async (inputs: string[]) => inputs.map(() => vector()));
   await prepareMemoryEmbeddings(migrated, request, embed);
   migrated.replaceMemoryDocuments([note("quiet", { revision: "r2", body: "Enjoys lively dining" })]);

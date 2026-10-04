@@ -460,7 +460,7 @@ describe("search extension", () => {
     expect(status.details).toMatchObject({
       ok: true,
       result: {
-        schemaVersion: 3,
+        schemaVersion: 4,
         memoryDocuments: 1,
         sessionDocuments: 3,
       },

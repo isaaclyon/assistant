@@ -28,6 +28,8 @@ export interface RecallCandidate {
   type: string;
   title: string;
   snippet: string;
+  /** Places the usage ranking moved this note down (ADR-0045); absent without ranking. */
+  drop?: number;
 }
 
 export interface RecallWindow {
@@ -52,7 +54,12 @@ export interface RecallDecision {
   id: string;
   revision: string;
   probability?: number;
+  drop?: number;
   result: RecallDecisionResult;
+}
+
+function decisionFor(candidate: RecallCandidate): Pick<RecallDecision, "id" | "revision" | "drop"> {
+  return { id: candidate.id, revision: candidate.revision, ...(candidate.drop === undefined ? {} : { drop: candidate.drop }) };
 }
 
 export type RecallOutcome =
@@ -216,7 +223,7 @@ export function selectRecalledNotes(
       selected.push(candidate);
       used += size;
     }
-    decisions.push({ id: candidate.id, revision: candidate.revision, probability: Math.round(probability * 1000) / 1000, result });
+    decisions.push({ ...decisionFor(candidate), probability: Math.round(probability * 1000) / 1000, result });
   }
   return { selected, decisions };
 }
@@ -288,7 +295,7 @@ export async function recallMemories(
     record.ms.search = elapsed(searchStarted);
     const candidates = retrieved.filter((candidate) => {
       const seen = window.injected.has(`${candidate.id}\n${candidate.revision}`);
-      if (seen) record.candidates.push({ id: candidate.id, revision: candidate.revision, result: "already_injected" });
+      if (seen) record.candidates.push({ ...decisionFor(candidate), result: "already_injected" });
       return !seen;
     });
     if (candidates.length === 0) return await finish("no_candidates");
@@ -302,7 +309,7 @@ export async function recallMemories(
       probabilities = judged.probabilities;
     } catch {
       record.ms.judge = elapsed(judgeStarted);
-      record.candidates.push(...candidates.map(({ id, revision }) => ({ id, revision, result: "not_judged" as const })));
+      record.candidates.push(...candidates.map((candidate) => ({ ...decisionFor(candidate), result: "not_judged" as const })));
       return await finish("judge_failed");
     }
     record.ms.judge = elapsed(judgeStarted);

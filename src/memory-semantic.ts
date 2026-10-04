@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { searchIndexedMemories, type IndexedMemorySearchRequest } from "./search-coordinator.js";
 import type { MemoryDocumentSearchMatch, MemoryDocumentSearchPage, SearchIndex } from "./search-index.js";
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, normalizeEmbedding, type EmbedTexts } from "./openai-embeddings.js";
+import { MAX_DECAY_DROP, rankWithDrops, type MemoryRanking } from "./memory-usage.js";
 
 // Changing the model, dimensions, or chunking invalidates the derived cache.
 const CACHE_VERSION = `${EMBEDDING_MODEL}:${EMBEDDING_DIMENSIONS}:sections-v1`;
@@ -164,17 +165,26 @@ export function visibleMemoryRevisions(
   return new Map(index.semantic.chunks(request).map((chunk) => [chunk.note.id, chunk.note.revision]));
 }
 
-/** Call only after a successful canonical refresh, including after inference. */
+/**
+ * Call only after a successful canonical refresh, including after inference.
+ * An optional usage ranking (ADR-0045) moves fading notes down a few places
+ * before the result list is trimmed.
+ */
 export function searchHybridMemories(
   index: SearchIndex,
   request: IndexedMemorySearchRequest,
   prepared: MemoryEmbeddingPreparation,
+  ranking?: MemoryRanking,
 ): MemoryDocumentSearchPage {
-  if (!prepared.queryVector) return {
-    ...searchIndexedMemories(index, request),
-    retrieval: { mode: "keyword", semantic: prepared.status },
-  };
   const limit = request.limit ?? 10;
+  if (!prepared.queryVector) {
+    if (!ranking) return { ...searchIndexedMemories(index, request), retrieval: { mode: "keyword", semantic: prepared.status } };
+    // Fetch a few extra so lower notes can move up past dropped ones.
+    const page = searchIndexedMemories(index, { ...request, limit: Math.min(50, limit + MAX_DECAY_DROP) });
+    const ranked = rankWithDrops(page.results, ranking);
+    return { ...page, results: ranked.slice(0, limit), truncated: page.truncated || ranked.length > limit,
+      retrieval: { mode: "keyword", semantic: prepared.status } };
+  }
   const candidateLimit = Math.max(20, limit);
   const lexical = searchIndexedMemories(index, { ...request, limit: candidateLimit });
   const best = new Map<string, MemoryDocumentSearchMatch>();
@@ -194,7 +204,8 @@ export function searchHybridMemories(
       merged.set(result.id, { ...(previous ?? result), score: (previous?.score ?? 0) + 1 / (60 + rank + 1) });
     });
   }
-  const results = [...merged.values()].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  const fused = [...merged.values()].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  const results = ranking ? rankWithDrops(fused, ranking) : fused;
   return { results: results.slice(0, limit),
     truncated: lexical.truncated || semantic.length > candidateLimit || results.length > limit,
     retrieval: { mode: best.size > 0 ? "hybrid" : "keyword", semantic: chunks.some((chunk) => !chunk.vector) ? "partial" : "ready" },
@@ -213,12 +224,13 @@ export function searchHybridMemoriesForQueries(
   request: IndexedMemorySearchRequest,
   queries: readonly string[],
   prepared: MemoryQueryEmbeddingPreparation,
+  ranking?: MemoryRanking,
 ): MemoryDocumentSearchMatch[] {
   const limit = request.limit ?? 10;
   const pages = queries.map((query, queryIndex) => {
     const vector = prepared.queryVectors?.[queryIndex];
     return searchHybridMemories(index, { ...request, query },
-      { status: prepared.status, ...(vector ? { queryVector: vector } : {}) }).results;
+      { status: prepared.status, ...(vector ? { queryVector: vector } : {}) }, ranking).results;
   });
   const merged = new Map<string, MemoryDocumentSearchMatch>();
   for (let rank = 0; merged.size < limit && pages.some((page) => rank < page.length); rank += 1) {

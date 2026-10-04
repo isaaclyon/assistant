@@ -37,6 +37,12 @@ import { isBridgeRuntime } from "../lib/bridge-runtime.ts";
 import { renderDateContext, type DateContext } from "../../src/date-context.ts";
 import { takePreparedDateContext } from "../../src/date-context-runtime.ts";
 import { mergeTemporalCandidates, searchTemporalMemories } from "../../src/memory-temporal.ts";
+import {
+  createMemoryRanking,
+  createMemoryUsageTally,
+  type MemoryRanking,
+  type MemoryUsageTally,
+} from "../../src/memory-usage.ts";
 
 const MemoryTypeSchema = StringEnum([
   "person",
@@ -220,6 +226,21 @@ export default function searchExtension(pi: ExtensionAPI): void {
     activeIndex?.close();
   }
 
+  // ADR-0045: usage ranking is a hint. If a log cannot be read, results keep
+  // their match order. Call after the final canonical refresh.
+  let usage: { stateDir: string; tally: MemoryUsageTally } | undefined;
+  const usageRanking = async (activeIndex: SearchIndex, context: SearchContext): Promise<MemoryRanking | undefined> => {
+    if (usage?.stateDir !== context.stateDir) {
+      usage = { stateDir: context.stateDir, tally: createMemoryUsageTally(context.stateDir) };
+    }
+    try {
+      await usage.tally.refresh();
+      return createMemoryRanking({ usage: usage.tally, overrides: activeIndex.memoryDecayOverrides(), now: Date.now() });
+    } catch {
+      return undefined;
+    }
+  };
+
   /** Fails closed: a stale index is not proof of current canonical visibility. */
   const requireFreshMemory = async (activeIndex: SearchIndex, context: SearchContext): Promise<void> => {
     const refresh = await settleRefreshWithin(
@@ -248,12 +269,14 @@ export default function searchExtension(pi: ExtensionAPI): void {
       prepareMemoryQueryEmbeddings(activeIndex, request, queries, createOpenAIEmbedder()),
     );
     if (semantic.status !== "disabled") await requireFreshMemory(activeIndex, context);
+    const ranking = await usageRanking(activeIndex, context);
     return mergeTemporalCandidates(
-      searchHybridMemoriesForQueries(activeIndex, request, queries, semantic),
+      searchHybridMemoriesForQueries(activeIndex, request, queries, semantic, ranking),
       searchTemporalMemories(activeIndex, request, dates?.ranges ?? []),
       RECALL_CANDIDATE_LIMIT,
     )
-      .map(({ id, revision, type, title, snippet }) => ({ id, revision, type, title, snippet }));
+      .map((match) => ({ id: match.id, revision: match.revision, type: match.type, title: match.title,
+        snippet: match.snippet, ...(ranking ? { drop: ranking.drop(match) } : {}) }));
   };
 
   const currentRecallRevisions = async (context: SearchContext): Promise<Map<string, string>> => {
@@ -347,7 +370,7 @@ export default function searchExtension(pi: ExtensionAPI): void {
               );
             }
             page = refresh.status === "fresh" && refresh.value.complete
-              ? searchHybridMemories(activeIndex, request, semantic)
+              ? searchHybridMemories(activeIndex, request, semantic, await usageRanking(activeIndex, context))
               : { results: [], truncated: false };
           } else {
             // An old scope/owner is not proof of current canonical visibility.

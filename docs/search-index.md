@@ -159,6 +159,38 @@ messages/day × 30 days × 4,000 input tokens costs about $0.50/month for Jev.
 Context is bounded; it does not grow with the entire session history. The log
 currently has no rotation, so totals cover all retained entries.
 
+## Usage ranking and decay
+
+Search and recall move unused, time-bound notes down a few places. Each note is
+`durable` or `fading`: person, preference, recipe, and reference notes default
+to `durable`; list, event, and purchase notes default to `fading`. An optional
+`decay: durable | fading` note header overrides the default.
+
+A note earns 1 point each time recall injects it, 3 points each time the agent
+reads it with `assistant_memory`, and 3 points at its latest edit. Points halve
+every 90 days. After a 30-day grace period from creation, a `fading` note drops
+`round(3 * (1 - min(1, points / 3)))` places. An unused list therefore drops one
+place after a month, two after three months, and three after about eight
+months. A read or edit in the last three weeks or so restores its full rank.
+Durable notes never move. The search tool and recall apply the same drops in
+hybrid and keyword-only search; duplicate checks before creation do not.
+
+Usage comes from two append-only logs in the instance state directory:
+injections from `memory-recall.jsonl` and agent reads from
+`memory-usage.jsonl` (mode `0600`, one line per read with the time and note ID).
+The search extension keeps the tally in memory and parses only appended lines,
+so rebuilding the search index loses nothing. If a log cannot be read, results
+keep their match order. The recall log records each candidate's `drop`. For
+example, to count notes recall pushed down:
+
+```bash
+jq -s '[.[].candidates[] | select((.drop // 0) > 0)] | group_by(.id)
+  | map({id: .[0].id, drops: length})' "$STATE_DIR/memory-recall.jsonl"
+```
+
+Usage is counted per instance. See
+[ADR-0045](adr/0045-rank-memory-by-usage-and-decay.md).
+
 ## Refresh and recovery
 
 Memory refresh stages parsed notes privately and publishes a transactional snapshot

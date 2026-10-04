@@ -37,6 +37,7 @@ The host explicitly loads the pinned, repo-installed Codex conversion, Codex web
 | Personal memory vault | `~/.local/share/pi-telegram-bridge/memory` (override: `PI_TELEGRAM_MEMORY_DIR`) | `personal-memory` skill CLI |
 | Derived memory/session search index | `<stateDir>/search-index.db` | Search extension/coordinator |
 | Memory recall decision log (IDs, timings, probabilities, reported Jev input tokens) | `<stateDir>/memory-recall.jsonl` | Search extension |
+| Memory read log (time, note ID) | `<stateDir>/memory-usage.jsonl` | Memory extension |
 | Google Places cache and monthly attempt accounting | `<stateDir>/google-places.db` | Google extension/gateway |
 | Google OAuth client/tokens and keyring | External `gogcli` configuration selected per instance | gogcli / operator |
 | Google keyring password | External mode-`0600` file selected by instance environment | User / Google extension |
@@ -255,6 +256,11 @@ question per candidate, rechecks visibility, and returns passing notes as one
 hidden `memory-recall` session message. It leaves the system prompt
 unchanged to preserve prompt caching, and it fails open. See
 [ADR-0037](docs/adr/0037-recall-memory-with-jev-before-each-turn.md).
+Search and recall then move unused `fading` notes (lists, events, purchases,
+or any note with a `decay: fading` header) down up to three places. Usage comes
+from the recall log and a per-instance agent-read log, tallied in memory, so the
+disposable index and canonical notes hold no usage. See
+[ADR-0045](docs/adr/0045-rank-memory-by-usage-and-decay.md).
 
 Before human turns, the host resolves bounded English date phrases with
 Chrono using the original Telegram timestamp and instance timezone. The search

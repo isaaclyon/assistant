@@ -17,6 +17,8 @@ export interface CorpusOperationStatus {
 export interface SearchIndex {
   memoryScan: MemoryScanStore;
   semantic: MemorySemanticStore;
+  /** Notes whose `decay` header overrides the type default (ADR-0045). */
+  memoryDecayOverrides(): Map<string, "durable" | "fading">;
   withRefreshLock<T>(corpus: SearchCorpus, operation: () => Promise<T>): Promise<T>;
   sessionScanCursor(instanceId: string, principalId: string): string | undefined;
   setSessionScanCursor(instanceId: string, principalId: string, path: string): void;
@@ -69,6 +71,8 @@ export interface MemoryIndexDocument {
   owner: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Optional `decay` header override; null uses the type default. */
+  decay?: "durable" | "fading" | null;
 }
 
 export interface MemoryIndexMatch {

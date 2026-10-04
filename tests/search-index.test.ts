@@ -39,12 +39,30 @@ describe("search index foundation", () => {
     db.close();
     const migrated = openSearchIndex({ stateDir });
     indexes.push(migrated);
-    expect(migrated.status().schemaVersion).toBe(3);
+    expect(migrated.status().schemaVersion).toBe(4);
     expect(migrated.getSessionSourceState("i", "p", source.sourcePath)).toEqual(source);
     expect(migrated.getSessionDocument("i", "p", "same", "same")).toEqual(document);
     migrated.replaceSessionSource({ ...source, principalId: "other" }, [{ ...document, principalId: "other" }]);
     expect(migrated.searchSessionDocuments({ query: "migration", limit: 10, instanceId: "i", principalId: "other" }).results).toHaveLength(1);
     expect(migrated.status().sessionDocuments).toBe(2);
+  });
+
+  it("adds the decay column to a version-3 index and forces a memory reparse", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "search-migration-v3-"));
+    openSearchIndex({ stateDir }).close();
+    const db = new DatabaseSync(join(stateDir, "search-index.db"));
+    db.exec("ALTER TABLE memory_document DROP COLUMN decay");
+    db.prepare("INSERT INTO memory_scan_source VALUES ('/vault/a.md', 'f', NULL, 'MALFORMED_NOTE')").run();
+    db.exec("UPDATE search_index_metadata SET schema_version = 3");
+    db.close();
+    const migrated = openSearchIndex({ stateDir });
+    indexes.push(migrated);
+    expect(migrated.status().schemaVersion).toBe(4);
+    expect(migrated.memoryScan.get("/vault/a.md")).toBeUndefined();
+    migrated.replaceMemoryDocuments([{ noteId: "a", relativePath: "lists/a.md", revision: "r", title: "t", tags: [],
+      body: "b", type: "list", status: "active", scope: "household", owner: null,
+      createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", decay: "durable" }]);
+    expect(migrated.memoryDecayOverrides()).toEqual(new Map([["a", "durable"]]));
   });
 
   it("creates a private versioned index with separate corpora", async () => {
@@ -54,7 +72,7 @@ describe("search index foundation", () => {
     indexes.push(index);
 
     expect(index.status()).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       memoryDocuments: 0,
       sessionDocuments: 0,
     });

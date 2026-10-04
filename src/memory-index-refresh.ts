@@ -33,6 +33,7 @@ interface ParsedMemoryNote {
   updated: string;
   revision: string;
   body: string;
+  decay?: "durable" | "fading";
 }
 
 interface MemoryStoreModule {
@@ -220,6 +221,7 @@ export async function doRebuildMemoryIndex(options: MemoryRefreshOptions): Promi
               owner: note.owner ?? null,
               createdAt: note.created,
               updatedAt: note.updated,
+              decay: note.decay ?? null,
             };
           } catch {
             warning = "MALFORMED_NOTE";

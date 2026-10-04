@@ -171,8 +171,8 @@ export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
   const insertMemory = db.prepare(`
     INSERT INTO memory_document (
       note_id, relative_path, revision, title, tags, tags_json, body, type, status,
-      scope, owner, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      scope, owner, created_at, updated_at, decay
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const searchMemory = db.prepare(`
     SELECT
@@ -381,6 +381,10 @@ export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
     },
     memoryScan: createMemoryScanStore(db),
     semantic: createMemorySemanticStore(db),
+    memoryDecayOverrides() {
+      const rows = db.prepare("SELECT note_id, decay FROM memory_document WHERE decay IS NOT NULL").all();
+      return new Map(rows.map((row) => [String(row.note_id), row.decay as "durable" | "fading"]));
+    },
     sessionScanCursor(instanceId, principalId) {
       const row = db.prepare("SELECT source_path FROM session_scan_cursor WHERE instance_id = ? AND principal_id = ?")
         .get(instanceId, principalId);
@@ -424,6 +428,7 @@ export function openSearchIndex(options: OpenSearchIndexOptions): SearchIndex {
             document.owner,
             document.createdAt,
             document.updatedAt,
+            document.decay ?? null,
           );
         }
         // Snapshot publication replaces all rows; retain only embeddings of
