@@ -13,6 +13,7 @@ export interface PrivateLoginOperations {
   submit(values: string[]): Promise<LoginStep>;
   close(): void;
   saved?: () => Promise<string[] | undefined>;
+  canUseSaved?(): boolean;
 }
 
 /** Authenticated display transport. No frames, input, or exceptions enter Pi. */
@@ -36,7 +37,7 @@ export async function startTakeoverServer(options: {
   const loginMetadata = () => {
     const state = options.login!.state();
     return { login: state, step: loginStep,
-      saved: !!options.login?.saved && !savedAttempted && state.state === "fields" && !state.fields.includes("code"),
+      saved: !!options.login?.saved && options.login.canUseSaved?.() !== false && !savedAttempted && state.state === "fields" && !state.fields.includes("code"),
       origin: new URL(options.resumeUrl).origin, expiresAt, resumeUrl: options.resumeUrl };
   };
   let settle!: (result: TakeoverResult) => void;
@@ -102,7 +103,7 @@ export async function startTakeoverServer(options: {
         const current = options.login?.state();
         if (!loginActive || loginBusy || input.step !== loginStep || current?.state !== "fields") { reply(res, 409, { error: "stale_step" }); return; }
         const saved = input.saved === true;
-        if (saved ? input.values !== undefined || !options.login?.saved || savedAttempted || current.fields.includes("code") : input.saved !== undefined || !validLoginValues(current.fields, input.values)) { reply(res, 400, { error: "invalid_fields" }); return; }
+        if (saved ? input.values !== undefined || !options.login?.saved || options.login.canUseSaved?.() === false || savedAttempted || current.fields.includes("code") : input.saved !== undefined || !validLoginValues(current.fields, input.values)) { reply(res, 400, { error: "invalid_fields" }); return; }
         loginBusy = true; loginStep = randomBytes(24).toString("base64url");
         loginWork = (async () => {
           let values: string[] | undefined;

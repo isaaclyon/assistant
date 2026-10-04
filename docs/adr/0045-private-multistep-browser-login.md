@@ -46,6 +46,10 @@ scope, uses stdin for its request and bounded private stdout, and returns no
 fields through the model tool or Mini App. Manual username entry must match the
 saved item before later saved-password use. General codes remain manual;
 OpenTable's sender-specific mail adapter is unchanged.
+The credential worker has its own process group; cancellation, timeout and
+completion kill remaining descendants before the private lookup settles.
+Password-only entrypoints have no bound identifier and use manual input or
+takeover; they cannot implicitly choose the saved item's account.
 
 An explicit authenticated takeover request must carry the current step nonce.
 It closes the private recognizer before issuing viewer credentials. The crash

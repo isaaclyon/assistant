@@ -90,6 +90,13 @@ describe("Telegram browser takeover boundary", () => {
     expect((await f.post("login", { step: first.step, saved: true })).status).toBe(400);
     expect(login.saved).not.toHaveBeenCalled(); expect(login.submit).not.toHaveBeenCalled();
   });
+  it("requires a bound username before saved-password-only entry", async () => {
+    const login: PrivateLoginOperations = { state: () => ({ state: "fields", fields: ["password"] }), close: vi.fn(), submit: vi.fn(), canUseSaved: () => false, saved: vi.fn(async () => ["synthetic-password"]) };
+    const f = await fixture(60000, login), first = await (await f.post("auth")).json();
+    expect(first.saved).toBe(false);
+    expect((await f.post("login", { step: first.step, saved: true })).status).toBe(400);
+    expect(login.saved).not.toHaveBeenCalled();
+  });
   it("binds bounded viewport changes to the paired user and current viewer", async () => {
     const f = await fixture(), viewport = { width: 390, height: 650, desktop: false };
     expect((await f.post("auth", { viewport, initData: signed(456) })).status).toBe(403);

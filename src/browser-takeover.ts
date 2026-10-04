@@ -63,13 +63,14 @@ export async function runBrowserTakeover(options: {
         const loginRequest = options.login, loginAbort = new AbortController();
         const loginSignal = AbortSignal.any([controller.signal, loginAbort.signal]);
         const page = await protectPrivateLogin(browser.port, loginRequest, loginSignal);
-        login = { state: page.state, submit: page.submit, close: () => { loginAbort.abort(); page.close(); },
+        const canUseSaved = () => { const state = page.state(); return state.state === "fields" && !state.fields.includes("code") && (state.fields.includes("username") || page.hasUsername()); };
+        login = { state: page.state, submit: page.submit, canUseSaved, close: () => { loginAbort.abort(); page.close(); },
           ...(loginRequest.credentialItem ? { saved: async () => {
             const state = page.state();
-            if (state.state !== "fields" || state.fields.includes("code")) return;
+            if (state.state !== "fields" || !canUseSaved()) return;
             const credential = await privateLoginCredential(config, loginRequest.credentialItem!, loginRequest.pageUrl, loginSignal);
             if (!credential) return;
-            try { if (page.matchesUsername(credential.username)) return state.fields.map(kind => kind === "username" ? credential.username : credential.password); }
+            try { if (state.fields.includes("username") || page.matchesUsername(credential.username)) return state.fields.map(kind => kind === "username" ? credential.username : credential.password); }
             finally { credential.username = ""; credential.password = ""; }
           } } : {}),
         };

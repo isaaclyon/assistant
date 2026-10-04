@@ -55,6 +55,8 @@ does not qualify implicitly. Lookup uses the current instance's credential
 scope, stays within the host, and is bounded. After manual username entry, a
 saved item's username must match exactly. Missing configuration, mismatched
 origin/username or lookup errors leave private manual entry available.
+Starting directly on a password-only screen also uses manual entry or takeover;
+saved-password steps require an identifier submitted within this private flow.
 
 General verification codes use private manual entry. Automatic Gmail retrieval
 remains limited to the existing [OpenTable specialization](private-browser-input.md),

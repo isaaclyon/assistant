@@ -50,8 +50,9 @@ export async function protectPrivateLogin(port: number, request: PrivateLoginReq
   } catch { cdp.close(); throw new Error("Private sign-in unavailable"); }
   return {
     state: () => step,
-    matchesUsername: (candidate: string) => username === undefined || username === candidate,
-    close() { closed = true; username = undefined; objectId = undefined; cdp.close(); },
+    hasUsername: () => username !== undefined,
+    matchesUsername: (candidate: string) => username !== undefined && username === candidate,
+    close() { closed = true; username = undefined; objectId = undefined; step = { state: "manual" }; cdp.close(); },
     async submit(values: string[]): Promise<LoginStep> {
       if (closed || signal.aborted || step.state !== "fields" || !validLoginValues(step.fields, values) || !allowed(step.fields)) throw new Error("Private sign-in rejected");
       const previous = [...step.fields]; previous.forEach(k => used.add(k));
@@ -65,7 +66,7 @@ export async function protectPrivateLogin(port: number, request: PrivateLoginReq
         // action again immediately before every fill/click. Never retry a send.
         const filled = await cdp.request("Runtime.callFunctionOn", { objectId, functionDeclaration: "function(values){return this.fill(values)}",
           arguments: [{ value: values }], returnByValue: true, awaitPromise: true }, sessionId).catch(() => undefined);
-        if (filled?.result?.value === false) return step;
+        if (filled?.exceptionDetails || (filled?.result?.value !== true && filled?.result?.value !== "changed")) return step;
         objectId = undefined;
         const until = Date.now() + 8_000;
         while (!closed && !signal.aborted && Date.now() < until) {

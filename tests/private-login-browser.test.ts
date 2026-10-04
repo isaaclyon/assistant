@@ -55,7 +55,9 @@ describe.skipIf(!available)("private general login against Chrome", () => {
   it.each([false,true])("keeps identifier/password/code steps protected across navigation (SPA=%s)",async spa=>{
     const f=await fixture(spa);
     expect(f.login.state()).toEqual({state:"fields",fields:["username"]});
+    expect(f.login.hasUsername()).toBe(false); expect(f.login.matchesUsername("unknown")).toBe(false);
     expect(await f.login.submit(["person@example.invalid"])).toEqual({state:"fields",fields:["password"]});
+    expect(f.login.hasUsername()).toBe(true); expect(f.login.matchesUsername("person@example.invalid")).toBe(true);
     expect(f.login.matchesUsername("other@example.invalid")).toBe(false);
     expect(await f.login.submit(["synthetic-secret"])).toEqual({state:"fields",fields:["code"]});
     expect(await f.login.submit(["123456"])).toEqual({state:"complete"});

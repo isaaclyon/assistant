@@ -65,6 +65,7 @@ export const LOGIN_FORM = String.raw`function(origin, bind) {
       for (let i=0;i<inputs.length;i++) {
         if (!good()) return i === 0 ? false : 'changed';
         setter.call(inputs[i],values[i]);
+        if (inputs[i].value !== values[i]) return i === 0 ? false : 'changed';
         inputs[i].dispatchEvent(new page.Event('input',{bubbles:true}));
         inputs[i].dispatchEvent(new page.Event('change',{bubbles:true}));
       }
