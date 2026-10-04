@@ -1,5 +1,19 @@
 # Keeping Pi current
 
+## GPT-6.1 Sol support
+
+The guarded Codex conversion install patch backports GPT-6.1 Sol's catalog
+entry and GPT-6 request-path recognition from upstream 3.0.40 into our pinned
+3.0.39 adapter. This enables Responses Lite and native reasoning changes,
+with upstream's 272K context window, 128K output limit, pricing, and low through
+max reasoning levels. Off and minimal are unavailable. The existing fast-mode
+setting applies through the ordinary Codex request options.
+
+This avoids importing the adapter's unrelated context-management changes;
+newer 3.0.43+ releases also require Pi 1.0. Remove the backport when upgrading
+to an adapter with native support. Offline catalog and request-path tests cover
+registration; account-level availability still depends on the Codex service.
+
 All four direct Pi packages use the same exact stable version in `package.json`.
 Commit their lockfile together. The version-alignment test also checks nested
 SDK copies installed by Pi's published shrinkwrap. Do not replace pins with

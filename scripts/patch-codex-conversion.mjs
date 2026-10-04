@@ -31,6 +31,43 @@ async function patchFile(path, original, replacement) {
 }
 
 await assertPinnedVersion();
+// Backport the model support from upstream 3.0.40 without its unrelated
+// context-management changes or a Pi runtime upgrade.
+await patchFile(
+  join(packageRoot, "dist/providers/openai-codex/responses-lite-model.js"),
+  String.raw`/^gpt-6-(?:astra|sol|luna)$/i`,
+  String.raw`/^(?:gpt-6-(?:astra|sol|luna)|gpt-6\.1-sol)$/i`,
+);
+await patchFile(
+  join(packageRoot, "dist/providers/openai-codex/model-catalog.js"),
+  `const SUPPLEMENTAL_MODELS = [`,
+  `const SUPPLEMENTAL_MODELS = [
+    {
+        id: "gpt-6.1-sol",
+        name: "GPT-6.1 Sol",
+        api: "openai-codex-responses",
+        provider: "openai-codex",
+        baseUrl: DEFAULT_CODEX_BASE_URL,
+        reasoning: true,
+        input: ["text", "image"],
+        cost: {
+            input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5,
+            tiers: [{ inputTokensAbove: 272_000, input: 4, output: 15, cacheRead: 0.2, cacheWrite: 5 }],
+        },
+        contextWindow: 272_000,
+        maxTokens: 128_000,
+        thinkingLevelMap: { off: null, minimal: null, xhigh: "xhigh", max: "max" },
+        compat: { supportsOpenAIGrammarTools: true, supportsMidConvoSystemMessages: true, supportsAdditionalTools: true, supportsToolSearch: true },
+    },`,
+);
+await patchFile(
+  join(packageRoot, "dist/providers/openai-codex/model-catalog.js"),
+  `        // Pi's built-ins can advertise "none", but the Codex catalog has no off effort here.`,
+  `        if (model.id === "gpt-6.1-sol") {
+            return { ...model, thinkingLevelMap: { ...model.thinkingLevelMap, off: null, minimal: null } };
+        }
+        // Pi's built-ins can advertise "none", but the Codex catalog has no off effort here.`,
+);
 await patchFile(
   join(packageRoot, "dist", "adapter", "activation", "config-store.js"),
   `export function getCodexConversionConfigPath(agentDir = getAgentDir()) {
