@@ -19,6 +19,7 @@ import { createOpenAIEmbedder } from "../../src/openai-embeddings.ts";
 import {
   prepareMemoryEmbeddings,
   prepareMemoryQueryEmbeddings,
+  RECALL_CANDIDATE_FILTER,
   searchHybridMemories,
   searchHybridMemoriesForQueries,
   visibleMemoryRevisions,
@@ -271,7 +272,7 @@ export default function searchExtension(pi: ExtensionAPI): void {
     if (semantic.status !== "disabled") await requireFreshMemory(activeIndex, context);
     const ranking = await usageRanking(activeIndex, context);
     return mergeTemporalCandidates(
-      searchHybridMemoriesForQueries(activeIndex, request, queries, semantic, ranking),
+      searchHybridMemoriesForQueries(activeIndex, request, queries, semantic, ranking, RECALL_CANDIDATE_FILTER),
       searchTemporalMemories(activeIndex, request, dates?.ranges ?? []),
       RECALL_CANDIDATE_LIMIT,
     )

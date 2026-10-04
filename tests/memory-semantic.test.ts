@@ -10,6 +10,7 @@ import {
   searchHybridMemories,
   searchHybridMemoriesForQueries,
   visibleMemoryRevisions,
+  RECALL_CANDIDATE_FILTER,
 } from "../src/memory-semantic.js";
 import { EMBEDDING_DIMENSIONS } from "../src/openai-embeddings.js";
 
@@ -25,7 +26,13 @@ const note = (id: string, patch: Partial<MemoryIndexDocument> = {}): MemoryIndex
   body: "Prefers quiet restaurants", type: "preference", status: "active", scope: "personal", owner: "alice",
   createdAt: "2026-01-01", updatedAt: "2026-01-01", ...patch,
 });
-const vector = (axis = 0) => Array.from({ length: EMBEDDING_DIMENSIONS }, (_, i) => i === axis ? 1 : 0);
+const vector = (axis = 0): number[] => Array.from({ length: EMBEDDING_DIMENSIONS }, (_, i) => i === axis ? 1 : 0);
+const similarVector = (score: number) => {
+  const result = vector();
+  result[0] = score;
+  result[1] = Math.sqrt(1 - score * score);
+  return result;
+};
 async function setup(documents: MemoryIndexDocument[]) {
   const root = await mkdtemp(join(tmpdir(), "semantic-memory-"));
   roots.push(root);
@@ -49,6 +56,42 @@ it("finds a paraphrase, caches unchanged notes across refresh/reopen, and retain
   indexes.push(reopened);
   await prepareMemoryEmbeddings(reopened, request, embed);
   expect(embed.mock.calls[1]![0]).toEqual([request.query]);
+});
+
+it("recall rejects weak semantic matches while explicit search retains them", async () => {
+  const index = await setup([note("weak", { body: "Buy detergent" })]);
+  const query = { ...request, query: "what day is today" };
+  const prepared = await prepareMemoryEmbeddings(index, query, async (inputs) =>
+    inputs.map((_, i) => i === 0 ? vector() : similarVector(0.17)));
+  expect(searchHybridMemories(index, query, prepared).results).toHaveLength(1);
+  expect(searchHybridMemories(index, query, prepared, undefined, RECALL_CANDIDATE_FILTER).results).toEqual([]);
+});
+
+it("recall preserves a generous semantic boundary and meaningful keyword matches", async () => {
+  const index = await setup([
+    note("indirect", { body: "Prefers quiet restaurants" }),
+    note("keyword", { title: "Alex", body: "Enjoys gardening" }),
+    note("common", { body: "What we should do is buy detergent" }),
+  ]);
+  const query = { ...request, query: "what should I get Alex" };
+  const prepared = await prepareMemoryEmbeddings(index, query, async (inputs) =>
+    inputs.map((text, i) => i === 0 ? vector() : similarVector(text.includes("quiet") ? 0.18 : 0.05)));
+  expect(searchHybridMemories(index, query, prepared, undefined, RECALL_CANDIDATE_FILTER)
+    .results.map((r) => r.id).sort()).toEqual(["indirect", "keyword"]);
+  const fallback = { status: "unavailable" as const };
+  expect(searchHybridMemories(index, query, fallback, undefined, RECALL_CANDIDATE_FILTER)
+    .results.map((r) => r.id)).toEqual(["keyword"]);
+  expect(searchHybridMemories(index, { ...query, query: "ok do it" }, fallback, undefined, RECALL_CANDIDATE_FILTER)
+    .results).toEqual([]);
+});
+
+it("recall filters each query before interleaving and preserves follow-up context", async () => {
+  const index = await setup([note("quiet"), note("weak", { body: "Buy detergent" })]);
+  const queries = ["ok do it", "somewhere we can hear each other"];
+  const prepared = await prepareMemoryQueryEmbeddings(index, request, queries, async (inputs) =>
+    inputs.map((text, i) => i === 0 ? vector(2) : i === 1 ? vector() : similarVector(text.includes("quiet") ? 0.198 : 0.1)));
+  expect(searchHybridMemoriesForQueries(index, request, queries, prepared, undefined, RECALL_CANDIDATE_FILTER)
+    .map((r) => r.id)).toEqual(["quiet"]);
 });
 
 it("filters owner, scope, status and type before sending any note to OpenAI", async () => {

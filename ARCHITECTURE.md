@@ -266,6 +266,11 @@ question per candidate, rechecks visibility, and returns passing notes as one
 hidden `memory-recall` session message. It leaves the system prompt
 unchanged to preserve prompt caching, and it fails open. See
 [ADR-0037](docs/adr/0037-recall-memory-with-jev-before-each-turn.md).
+Automatic recall filters semantic sections below cosine similarity 0.18 and
+requires content words for lexical candidates before fusion. Explicit search
+keeps its existing behavior; date-overlap candidates remain eligible. Empty
+candidate sets skip Jev. See
+[ADR-0046](docs/adr/0046-filter-automatic-recall-candidates.md).
 Search and recall then move unused `fading` notes (lists, events, purchases,
 or any note with a `decay: fading` header) down up to three places. Usage comes
 from the recall log and a per-instance agent-read log, tallied in memory, so the
