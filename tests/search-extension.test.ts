@@ -210,6 +210,17 @@ describe("search extension", () => {
       expect(Object.keys(JSON.parse(typesafeBodies[1]!).questions)).toEqual(["add"]);
       weakQuery = false;
 
+      // A recent assistant response can fill the 512-character query window.
+      // Quoting/OR expansion must not abort the entire automatic recall batch.
+      const longQuery = `shellfish ${Array.from({ length: 80 }, (_, i) => `word${i}`).join(" ")}`;
+      const longResult = await beforeAgentStart({ prompt: "[telegram] and dinner?" }, {
+        sessionManager: { buildContextEntries: () => [
+          { type: "message", message: { role: "assistant", content: longQuery } },
+        ], getSessionId: () => "long-query-session" },
+      });
+      expect(longResult?.message?.content).toContain("Emma food");
+      expect(typesafeBodies).toHaveLength(3);
+
       // The question has no words in common with the saved event. With
       // embeddings disabled, interval overlap is the only way to find it.
       await storeModule.createMarkdownMemoryStore({ root: vault, principal: "isaac", memoryView: "owner-and-household" })
@@ -227,6 +238,15 @@ describe("search extension", () => {
         start: "2026-10-02", end: "2026-10-04",
       });
 
+      // Simulate an unsafe canonical directory without exposing its path in
+      // recall diagnostics. No stale notes may be injected on partial refresh.
+      const unsafe = join(vault, "lists");
+      await symlink(sessions, unsafe);
+      const callsBeforePartial = typesafeBodies.length;
+      await expect(beforeAgentStart({ prompt: "[telegram] dinner" }, ctx)).resolves.toBeUndefined();
+      expect(typesafeBodies).toHaveLength(callsBeforePartial);
+      await rm(unsafe);
+
       judge = () => new Response("unavailable", { status: 503 });
       await expect(beforeAgentStart({ prompt: "[telegram] and a backup option avoiding shellfish" }, ctx)).resolves.toBeUndefined();
 
@@ -239,8 +259,12 @@ describe("search extension", () => {
       unbind();
     }
     const log = (await readFile(join(state, "memory-recall.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-    expect(log.map((record) => record.outcome)).toEqual(["injected", "none_selected", "injected", "judge_failed"]);
-    expect(log.map((record) => record.inputTokens)).toEqual([4096, 4096, 4096, undefined]);
+    expect(log.map((record) => record.outcome)).toEqual(["injected", "none_selected", "injected", "injected", "search_failed", "judge_failed"]);
+    expect(log.map((record) => record.inputTokens)).toEqual([4096, 4096, 4096, 4096, undefined, undefined]);
+    expect(log[4].failure).toEqual({ stage: "initial_refresh", reason: "refresh_incomplete",
+      warningCodes: ["UNSAFE_ENTRY"], scanTruncated: false, warningsTruncated: false });
+    expect(log[5].failure).toMatchObject({ stage: "judge", reason: "exception", errorType: "Error" });
+    expect(JSON.stringify(log)).not.toContain(sandbox);
     expect(JSON.stringify(log)).not.toMatch(/shellfish|crab shack|ok do it/);
   }, 15_000);
 
@@ -276,6 +300,7 @@ describe("search extension", () => {
       settleRefreshWithin<T>(
         promise: Promise<T>,
         timeoutMs: number,
+        onFailure?: (error: unknown) => void,
       ): Promise<{ status: string; value?: T }>;
     };
 
@@ -289,6 +314,11 @@ describe("search extension", () => {
     await expect(
       module.settleRefreshWithin(new Promise(() => undefined), 5),
     ).resolves.toEqual({ status: "timeout" });
+    const privateError = new Error("private failure");
+    const onFailure = vi.fn();
+    await expect(module.settleRefreshWithin(Promise.reject(privateError), 50, onFailure))
+      .resolves.toEqual({ status: "failed" });
+    expect(onFailure).toHaveBeenCalledWith(privateError);
   });
 
   it("registers separate memory/session tools and supersedes scan search in its guidance", async () => {

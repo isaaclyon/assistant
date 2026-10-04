@@ -31,6 +31,9 @@ import {
   isMemoryRecallEnabled,
   recallMemories,
   RECALL_CANDIDATE_LIMIT,
+  RecallOperationError,
+  runRecallOperation,
+  type RecallFailureStage,
   type RecallCandidate,
 } from "../../src/memory-recall.ts";
 import { createTypeSafeJudge } from "../../src/semantic-judge.ts";
@@ -154,6 +157,7 @@ export type RefreshOutcome<T> =
 export async function settleRefreshWithin<T>(
   promise: Promise<T>,
   timeoutMs: number,
+  onFailure?: (error: unknown) => void,
 ): Promise<RefreshOutcome<T>> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<RefreshOutcome<T>>((resolveTimeout) => {
@@ -161,7 +165,7 @@ export async function settleRefreshWithin<T>(
   });
   const settled = promise.then<RefreshOutcome<T>, RefreshOutcome<T>>(
     (value) => ({ status: "fresh", value }),
-    () => ({ status: "failed" }),
+    (error) => { onFailure?.(error); return { status: "failed" }; },
   );
   try {
     return await Promise.race([settled, timeout]);
@@ -243,12 +247,16 @@ export default function searchExtension(pi: ExtensionAPI): void {
   };
 
   /** Fails closed: a stale index is not proof of current canonical visibility. */
-  const requireFreshMemory = async (activeIndex: SearchIndex, context: SearchContext): Promise<void> => {
+  const requireFreshMemory = async (activeIndex: SearchIndex, context: SearchContext, stage: RecallFailureStage): Promise<void> => {
+    let failure: unknown;
     const refresh = await settleRefreshWithin(
       trackRefresh(refreshMemory(activeIndex, context)),
       INTERACTIVE_REFRESH_BUDGET_MS,
+      (error) => { failure = error; },
     );
-    if (refresh.status !== "fresh" || !refresh.value.complete) throw new Error("Memory index is not fresh");
+    if (refresh.status === "timeout") throw new RecallOperationError(stage, "refresh_timeout");
+    if (refresh.status === "failed") throw new RecallOperationError(stage, "refresh_failed", failure);
+    if (!refresh.value.complete) throw new RecallOperationError(stage, "refresh_incomplete", undefined, refresh.value);
   };
 
   // ADR-0037: the same refresh -> embed -> refresh privacy sequence as the
@@ -258,34 +266,34 @@ export default function searchExtension(pi: ExtensionAPI): void {
     queries: string[],
     dates?: DateContext,
   ): Promise<RecallCandidate[]> => {
-    const activeIndex = getIndex(context);
+    const activeIndex = await runRecallOperation("index_open", () => getIndex(context));
     const request = {
       query: queries[0]!,
       principal: context.principalId,
       memoryView: context.memoryView,
       limit: RECALL_CANDIDATE_LIMIT,
     };
-    await requireFreshMemory(activeIndex, context);
-    const semantic = await trackRefresh(
+    await requireFreshMemory(activeIndex, context, "initial_refresh");
+    const semantic = await runRecallOperation("embedding", () => trackRefresh(
       prepareMemoryQueryEmbeddings(activeIndex, request, queries, createOpenAIEmbedder()),
-    );
-    if (semantic.status !== "disabled") await requireFreshMemory(activeIndex, context);
+    ));
+    if (semantic.status !== "disabled") await requireFreshMemory(activeIndex, context, "post_embedding_refresh");
     const ranking = await usageRanking(activeIndex, context);
-    return mergeTemporalCandidates(
+    return runRecallOperation("candidate_search", () => mergeTemporalCandidates(
       searchHybridMemoriesForQueries(activeIndex, request, queries, semantic, ranking, RECALL_CANDIDATE_FILTER),
       searchTemporalMemories(activeIndex, request, dates?.ranges ?? []),
       RECALL_CANDIDATE_LIMIT,
     )
       .map((match) => ({ id: match.id, revision: match.revision, type: match.type, title: match.title,
-        snippet: match.snippet, ...(ranking ? { drop: ranking.drop(match) } : {}) }));
+        snippet: match.snippet, ...(ranking ? { drop: ranking.drop(match) } : {}) })));
   };
 
   const currentRecallRevisions = async (context: SearchContext): Promise<Map<string, string>> => {
-    const activeIndex = getIndex(context);
-    await requireFreshMemory(activeIndex, context);
-    return visibleMemoryRevisions(activeIndex, {
+    const activeIndex = await runRecallOperation("index_open", () => getIndex(context));
+    await requireFreshMemory(activeIndex, context, "revalidation_refresh");
+    return runRecallOperation("revision_lookup", () => visibleMemoryRevisions(activeIndex, {
       query: "recall", principal: context.principalId, memoryView: context.memoryView,
-    });
+    }));
   };
 
   pi.on("before_agent_start", async (event, ctx) => {

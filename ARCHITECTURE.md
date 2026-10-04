@@ -272,6 +272,11 @@ notes. High-confidence proposals enter the hidden context for the main agent
 to assess and offer for explicit user approval. Already recalled notes remain
 eligible for edit checks. No memories are saved automatically. See
 [ADR-0047](docs/adr/0047-propose-memories-in-batched-jev-recall.md).
+Recall failures include the failing pipeline stage, a closed reason category,
+and recognized exception/system/SQLite codes in that same log. Refresh failures
+distinguish timeout, rejection, and incomplete canonical coverage. Diagnostics
+contain no error messages, stacks, file paths, or provider payloads. See
+[the recall diagnostics guide](docs/memory-recall-diagnostics.md).
 Automatic recall filters semantic sections below cosine similarity 0.18 and
 requires content words for lexical candidates before fusion. Explicit search
 keeps its existing behavior; date-overlap candidates remain eligible. Empty

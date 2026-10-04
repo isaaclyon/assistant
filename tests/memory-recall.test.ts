@@ -9,6 +9,7 @@ import {
   classifyRecallPrompt,
   MEMORY_RECALL_LOG_FILE,
   recallMemories,
+  RecallOperationError,
   type MemoryRecallDependencies,
   type RecallCandidate,
   type RecallLogRecord,
@@ -196,20 +197,55 @@ describe("memory recall", () => {
     const search = dependencies({ retrieve: vi.fn(async () => { throw new Error("index busy"); }) });
     await expect(recallMemories({ prompt, entries: [], sessionId: "s" }, search.deps)).resolves.toBeUndefined();
     expect(search.logs[0]).toMatchObject({ outcome: "search_failed" });
+    expect(search.logs[0]!.failure).toEqual({ stage: "search", reason: "exception", errorType: "Error" });
     expect(search.deps.judge).not.toHaveBeenCalled();
 
     const judge = dependencies();
     judge.deps.judge.mockImplementationOnce(async () => { throw new Error("TypeSafe request failed"); });
     await expect(recallMemories({ prompt, entries: [], sessionId: "s" }, judge.deps)).resolves.toBeUndefined();
     expect(judge.logs[0]).toMatchObject({ outcome: "judge_failed", candidates: [{ id: "allergy", result: "not_judged" }] });
+    expect(judge.logs[0]!.failure).toMatchObject({ stage: "judge" });
     expect(judge.logs[0]!.candidates[0]).not.toHaveProperty("probability");
 
     const revalidate = dependencies({ currentRevisions: vi.fn(async () => { throw new Error("refresh timeout"); }) });
     await expect(recallMemories({ prompt, entries: [], sessionId: "s" }, revalidate.deps)).resolves.toBeUndefined();
     expect(revalidate.logs[0]).toMatchObject({ outcome: "revalidate_failed" });
+    expect(revalidate.logs[0]!.failure).toMatchObject({ stage: "revalidate" });
 
     const unloggable = dependencies({ log: vi.fn(async () => { throw new Error("disk full"); }) });
     await expect(recallMemories({ prompt, entries: [], sessionId: "s" }, unloggable.deps)).resolves.toMatchObject({ customType: "memory-recall" });
+  });
+
+  it("logs closed failure categories and safe codes without error text, paths, or arbitrary fields", async () => {
+    const secret = "private note /private/vault/file token=secret";
+    const { deps, logs } = dependencies({ retrieve: vi.fn(async () => {
+      throw new RecallOperationError("candidate_search", "exception", Object.assign(new Error(secret), {
+        code: "INVALID_INPUT", name: secret, stack: secret, path: secret,
+      }));
+    }) });
+    await recallMemories({ prompt: "[telegram] hi", entries: [], sessionId: "s" }, deps);
+    expect(logs[0]!.failure).toEqual({ stage: "candidate_search", reason: "exception", errorType: "unknown", code: "INVALID_INPUT" });
+    deps.retrieve.mockImplementationOnce(async () => { throw Object.assign(new Error(secret), { code: secret }); });
+    await recallMemories({ prompt: "[telegram] hi", entries: [], sessionId: "s" }, deps);
+    expect(logs[1]!.failure).toEqual({ stage: "search", reason: "exception", errorType: "Error" });
+    expect(JSON.stringify(logs)).not.toContain(secret);
+  });
+
+  it("preserves timeout stages and SQLite busy codes as safe categories", async () => {
+    const { deps, logs } = dependencies({ retrieve: vi.fn(async () => {
+      throw new RecallOperationError("post_embedding_refresh", "refresh_timeout");
+    }) });
+    await recallMemories({ prompt: "[telegram] hi", entries: [], sessionId: "s" }, deps);
+    expect(logs[0]!.failure).toEqual({ stage: "post_embedding_refresh", reason: "refresh_timeout" });
+    deps.retrieve.mockImplementationOnce(async () => {
+      throw new RecallOperationError("initial_refresh", "refresh_failed", Object.assign(new Error("private database path"), {
+        code: "ERR_SQLITE_ERROR", errcode: 5,
+      }));
+    });
+    await recallMemories({ prompt: "[telegram] hi", entries: [], sessionId: "s" }, deps);
+    expect(logs[1]!.failure).toEqual({ stage: "initial_refresh", reason: "refresh_failed", errorType: "Error",
+      code: "ERR_SQLITE_ERROR", sqliteCode: "SQLITE_BUSY" });
+    expect(JSON.stringify(logs)).not.toContain("private database path");
   });
 
   it("appends private log lines", async () => {
