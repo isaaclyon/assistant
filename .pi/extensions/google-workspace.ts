@@ -26,6 +26,7 @@ import {
   parseAccountAlias,
   parseCalendars,
   parseEvents,
+  GoogleCommandError,
   parseGmailSearch,
   parseGmailThread,
   parseContactSearchResources,
@@ -376,11 +377,6 @@ export function registerGoogleWorkspaceTool(
           return failure("GOOGLE_CALENDAR_INPUT_INVALID", "The Google Calendar request is invalid");
         }
         const args = [
-          ...commonArgs(account!),
-          "calendar",
-          "events",
-          // Positional IDs preserve Google's "primary" alias; --cal resolves names.
-          ...selectedCalendars,
           `--from=${window.from}`,
           `--to=${window.to}`,
           `--max=${maximum}`,
@@ -389,9 +385,30 @@ export function registerGoogleWorkspaceTool(
           "--sort=start",
         ];
         try {
-          const payload = await options.run(runtime, args, signal);
-          return success(parseEvents(payload, operation, account!, maximum, query));
-        } catch {
+          const results = [];
+          for (const calendarId of selectedCalendars) {
+            // Single positional IDs preserve Google's primary alias and avoid name resolution.
+            const payload = await options.run(runtime, [...commonArgs(account!), "calendar", "events", calendarId, ...args], signal);
+            results.push(parseEvents(payload, operation, account!, maximum, query));
+          }
+          const events = results.flatMap((result, index) =>
+            (result.events as Array<Record<string, unknown>>).map((event): Record<string, unknown> => ({
+              ...event, calendarId: event.calendarId ?? selectedCalendars[index],
+            })),
+          ).sort((a, b) => Date.parse(String(a.start)) - Date.parse(String(b.start)));
+          return success({ operation, account, ...(query ? { query } : {}),
+            events: events.slice(0, maximum),
+            truncated: events.length > maximum || results.some((result) => result.truncated),
+          });
+        } catch (error) {
+          // Fixed classifications retain useful diagnostics without exposing stderr.
+          console.warn("[google-workspace] calendar read failed", {
+            operation, calendarCount: selectedCalendars.length,
+            code: error instanceof GoogleCommandError ? error.code : "INVALID_RESPONSE_OR_TRANSPORT_FAILURE",
+          });
+          if (error instanceof GoogleCommandError && error.code !== "UNKNOWN") {
+            return failure(`GOOGLE_CALENDAR_${error.code}`, `Google Calendar request failed: ${error.code}`);
+          }
           return failure("GOOGLE_CALENDAR_UNAVAILABLE", `Google Calendar is temporarily unavailable for account ${account}`);
         }
       }

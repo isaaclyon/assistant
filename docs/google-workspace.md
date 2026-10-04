@@ -236,6 +236,14 @@ read adapters supply `--readonly`, `--no-input`, and Gmail-send blocking. They
 normalizes and bounds returned fields, omits cancelled events, preserves
 all-day/date and time-zone distinctions, and mark remote text as untrusted.
 
+Event reads and searches query each selected calendar separately because gogcli
+0.34.1 accepts at most one positional calendar ID. Results carry their source
+calendar ID and merge in start-time order under one result limit. Pagination
+or omitted results mark the response as truncated. If any calendar fails, the
+whole request fails rather than presenting an incomplete schedule as complete.
+Calendar read failures expose fixed command classifications when available;
+logs include only the operation, calendar count, and fixed failure category.
+
 For writes, first verify the allowlist and OAuth grant. Any live mutation test
 must use an explicitly identified disposable event; deletion still uses its
 confirmation button. Automated tests use synthetic events and transports.

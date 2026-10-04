@@ -27,6 +27,40 @@ afterEach(async () => {
 });
 
 describe("google workspace extension", () => {
+  it.each(["calendar_events", "calendar_search"])("merges individual calendar reads for %s and fails closed", async (operation) => {
+    const diagnostics = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const module = await import(extensionUrl);
+    let tool: ToolDefinition | undefined;
+    const run = vi.fn(async (_runtime: unknown, args: string[]) => {
+      const id = args[9];
+      if (args[10] && !args[10].startsWith("--from=")) throw new Error("Multiple IDs rejected");
+      return { events: [
+        { id: "shared-id", start: { dateTime: id === "primary" ? "2026-10-17T09:00:00Z" : "2026-10-17T10:00:00+03:00" }, end: { dateTime: "2026-10-17T13:00:00Z" } },
+      ] };
+    });
+    module.registerGoogleWorkspaceTool({ registerTool: (value: ToolDefinition) => { tool = value; } }, {
+      resolveRuntime: async () => ({ account: "personal" }), run,
+    });
+    const input = { operation, query: "concert", calendar_ids: ["primary", "team", "primary"], from: "2026-10-17", to: "2026-10-18", max_results: 1 };
+    const result = await tool!.execute("multi", input);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(result.details).toMatchObject({ ok: true, result: { events: [{ id: "shared-id", calendarId: "team" }], truncated: true } });
+    if (operation === "calendar_search") expect(run.mock.calls.every((call) => call[1].includes("--query=concert"))).toBe(true);
+    expect((await tool!.execute("both", { ...input, max_results: 2 })).details).toMatchObject({
+      ok: true, result: { events: [{ id: "shared-id", calendarId: "team" }, { id: "shared-id", calendarId: "primary" }], truncated: false },
+    });
+    run.mockResolvedValueOnce({ events: [] }).mockRejectedValueOnce(new Error("private failure"));
+    const failed = await tool!.execute("failed", input);
+    expect(failed.details).toMatchObject({ ok: false, result: null });
+    expect(JSON.stringify(failed)).not.toContain("private failure");
+    expect(JSON.stringify(diagnostics.mock.calls)).not.toContain("private failure");
+    expect(diagnostics).toHaveBeenCalledWith("[google-workspace] calendar read failed", expect.objectContaining({ operation, calendarCount: 2 }));
+    const { GoogleCommandError } = await import("../.pi/lib/google-operations.js");
+    run.mockRejectedValueOnce(new GoogleCommandError("FORBIDDEN"));
+    expect((await tool!.execute("forbidden", input)).details).toMatchObject({ ok: false, error: { code: "GOOGLE_CALENDAR_FORBIDDEN" } });
+    diagnostics.mockRestore();
+  });
+
   it("passes the one resolved runtime snapshot to transport", async () => {
     const module = await import(extensionUrl);
     let tool: ToolDefinition | undefined;
@@ -279,7 +313,7 @@ describe("google workspace extension", () => {
     const result = await tool.execute("call-events", {
       operation: "calendar_events",
       account: "personal",
-      calendar_ids: ["primary", "team@example.com"],
+      calendar_ids: ["primary"],
       from: "2026-08-01T00:00:00-06:00",
       to: "2026-08-08T00:00:00-06:00",
       time_zone: "America/New_York",
@@ -290,7 +324,7 @@ describe("google workspace extension", () => {
       [
         "--no-input", "--readonly", "--gmail-no-send", "--wrap-untrusted", "--json",
         "--account", "personal", "calendar", "events",
-        "primary", "team@example.com",
+        "primary",
         "--from=2026-08-01T00:00:00-06:00", "--to=2026-08-08T00:00:00-06:00",
         "--max=20", "--timezone=America/New_York", "--sort=start",
       ],
