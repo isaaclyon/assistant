@@ -166,6 +166,16 @@ current website so in-page state can survive. Only a fixed status reaches Pi;
 see [ADR-0044](docs/adr/0044-telegram-browser-takeover.md) and
 [the takeover guide](docs/browser-takeover.md).
 
+`private_browser_login` reuses that protected owner for common multi-screen
+sign-in. An isolated-world recognizer binds each same-origin POST form and its
+controls; authenticated, single-use private steps preserve the browser document.
+Approved saved credentials use the instance's existing 1Password scope with
+exact-origin matching. Unknown screens switch directly to the same private
+viewer by user choice. Input and viewer work drain before browser cleanup; only
+fixed terminal status reaches Pi. See
+[ADR-0045](docs/adr/0045-private-multistep-browser-login.md) and
+[the multi-step workflow](docs/private-browser-login.md).
+
 When `PI_TELEGRAM_SESSION_IDLE_HOURS` is enabled, the host records only accepted
 human prompt time and replacement correlation under each instance state tree.
 Jobs do not advance the clock. Immediately before a qualifying Telegram or job

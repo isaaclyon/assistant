@@ -12,6 +12,56 @@ const initData = app?.initData;
 let rfb, socket, ticket, finished = false, finishing = false, connected = false, expiry;
 let desktop = false, appliedViewport = "", resizeTimer, resizePending = false;
 let previous = "";
+let loginStep, loginInputs = [], loginBusy = false, cancellingLogin = false;
+const clearLogin = () => loginInputs.forEach(input => { input.value = ""; });
+function lockLogin(locked) {
+  for (const id of ["login-submit", "login-saved", "login-takeover"]) el(id).disabled = locked;
+  loginInputs.forEach(input => { input.disabled = locked; });
+}
+function renderLogin(result) {
+  clearLogin(); loginInputs = []; el("login-fields").replaceChildren();
+  loginStep = result.step; el("login").hidden = false;
+  el("login-origin").textContent = `Website: ${result.origin}`;
+  el("login-status").textContent = result.savedUnavailable ? "Saved sign-in is unavailable for this step. Enter it privately or take over." : result.login.state === "fields" ?
+    "Sign in to your existing account. Your details stay private across steps." : "This step needs you. Take over to continue in the same browser.";
+  el("login-form").hidden = result.login.state !== "fields";
+  el("login-saved").hidden = !result.saved;
+  for (const kind of result.login.fields || []) {
+    const label = document.createElement("label"), input = document.createElement("input");
+    input.id = `login-${kind}`; label.htmlFor = input.id;
+    label.textContent = kind === "username" ? "Email, phone or username" : kind === "password" ? "Password" : "Verification code";
+    input.type = kind === "username" ? "text" : "password";
+    input.autocomplete = "off"; input.autocapitalize = "off"; input.spellcheck = false; input.required = true;
+    input.maxLength = kind === "code" ? 32 : 1024;
+    el("login-fields").append(label, input); loginInputs.push(input);
+  }
+  loginBusy = false; lockLogin(false); el("login-cancel").disabled = false;
+}
+async function submitLogin(saved) {
+  if (finished || loginBusy || cancellingLogin) return;
+  loginBusy = true; lockLogin(true);
+  const values = saved ? undefined : loginInputs.map(input => input.value);
+  clearLogin(); el("login-status").textContent = "Submitting privately…";
+  try {
+    const result = await post("login", { step: loginStep, ...(saved ? { saved: true } : { values }) });
+    if (finished || cancellingLogin) return;
+    if (result.status === "submitted") {
+      finished = true; clearTimeout(expiry); el("login-status").textContent = "Details submitted. The assistant will check sign-in.";
+      app?.disableClosingConfirmation(); try { app?.close(); } catch {}
+    } else renderLogin(result);
+  } catch {
+    if (!cancellingLogin) el("login-status").textContent = "Could not confirm this step. Reopen the sign-in button or cancel; do not resend details in chat.";
+  } finally { values?.fill(""); }
+}
+el("login-form").addEventListener("submit", event => { event.preventDefault(); void submitLogin(false); });
+el("login-saved").onclick = () => void submitLogin(true);
+el("login-takeover").onclick = () => { if (!finished && !loginBusy && !cancellingLogin) { clearLogin(); lockLogin(true); el("login").hidden = true; void connect(true); } };
+el("login-cancel").onclick = async () => {
+  if (finished) return; cancellingLogin = true; clearLogin(); lockLogin(true); el("login-cancel").disabled = true;
+  try { await post("login-cancel"); finished = true; clearTimeout(expiry); el("login-status").textContent = "Cancelled."; app?.disableClosingConfirmation(); }
+  catch { el("login-status").textContent = "Could not confirm cancellation. Retry or check Telegram."; el("login-cancel").disabled = false; }
+};
+window.addEventListener("pagehide", clearLogin);
 const buttons = ["keyboard", "tab", "enter", "scale", "desktop", "handback"];
 app?.ready(); app?.expand(); app?.enableClosingConfirmation(); app?.disableVerticalSwipes?.();
 function layout() {
@@ -44,7 +94,7 @@ new ResizeObserver(scheduleResize).observe(el("screen"));
 layout();
 async function post(path, extra = {}) {
   const response = await fetch(`/api/${path}`, { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ requestId, initData, ...extra }), signal: AbortSignal.timeout(10_000) });
+    body: JSON.stringify({ requestId, initData, ...extra }), signal: AbortSignal.timeout(path === "login" ? 75_000 : 10_000) });
   if (!response.ok) throw new Error("Unavailable");
   return response.json();
 }
@@ -57,16 +107,18 @@ function unavailable() {
   el("reconnect").hidden = false;
   el("share").disabled = true;
 }
-async function connect() {
+async function connect(takeover = false) {
   el("reconnect").hidden = true; el("status").textContent = "Connecting securely…";
   try {
     if (!requestId || !initData) throw new Error();
     const initialViewport = viewport();
-    const auth = await post("auth", { viewport: initialViewport }); ticket = auth.ticket;
+    const auth = await post("auth", { viewport: initialViewport, ...(takeover ? { takeover: true, step: loginStep } : {}) });
     appliedViewport = JSON.stringify(initialViewport);
     el("resume").textContent = auth.resumeUrl;
     clearTimeout(expiry);
-    expiry = setTimeout(() => { finished = true; disconnect(); el("finish").hidden = true; el("reconnect").hidden = true; buttons.forEach(id => { el(id).disabled = true; }); el("status").textContent = "Takeover expired. The private view is closed."; }, Math.max(0, auth.expiresAt - Date.now()));
+    expiry = setTimeout(() => { finished = true; clearLogin(); lockLogin(true); el("login").hidden = true; disconnect(); el("finish").hidden = true; el("reconnect").hidden = true; buttons.forEach(id => { el(id).disabled = true; }); el("status").textContent = "Takeover expired. The private view is closed."; }, Math.max(0, auth.expiresAt - Date.now()));
+    if (auth.login) { renderLogin(auth); return; }
+    el("login").hidden = true; ticket = auth.ticket;
     socket = new WebSocket(`${location.origin.replace(/^https:/, "wss:")}/socket`);
     socket.addEventListener("open", () => socket.send(JSON.stringify({ ticket })), { once: true });
     socket.addEventListener("error", unavailable);

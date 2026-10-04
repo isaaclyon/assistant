@@ -45,6 +45,19 @@ browser tasks in the same session concurrently or bypass the helper with raw CDP
 
 ## Private Telegram sign-in input
 
+Prefer `private_browser_login` for an existing-account sign-in that may span
+email/username, password and verification screens. Inspect the initial page,
+then pass the session, exact `pageUrl` and clean same-origin HTTPS `resumeUrl`.
+Tell the user to keep Tailscale connected and open **Sign in privately**. The
+Mini App asks for each recognized step; **Take over** handles unfamiliar screens
+inside the same protected session. Wait throughout. Never inspect intermediate
+pages or put values in chat/tool arguments. Optional `credentialItem` names a
+user-approved Login item in this instance's dedicated 1Password vault; its saved
+website must match the exact origin, and the user chooses **Use saved sign-in**.
+General codes remain private manual input. Use the OpenTable specialization
+below for its existing email-code support. Verify sign-in after the tool returns.
+See [the multi-step guide](../../../docs/private-browser-login.md).
+
 When `private_browser_input` is available, use it for user-authorized passwords
 or verification codes on ordinary HTTPS, same-origin POST forms. Inspect a single
 tab first; provide its exact URL, CSS selectors, and a same-origin `resumeUrl`

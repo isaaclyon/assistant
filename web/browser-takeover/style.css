@@ -15,4 +15,10 @@ button:disabled { opacity: .5; }
 #finish { position: absolute; inset: 0; overflow: auto; padding: 24px; background: var(--tg-theme-bg-color, white); }
 #finish button { display: block; width: 100%; }
 #finish p { line-height: 1.45; margin-bottom: 28px; }
+#login { position: absolute; inset: 0; overflow: auto; padding: 20px; background: var(--tg-theme-bg-color, white); }
+#login h2 { margin-top: 0; }
+#login label, #login input { display: block; width: 100%; }
+#login input { font: 18px system-ui; padding: 12px; margin: 6px 0 16px; }
+#login button { margin: 6px 4px 6px 0; }
+#login-origin { overflow-wrap: anywhere; }
 [hidden] { display: none !important; }

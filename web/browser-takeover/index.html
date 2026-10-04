@@ -5,6 +5,14 @@
 <nav><button id="keyboard" disabled>Keyboard</button><button id="tab" disabled>Tab</button><button id="enter" disabled>Enter</button><button id="scale" disabled>Zoom</button><button id="desktop" disabled>Desktop</button><button id="reconnect" hidden>Reconnect</button><button id="handback" disabled>Hand back</button></nav>
 <main id="screen" aria-label="Live browser view"></main>
 <input id="typing" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Remote browser keyboard">
+<section id="login" hidden>
+<h2>Sign in privately</h2><p id="login-origin"></p>
+<p id="login-status" role="status">The assistant stays paused throughout sign-in.</p>
+<form id="login-form"><div id="login-fields"></div><button id="login-submit" type="submit">Continue</button></form>
+<button id="login-saved" type="button" hidden>Use saved sign-in</button>
+<button id="login-takeover" type="button">Take over</button>
+<button id="login-cancel" type="button">Cancel</button>
+</section>
 <section id="finish" hidden>
 <h2>Hand the browser back</h2>
 <button id="private">Return privately</button><p>Reopen <span id="resume"></span>. Your sign-in is kept; open tabs and unsaved page changes are discarded.</p>

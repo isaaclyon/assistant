@@ -4,6 +4,10 @@
 session inside a private Telegram Mini App. The active agent turn waits while
 the user controls the browser, then continues after handback and cleanup.
 
+[`private_browser_login`](private-browser-login.md) uses this same protected
+session for multi-step sign-in. Its **Take over** choice opens this viewer
+without losing the current sign-in page.
+
 ## Agent workflow
 
 1. Use the stock helper to start a dedicated session and navigate to the requested
