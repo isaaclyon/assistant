@@ -40,6 +40,7 @@ import { createTypeSafeJudge } from "../../src/semantic-judge.ts";
 import { isBridgeRuntime } from "../lib/bridge-runtime.ts";
 import { renderDateContext, type DateContext } from "../../src/date-context.ts";
 import { takePreparedDateContext } from "../../src/date-context-runtime.ts";
+import { publishDebug } from "../../src/debug-messages.ts";
 import { mergeTemporalCandidates, searchTemporalMemories } from "../../src/memory-temporal.ts";
 import {
   createMemoryRanking,
@@ -300,20 +301,22 @@ export default function searchExtension(pi: ExtensionAPI): void {
     if (!isBridgeRuntime() || !classifyRecallPrompt(event.prompt)) return;
     const dates = takePreparedDateContext(event.prompt);
     const dateText = dates ? renderDateContext(dates) : "";
+    if (dateText) publishDebug("Automatic date context", dateText);
     const dateMessage = dateText ? { message: {
       customType: "date-context", content: dateText, display: false,
       details: { dates },
     } } : undefined;
     // Date interpretation works in every profile, including memoryView=none,
     // and without Jev, an embedding key, or a working vault.
-    if (!isMemoryRecallEnabled()) return dateMessage;
+    if (!isMemoryRecallEnabled()) { publishDebug("Automatic memory recall", "Disabled for this instance."); return dateMessage; }
     let context: SearchContext;
     try {
       context = resolveContext();
     } catch {
+      publishDebug("Automatic memory recall", "Memory context unavailable.");
       return dateMessage;
     }
-    if (context.memoryView === "none") return dateMessage;
+    if (context.memoryView === "none") { publishDebug("Automatic memory recall", "No memory view for this instance."); return dateMessage; }
     const message = await trackRefresh(recallMemories({
       prompt: event.prompt,
       entries: ctx.sessionManager.buildContextEntries(),
@@ -324,8 +327,9 @@ export default function searchExtension(pi: ExtensionAPI): void {
       currentRevisions: () => currentRecallRevisions(context),
       // Built per turn so it reads the current environment and global fetch.
       judge: createTypeSafeJudge({ timeoutMs: 3_000, maxAttempts: 1 }),
-      log: (record) => appendRecallLog(context.stateDir, record),
+      log: (record) => { publishDebug("Automatic memory recall decisions", record); return appendRecallLog(context.stateDir, record); },
     }));
+    if (message) publishDebug("Automatically recalled context", message.content);
     return message ? { message: { ...message,
       content: [dateText, message.content].filter(Boolean).join("\n\n"),
       details: { ...message.details, ...(dates ? { dates } : {}) },
