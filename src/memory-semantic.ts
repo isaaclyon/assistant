@@ -11,6 +11,33 @@ const MAX_NEW_CHUNKS = 32;
 /** The embedder accepts 33 inputs: the chunk batch shrinks as queries are added. */
 const MAX_QUERIES = 3;
 
+export interface MemoryCandidateFilter {
+  minSemanticScore: number;
+  meaningfulKeywords: boolean;
+}
+
+/** A permissive recall-only floor; Jev still decides whether a note matters. */
+export const RECALL_CANDIDATE_FILTER: MemoryCandidateFilter = {
+  minSemanticScore: 0.18,
+  meaningfulKeywords: true,
+};
+
+// Raw BM25 scores vary with the vault. Require a content word instead of a
+// numeric BM25 cutoff. Keep names, dates, and non-English words eligible.
+const COMMON_WORDS = new Set((
+  "a an the and or but if then of to in on at by for from with as is are was were be been being " +
+  "i me my mine we us our ours you your yours he him his she her hers it its they them their theirs " +
+  "this that these those what which who whom whose when where why how do does did doing " +
+  "have has had can could would should will shall may might must not no yes ok okay " +
+  "please thanks thank get got just some any all so very about"
+).split(" "));
+
+function recallKeywordQuery(query: string): string {
+  const terms = [...new Set((query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])
+    .filter((term) => !COMMON_WORDS.has(term)))];
+  return terms.map((term) => `"${term}"`).join(" OR ");
+}
+
 interface MemoryChunk {
   note: MemoryDocumentSearchMatch;
   hash: string;
@@ -175,24 +202,30 @@ export function searchHybridMemories(
   request: IndexedMemorySearchRequest,
   prepared: MemoryEmbeddingPreparation,
   ranking?: MemoryRanking,
+  filter?: MemoryCandidateFilter,
 ): MemoryDocumentSearchPage {
   const limit = request.limit ?? 10;
+  const lexicalQuery = filter?.meaningfulKeywords ? recallKeywordQuery(request.query) : request.query;
+  const lexicalSearch = (candidateLimit: number): MemoryDocumentSearchPage => lexicalQuery
+    ? searchIndexedMemories(index, { ...request, query: lexicalQuery, limit: candidateLimit })
+    : { results: [], truncated: false };
   if (!prepared.queryVector) {
-    if (!ranking) return { ...searchIndexedMemories(index, request), retrieval: { mode: "keyword", semantic: prepared.status } };
+    if (!ranking) return { ...lexicalSearch(limit), retrieval: { mode: "keyword", semantic: prepared.status } };
     // Fetch a few extra so lower notes can move up past dropped ones.
-    const page = searchIndexedMemories(index, { ...request, limit: Math.min(50, limit + MAX_DECAY_DROP) });
+    const page = lexicalSearch(Math.min(50, limit + MAX_DECAY_DROP));
     const ranked = rankWithDrops(page.results, ranking);
     return { ...page, results: ranked.slice(0, limit), truncated: page.truncated || ranked.length > limit,
       retrieval: { mode: "keyword", semantic: prepared.status } };
   }
   const candidateLimit = Math.max(20, limit);
-  const lexical = searchIndexedMemories(index, { ...request, limit: candidateLimit });
+  const lexical = lexicalSearch(candidateLimit);
   const best = new Map<string, MemoryDocumentSearchMatch>();
   const chunks = index.semantic.chunks(request);
   // ponytail: exact scan suits personal vaults; add an ANN index only after measured scan latency warrants it.
   for (const chunk of chunks) {
     if (!chunk.vector) continue;
     const score = chunk.vector.reduce((sum, n, i) => sum + n * prepared.queryVector![i]!, 0);
+    if (filter && score < filter.minSemanticScore) continue;
     const previous = best.get(chunk.note.id);
     if (!previous || score > previous.score) best.set(chunk.note.id, { ...chunk.note, score, snippet: chunk.snippet });
   }
@@ -225,12 +258,13 @@ export function searchHybridMemoriesForQueries(
   queries: readonly string[],
   prepared: MemoryQueryEmbeddingPreparation,
   ranking?: MemoryRanking,
+  filter?: MemoryCandidateFilter,
 ): MemoryDocumentSearchMatch[] {
   const limit = request.limit ?? 10;
   const pages = queries.map((query, queryIndex) => {
     const vector = prepared.queryVectors?.[queryIndex];
     return searchHybridMemories(index, { ...request, query },
-      { status: prepared.status, ...(vector ? { queryVector: vector } : {}) }, ranking).results;
+      { status: prepared.status, ...(vector ? { queryVector: vector } : {}) }, ranking, filter).results;
   });
   const merged = new Map<string, MemoryDocumentSearchMatch>();
   for (let rank = 0; merged.size < limit && pages.some((page) => rank < page.length); rank += 1) {

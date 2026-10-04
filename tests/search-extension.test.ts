@@ -152,6 +152,7 @@ describe("search extension", () => {
       registerTool() {},
     });
     const typesafeBodies: string[] = [];
+    let weakQuery = false;
     let judge: (questions: string[]) => Response = (questions) => new Response(JSON.stringify({
       model: "jev-1.13.0",
       usage: { input_tokens: 4096 },
@@ -164,7 +165,8 @@ describe("search extension", () => {
       }
       const inputs = (JSON.parse(String(init.body)) as { input: string[] }).input;
       return new Response(JSON.stringify({ model: EMBEDDING_MODEL, data: inputs.map((_, index) => ({
-        index, embedding: Array.from({ length: EMBEDDING_DIMENSIONS }, (_, i) => i === 0 ? 1 : 0),
+        index, embedding: Array.from({ length: EMBEDDING_DIMENSIONS }, (_, i) =>
+          i === (weakQuery && index === 0 ? 1 : 0) ? 1 : 0),
       })) }));
     });
     vi.stubGlobal("fetch", fetcher);
@@ -198,6 +200,13 @@ describe("search extension", () => {
       expect(typesafeBodies).toHaveLength(1);
       expect(typesafeBodies.join("") + JSON.stringify(fetcher.mock.calls)).not.toContain("emma-private-dinner-secret");
 
+      weakQuery = true;
+      await expect(beforeAgentStart({ prompt: "[telegram] what day is today" }, {
+        sessionManager: { buildContextEntries: () => [], getSessionId: () => "unrelated-session" },
+      })).resolves.toBeUndefined();
+      expect(typesafeBodies).toHaveLength(1);
+      weakQuery = false;
+
       // The question has no words in common with the saved event. With
       // embeddings disabled, interval overlap is the only way to find it.
       await storeModule.createMarkdownMemoryStore({ root: vault, principal: "isaac", memoryView: "owner-and-household" })
@@ -216,7 +225,7 @@ describe("search extension", () => {
       });
 
       judge = () => new Response("unavailable", { status: 503 });
-      await expect(beforeAgentStart({ prompt: "[telegram] and a backup option" }, ctx)).resolves.toBeUndefined();
+      await expect(beforeAgentStart({ prompt: "[telegram] and a backup option avoiding shellfish" }, ctx)).resolves.toBeUndefined();
 
       vi.stubEnv("PI_TELEGRAM_MEMORY_RECALL", "off");
       const calls = fetcher.mock.calls.length;
@@ -227,8 +236,8 @@ describe("search extension", () => {
       unbind();
     }
     const log = (await readFile(join(state, "memory-recall.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-    expect(log.map((record) => record.outcome)).toEqual(["injected", "injected", "judge_failed"]);
-    expect(log.map((record) => record.inputTokens)).toEqual([4096, 4096, undefined]);
+    expect(log.map((record) => record.outcome)).toEqual(["injected", "no_candidates", "injected", "judge_failed"]);
+    expect(log.map((record) => record.inputTokens)).toEqual([4096, undefined, 4096, undefined]);
     expect(JSON.stringify(log)).not.toMatch(/shellfish|crab shack|ok do it/);
   }, 15_000);
 

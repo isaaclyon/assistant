@@ -54,6 +54,15 @@ function dependencies(overrides: Partial<MemoryRecallDependencies> = {}) {
 }
 
 describe("memory recall prompt classification", () => {
+  it("skips Jev and records no_candidates when retrieval finds nothing", async () => {
+    const { deps, logs } = dependencies({ retrieve: vi.fn(async () => []) });
+    await expect(recallMemories({ prompt: "[telegram] what day is today", entries: [], sessionId: "s" }, deps))
+      .resolves.toBeUndefined();
+    expect(deps.judge).not.toHaveBeenCalled();
+    expect(deps.currentRevisions).not.toHaveBeenCalled();
+    expect(logs).toEqual([expect.objectContaining({ outcome: "no_candidates", candidates: [] })]);
+  });
+
   it("recalls for human and self-authored prompts and skips external or empty ones", async () => {
     expect(classifyRecallPrompt("[telegram] hi")).toBe("telegram");
     expect(classifyRecallPrompt("[telegram|actor:Emma] hi")).toBe("telegram");
