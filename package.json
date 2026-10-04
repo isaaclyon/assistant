@@ -10,6 +10,8 @@
   "scripts": {
     "build": "npm run clean && tsc -p tsconfig.json && node --input-type=module -e \"await import('./dist/src/memory-application.js')\"",
     "check": "npm run typecheck && npm run typecheck:extensions && npm run typecheck:telegram && npm test",
+    "check:changed": "npm run typecheck && npm run typecheck:extensions && npm run typecheck:telegram && npm run test:changed",
+    "test:changed": "node scripts/test-selected.mjs",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "deploy": "bash scripts/deploy.sh",
     "jobs:check": "node dist/src/jobs-check.js",
