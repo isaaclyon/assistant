@@ -4,7 +4,15 @@
 - Keep `@llblab/pi-telegram` as a pinned dependency; do not vendor it without revisiting ADR-0001.
 - Treat `~/.pi/agent/telegram.json` and Pi credential files as secrets; never print their contents.
 - Preserve the dedicated bridge session directory and same-cwd restart behavior.
-- Run `npm run check` and `npm run build` after code changes.
+- Run `npm run check:changed` and `npm run build` after code changes. This keeps
+  all type checks and ordinary tests, and skips browser integration tests for
+  unrelated changes. Set `PI_TEST_BASE` to the comparison commit (default:
+  `origin/main`). Use `npm run check` to force the complete suite. CI selects
+  against the PR base or the previous main commit; missing history runs all tests.
+- Name browser integration suites `tests/*-browser.test.ts` so changed-file
+  selection discovers them. Keep fast browser unit tests in the ordinary suite.
+  If a browser test loads a new asset/helper by filename rather than importing
+  it, add its path to `scripts/browser-test-selection.mjs` and cover the rule.
 - Upgrade the four Pi runtime packages together with exact pins. Review weekly
   grouped update PRs using `docs/pi-upgrades.md`; preserve the compatibility
   gates and source-checked install patches, and do not auto-merge updates.

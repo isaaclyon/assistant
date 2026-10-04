@@ -18,16 +18,25 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Use Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24
           cache: npm
       - run: npm ci --no-audit --no-fund
+      - name: Select browser tests from changed files
+        id: tests
+        env:
+          PI_TEST_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/test-selected.mjs --plan
       - name: Install browser takeover test dependencies
+        if: steps.tests.outputs.browser == 'true'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb x11vnc websockify novnc
       - name: Check host, extensions, Telegram SDK compatibility, and behavior
-        run: npm run check
+        env:
+          PI_TEST_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: npm run check:changed
       - name: Preserve failed synthetic viewer diagnostics
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
