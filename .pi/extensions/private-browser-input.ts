@@ -7,13 +7,14 @@ import { openTableRequest } from "../../src/opentable-private-flow.ts";
 import type { ProtectedInputRequest } from "../../src/protected-browser.ts";
 import { runBrowserTakeover } from "../../src/browser-takeover.ts";
 import type { TakeoverRequest } from "../../src/browser-takeover-protection.ts";
+import type { PrivateLoginRequest } from "../../src/private-login.ts";
 
 export default function privateBrowserInput(pi: ExtensionAPI) {
   let active: AbortController | undefined;
   let settling: Promise<unknown> | undefined;
   pi.on("session_shutdown", async () => { active?.abort(); await settling?.catch(() => {}); });
   pi.on("tool_call", () => active ? { block: true, reason: "Private browser input is active. Wait for its result." } : undefined);
-  async function execute(request: ProtectedInputRequest | TakeoverRequest, signal: AbortSignal | undefined, notifyWaiting: () => void) {
+  async function execute(request: ProtectedInputRequest | TakeoverRequest | PrivateLoginRequest, signal: AbortSignal | undefined, notifyWaiting: () => void) {
     if (active) throw new Error("Private input is already active");
     const controller = new AbortController(); active = controller;
     const abort = () => controller.abort();
@@ -26,13 +27,27 @@ export default function privateBrowserInput(pi: ExtensionAPI) {
       if (!target) throw new Error();
       const common = { config: await loadBridgeInstanceConfig(), chatId: target.chatId,
         ...(target.threadId ? { threadId: target.threadId } : {}), signal: controller.signal, notifyWaiting };
-      const work = "fields" in request ? runPrivateBrowserInput({ ...common, request }) : runBrowserTakeover({ ...common, request });
+      const work = "fields" in request ? runPrivateBrowserInput({ ...common, request }) : runBrowserTakeover({ ...common, request, ...("pageUrl" in request ? { login: request } : {}) });
       settling = work;
       details = await work;
     } catch { details = { status: "unavailable" }; }
     finally { signal?.removeEventListener("abort", abort); settling = undefined; if (active === controller) active = undefined; }
     return { content: [{ type: "text" as const, text: JSON.stringify(details) }], details };
   }
+  pi.registerTool(defineTool({
+    name: "private_browser_login", label: "Private sign-in",
+    description: "Private multi-step existing-account sign-in in stock Chrome. Recognizes common same-origin POST email/username, password and verification-code screens, retaining the protected browser across steps. The Mini App can switch directly to human takeover for unfamiliar screens. Returns only a fixed terminal status and reopens the clean resume URL unless the user explicitly shares a page.",
+    promptGuidelines: [
+      "Use private_browser_login for authorized existing-account sign-in across multiple screens. Inspect the initial page first; pass its exact pageUrl and a clean same-origin HTTPS resumeUrl. Tell the user to keep Tailscale connected and open Sign in privately.",
+      "Never ask for credentials in chat or tool arguments. Optional credentialItem names a user-approved Login item in the current instance's dedicated 1Password vault; the user may select Use saved sign-in privately. No general email-code lookup is enabled; codes remain private manual input.",
+      "Stay paused for the whole operation. Do not inspect browser/runtime/profile files, use raw CDP, or run other browser tools while waiting. Unknown, repeated, embedded, cross-origin, recovery, registration or CAPTCHA screens need the Take over choice inside the Mini App; it preserves the same protected session.",
+      "submitted is not proof of authentication. Verify the clean resume page afterward. Continue from this page explicitly shares the current website/form contents. On browser_blocked stop the stock session before reopening; never delete the gate.",
+    ],
+    parameters: Type.Object({ session: Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,62}$" }), pageUrl: Type.String({ maxLength: 2000 }), resumeUrl: Type.String({ maxLength: 2000 }), credentialItem: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })) }, { additionalProperties: false }),
+    async execute(_id, request, signal, update) {
+      return execute(request, signal, () => update?.({ content: [{ type: "text", text: "Private sign-in opened. Waiting for sign-in or handback." }], details: undefined }));
+    },
+  }));
   pi.registerTool(defineTool({
     name: "browser_takeover", label: "Browser takeover",
     description: "Let the paired user control a live stock-Chrome window inside a private Telegram Mini App. Pauses agent browser access until Hand back, cancellation or expiry. Requires one HTTPS tab and a clean same-origin resume URL. Only a fixed status returns; never browser images, keys or credentials.",

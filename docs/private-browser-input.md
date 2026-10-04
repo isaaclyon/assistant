@@ -4,6 +4,10 @@
 sign-in form. It is available in private personal and builder chats. Tailscale
 must be connected on the phone. No persistent listener or bot menu is installed.
 
+For general email → password → verification flows, prefer
+[`private_browser_login`](private-browser-login.md). It preserves transient
+state between screens and offers takeover inside the same protected operation.
+
 ## Workflow
 
 1. Use the tracked stock-Chrome helper to open the website and inspect its form.

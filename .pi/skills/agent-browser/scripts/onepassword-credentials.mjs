@@ -94,7 +94,7 @@ function normalizedHost(hostname) {
   return lower.startsWith("www.") ? lower.slice(4) : lower;
 }
 
-function domainMatches(target, itemUrl) {
+function domainMatches(target, itemUrl, exactOrigin = false) {
   let saved;
   try {
     saved = new URL(itemUrl);
@@ -102,6 +102,7 @@ function domainMatches(target, itemUrl) {
     return false;
   }
   if (saved.protocol !== "https:") return false;
+  if (exactOrigin) return !saved.username && !saved.password && target.origin === saved.origin;
   const requestedHost = normalizedHost(target.hostname);
   const savedHost = normalizedHost(saved.hostname);
   return requestedHost === savedHost || requestedHost.endsWith(`.${savedHost}`);
@@ -155,6 +156,8 @@ async function resolveCredential() {
     throw new Error("Credential item reference is invalid");
   }
   const target = parseTargetUrl(message.request?.url);
+  const originPolicy = message.request?.originPolicy;
+  if (originPolicy !== undefined && originPolicy !== "exact") throw new Error("Credential origin policy is invalid");
   const scope = resolvedScope();
   if (!scope) throw new Error("Credential scope is unavailable");
   const paths = credentialPaths(scope);
@@ -211,7 +214,7 @@ async function resolveCredential() {
   if (
     !urls.some(
       (entry) =>
-        entry && typeof entry.href === "string" && domainMatches(target, entry.href),
+        entry && typeof entry.href === "string" && domainMatches(target, entry.href, originPolicy === "exact"),
     )
   ) {
     throw new Error("Login URL does not match the 1Password item's website domain");

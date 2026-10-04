@@ -2,7 +2,8 @@ import { createHmac } from "node:crypto";
 import { createServer } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { startTakeoverServer } from "../src/browser-takeover-server.js";
+import { startTakeoverServer, type PrivateLoginOperations } from "../src/browser-takeover-server.js";
+import type { LoginStep } from "../src/private-login.js";
 
 const botToken = "123:synthetic", origin = "https://takeover.example.ts.net:8447";
 function signed(userId = 123) {
@@ -14,7 +15,7 @@ const message = (ws: WebSocket) => new Promise<Buffer>((resolve) => ws.once("mes
 describe("Telegram browser takeover boundary", () => {
   const cleanup: Array<() => Promise<void>> = [];
   afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
-  async function fixture(durationMs = 60_000) {
+  async function fixture(durationMs = 60_000, login?: PrivateLoginOperations) {
     const http = createServer(), upstream = new WebSocketServer({ server: http });
     let connections = 0;
     upstream.on("connection", ws => { connections++; ws.send("RFB 003.008\n", { binary: true }); ws.on("message", data => ws.send(data, { binary: true })); });
@@ -23,7 +24,7 @@ describe("Telegram browser takeover boundary", () => {
     const controller = new AbortController();
     const resize = vi.fn(async (_viewport: { width: number; height: number; desktop: boolean }) => {});
     const server = await startTakeoverServer({ origin, botToken, userId: 123, signal: controller.signal, durationMs,
-      resourceRoot: process.cwd(), upstreamPort: (http.address() as any).port, password: "testOnly", resumeUrl: "https://example.com/", resize });
+      resourceRoot: process.cwd(), upstreamPort: (http.address() as any).port, password: "testOnly", resumeUrl: "https://example.com/", resize, ...(login ? { login } : {}) });
     cleanup.push(server.close);
     const post = (path: string, extra: object = {}, from = origin) => fetch(`http://127.0.0.1:${server.port}/api/${path}`, {
       method: "POST", headers: { origin: from, "content-type": "application/json" }, body: JSON.stringify({ initData: signed(), requestId: server.requestId, ...extra }),
@@ -35,6 +36,67 @@ describe("Telegram browser takeover boundary", () => {
     };
     return { server, post, socket, controller, resize, connections: () => connections };
   }
+  it("keeps login values private, rotates steps, rejects replay and finishes privately", async () => {
+    let step: LoginStep = { state: "fields", fields: ["username"] };
+    const login: PrivateLoginOperations = { state: () => step, close: vi.fn(), submit: vi.fn(async () => step = step.state === "fields" && step.fields[0] === "username" ? { state: "fields", fields: ["password"] } : { state: "complete" }) };
+    const f = await fixture(60000, login), first = await (await f.post("auth")).json();
+    expect(first.login).toEqual(step); expect(first.password).toBeUndefined(); expect(first.ticket).toBeUndefined();
+    const second = await (await f.post("login", { step: first.step, values: ["synthetic-user"] })).json();
+    expect(second.step).not.toBe(first.step); expect(second.login.fields).toEqual(["password"]);
+    expect(JSON.stringify(second)).not.toContain("synthetic-user");
+    expect((await f.post("login", { step: first.step, values: ["replay"] })).status).toBe(409);
+    expect((await f.post("login", { step: second.step, values: ["synthetic-secret"], initData: signed(456) })).status).toBe(403);
+    const final = await (await f.post("login", { step: second.step, values: ["synthetic-secret"] })).json();
+    expect(final).toEqual({ status: "submitted" });
+    expect(await f.server.done).toEqual({ status: "submitted", mode: "private" });
+    expect(login.close).toHaveBeenCalled(); expect(login.submit).toHaveBeenCalledTimes(2);
+  });
+  it("requires a current step to switch to takeover and never resumes automatic filling afterward", async () => {
+    const login: PrivateLoginOperations = { state: () => ({ state: "manual" }), close: vi.fn(), submit: vi.fn() };
+    const f = await fixture(60000, login), first = await (await f.post("auth")).json();
+    expect((await f.post("auth", { takeover: true, step: "stale" })).status).toBe(409);
+    expect(login.close).not.toHaveBeenCalled();
+    const live = await (await f.post("auth", { takeover: true, step: first.step })).json();
+    expect(live.ticket).toBeTypeOf("string"); expect(login.close).toHaveBeenCalledOnce();
+    expect((await f.post("login", { step: first.step, values: ["forbidden"] })).status).toBe(409);
+    expect(login.submit).not.toHaveBeenCalled();
+  });
+  it("drains an in-flight login on cancellation without reopening a step", async () => {
+    let release!: (step: LoginStep) => void;
+    const login: PrivateLoginOperations = { state: () => ({ state: "fields", fields: ["password"] }), close: vi.fn(), submit: vi.fn(() => new Promise<LoginStep>(r => { release = r; })) };
+    const f = await fixture(60000, login), first = await (await f.post("auth")).json();
+    const pending = f.post("login", { step: first.step, values: ["synthetic-secret"] });
+    await vi.waitFor(() => expect(login.submit).toHaveBeenCalled());
+    expect((await f.post("auth", { takeover: true, step: first.step })).status).toBe(409);
+    let ended = false; void f.server.done.then(() => ended = true);
+    expect((await f.post("login-cancel")).status).toBe(200); expect(ended).toBe(false);
+    release({ state: "fields", fields: ["code"] });
+    expect((await pending).status).toBe(410);
+    expect(await f.server.done).toEqual({ status: "cancelled", mode: "private" });
+  });
+  it("offers private manual entry after saved credentials are unavailable, without echoing values", async () => {
+    const saved = vi.fn(async () => undefined);
+    const login: PrivateLoginOperations = { state: () => ({ state: "fields", fields: ["password"] }), close: vi.fn(), submit: vi.fn(), saved };
+    const f = await fixture(60000, login), first = await (await f.post("auth")).json();
+    const next = await (await f.post("login", { step: first.step, saved: true })).json();
+    expect(next.savedUnavailable).toBe(true); expect(next.saved).toBe(false);
+    expect(next.login.fields).toEqual(["password"]); expect(next.step).not.toBe(first.step);
+    expect(saved).toHaveBeenCalledOnce(); expect(login.submit).not.toHaveBeenCalled();
+  });
+  it("never resolves saved passwords for a verification-code field", async () => {
+    const login: PrivateLoginOperations = { state: () => ({ state: "fields", fields: ["code"] }), close: vi.fn(), submit: vi.fn(), saved: vi.fn(async () => ["synthetic-password"]) };
+    const f = await fixture(60000, login), first = await (await f.post("auth")).json();
+    expect(first.saved).toBe(false);
+    expect((await f.post("login", { step: first.step, saved: true })).status).toBe(400);
+    expect(login.saved).not.toHaveBeenCalled(); expect(login.submit).not.toHaveBeenCalled();
+  });
+  it("requires a bound username before saved-password-only entry", async () => {
+    const login: PrivateLoginOperations = { state: () => ({ state: "fields", fields: ["password"] }), close: vi.fn(), submit: vi.fn(), canUseSaved: () => false, saved: vi.fn(async () => ["synthetic-password"]) };
+    const f = await fixture(60000, login), first = await (await f.post("auth")).json();
+    expect(first.saved).toBe(false);
+    expect((await f.post("login", { step: first.step, saved: true })).status).toBe(400);
+    expect(login.saved).not.toHaveBeenCalled();
+  });
   it("binds bounded viewport changes to the paired user and current viewer", async () => {
     const f = await fixture(), viewport = { width: 390, height: 650, desktop: false };
     expect((await f.post("auth", { viewport, initData: signed(456) })).status).toBe(403);

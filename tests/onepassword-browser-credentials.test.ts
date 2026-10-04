@@ -88,16 +88,25 @@ process.stdout.write(JSON.stringify({
   };
 }
 
-function request(url: string) {
+function request(url: string, originPolicy?: "exact") {
   return JSON.stringify({
     protocol: "agent-browser.plugin.v1",
     type: "credential.resolve",
     capability: "credential.read",
-    request: { itemRef: "OpenTable", profileName: "opentable", url },
+    request: { itemRef: "OpenTable", profileName: "opentable", url, originPolicy },
   });
 }
 
 describe("1Password agent-browser credential provider", () => {
+  it("enforces the private flow's exact-origin policy, including subdomains and ports", async () => {
+    const setup = await fixture();
+    const exact = await runProvider([], setup.env, request("https://www.opentable.com/login", "exact"));
+    expect(JSON.parse(exact.stdout).success).toBe(true);
+    for (const url of ["https://opentable.com/", "https://sub.www.opentable.com/", "https://www.opentable.com:8443/"]) {
+      const result = await runProvider([], setup.env, request(url, "exact"));
+      expect(JSON.parse(result.stdout).success).toBe(false); expect(result.stdout).not.toContain("fake-password");
+    }
+  });
   it("returns only username/password for an HTTPS URL matching the item's domain", async () => {
     const setup = await fixture();
     const result = await runProvider(
