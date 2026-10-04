@@ -599,6 +599,7 @@ async function serve(session, args) {
   const resolved = paths(session);
   await ensurePrivateDirectory(resolved.runtimeDir);
   const password = randomBytes(8).toString("base64url").slice(0, 8);
+  const controlProperty = args.includes("--no-clipboard") ? `PI_TAKEOVER_${randomBytes(16).toString("hex")}` : undefined;
   await atomicPrivateWrite(resolved.passwordPath, `${password}\n`);
   await rm(resolved.logPath, { force: true });
   const log = await open(resolved.logPath, "wx", 0o600);
@@ -619,7 +620,7 @@ async function serve(session, args) {
       "-nevershared",
       "-noxdamage",
       "-quiet",
-      ...(args.includes("--no-clipboard") ? ["-nosel"] : []),
+      ...(controlProperty ? ["-nosel", "-env", `X11VNC_REMOTE=${controlProperty}`] : []),
     ],
     { stdio: ["ignore", log.fd, log.fd] },
   );
@@ -658,6 +659,8 @@ async function serve(session, args) {
       webPort,
       expiresAt: new Date(expiresAtMs).toISOString(),
       passwordPath: resolved.passwordPath,
+      privateViewer: args.includes("--no-clipboard"),
+      controlProperty,
     };
     await atomicPrivateWrite(
       resolved.handoffStatePath,
@@ -718,6 +721,27 @@ export async function hasActiveHandoff(session) {
 export async function startPrivateHandoff(session) {
   if (await current(session)) throw new Error("Another handoff is active");
   return start(session, ["--minutes", "10"], true);
+}
+
+/** Fixed geometry operation only; caller owns the protected browser session. */
+export async function resizePrivateHandoff(session, width, height) {
+  if (!SESSION_PATTERN.test(session) || !Number.isInteger(width) || width < 320 || width > 1920 ||
+      !Number.isInteger(height) || height < 180 || height > 1080) throw new Error("Invalid viewer size");
+  const resolved = paths(session), state = await readJson(resolved.handoffStatePath);
+  const browser = await readJson(resolved.browserStatePath);
+  if (!validHandoffState(state) || state.privateViewer !== true || !(Date.parse(state.expiresAt) > Date.now()) ||
+      typeof state.controlProperty !== "string" || !/^PI_TAKEOVER_[a-f0-9]{32}$/.test(state.controlProperty) ||
+      !(await supervisorAlive(state.supervisorPid, session)) || !(await trustedHandoffChild(state, "x11vnc")) ||
+      !Number.isSafeInteger(browser?.pid) || !Number.isSafeInteger(browser?.port)) throw new Error("Private viewer unavailable");
+  if (!(await commandLine(state.x11Pid)).includes(`X11VNC_REMOTE=${state.controlProperty}`)) throw new Error("Private viewer unavailable");
+  const context = await discoverBrowserContext(browser.pid, browser.port);
+  await new Promise((resolve, reject) => {
+    execFile(state.x11vncPath, ["-norc", "-display", context.display, "-auth", context.xauthority,
+      "-env", `X11VNC_REMOTE=${state.controlProperty}`, "-sync", "-R", `clip:${width}x${height}+0+0`],
+    { env: helperEnvironment(), timeout: 3_000, maxBuffer: 32_000 }, error => {
+      if (error) reject(new Error("Private viewer resize failed")); else resolve();
+    });
+  });
 }
 
 export async function stopPrivateHandoff(session) {

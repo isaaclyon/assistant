@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { agentSessionName, assertUnprotected, current, executable, paths, withSessionLock } from "../.pi/skills/agent-browser/scripts/stock-chrome.mjs";
-import { hasActiveHandoff, startPrivateHandoff, stopPrivateHandoff } from "../.pi/skills/agent-browser/scripts/browser-handoff.mjs";
+import { hasActiveHandoff, startPrivateHandoff, stopPrivateHandoff, resizePrivateHandoff } from "../.pi/skills/agent-browser/scripts/browser-handoff.mjs";
 import { withMutationLock } from "../.pi/lib/mutation-lock.mjs";
 import { assertDemoPortUnused, demoTelegramRequest, isPrivateDemoProxy, readDemoTelegramProfile } from "./secure-input-demo-launch.js";
 import { protectBrowserTakeover, validateTakeoverRequest, type TakeoverRequest } from "./browser-takeover-protection.js";
@@ -64,6 +64,12 @@ export async function runBrowserTakeover(options: {
       if (controller.signal.aborted) throw new Error();
       server = await startTakeoverServer({ ...profile, origin, resourceRoot: config.resourceRoot, upstreamPort: handoff.webPort,
         password, resumeUrl: request.resumeUrl, signal: controller.signal,
+        resize: async viewport => {
+          if (controller.signal.aborted) throw new Error();
+          const size = await protectedPage!.resize(viewport);
+          if (controller.signal.aborted) throw new Error();
+          await resizePrivateHandoff(request.session, size.width, size.height);
+        },
         durationMs: Math.max(1, Date.parse(handoff.expiresAt) - Date.now()) });
       const target = `http://127.0.0.1:${server.port}`;
       proxy = spawn("sudo", ["-n", "tailscale", "serve", "--yes", "--bg=false", `--https=${httpsPort}`, target], { stdio: "ignore" });
