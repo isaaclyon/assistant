@@ -94,6 +94,20 @@ it("recall filters each query before interleaving and preserves follow-up contex
     .map((r) => r.id)).toEqual(["quiet"]);
 });
 
+it("bounds expanded recall keyword queries without breaking quoted terms or aborting the batch", async () => {
+  const index = await setup([note("quiet"), note("unicode", { body: "庭園" })]);
+  const long = `quiet ${Array.from({ length: 70 }, (_, i) => `word${i}`).join(" ")}`.slice(0, 512);
+  expect(long.length).toBeLessThanOrEqual(512);
+  // Adding quotes and OR to otherwise valid text used to exceed the indexed
+  // search limit, throwing INVALID_INPUT after embeddings had succeeded.
+  const queries = [long, "庭園", "ok do it"];
+  expect(searchHybridMemoriesForQueries(index, request, queries, { status: "unavailable" }, undefined, RECALL_CANDIDATE_FILTER)
+    .map((result) => result.id)).toEqual(["quiet", "unicode"]);
+  // A single term too large to quote safely must not prevent later terms.
+  expect(searchHybridMemories(index, { ...request, query: `${"x".repeat(512)} quiet` },
+    { status: "unavailable" }, undefined, RECALL_CANDIDATE_FILTER).results.map((result) => result.id)).toEqual(["quiet"]);
+});
+
 it("filters owner, scope, status and type before sending any note to OpenAI", async () => {
   const index = await setup([
     note("own"), note("foreign", { owner: "bob", body: "foreign-secret" }),

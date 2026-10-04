@@ -24,6 +24,7 @@ const DEFAULT_CONTEXT_MAX_CHARS = 4_000;
 const MIN_CONTEXT_MAX_CHARS = 256;
 const MAX_CONTEXT_MAX_CHARS = 12_000;
 const MAX_CONTEXT_ENTRY_CHARS = 1_200;
+export const MEMORY_SEARCH_QUERY_LIMIT = 512;
 
 export class SearchInputError extends Error {
   readonly code = "INVALID_INPUT";
@@ -175,7 +176,7 @@ export function searchIndexedMemories(
   request: IndexedMemorySearchRequest,
 ): MemoryDocumentSearchPage {
   const query = request.query?.trim();
-  if (!query || request.query.length > 512) {
+  if (!query || request.query.length > MEMORY_SEARCH_QUERY_LIMIT) {
     throw new SearchInputError("Memory search query is invalid");
   }
   const limit = request.limit ?? 10;

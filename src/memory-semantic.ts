@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import { searchIndexedMemories, type IndexedMemorySearchRequest } from "./search-coordinator.js";
+import { MEMORY_SEARCH_QUERY_LIMIT, searchIndexedMemories, type IndexedMemorySearchRequest } from "./search-coordinator.js";
 import type { MemoryDocumentSearchMatch, MemoryDocumentSearchPage, SearchIndex } from "./search-index.js";
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, normalizeEmbedding, type EmbedTexts } from "./openai-embeddings.js";
 import { MAX_DECAY_DROP, rankWithDrops, type MemoryRanking } from "./memory-usage.js";
@@ -35,7 +35,15 @@ const COMMON_WORDS = new Set((
 function recallKeywordQuery(query: string): string {
   const terms = [...new Set((query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])
     .filter((term) => !COMMON_WORDS.has(term)))];
-  return terms.map((term) => `"${term}"`).join(" OR ");
+  let expanded = "";
+  for (const term of terms) {
+    const next = `${expanded ? `${expanded} OR ` : ""}"${term}"`;
+    // Bound the generated FTS expression, not only its source text. Keep
+    // complete quoted terms; slicing could leave invalid syntax. A term too
+    // large to fit must not prevent later, shorter terms from being searched.
+    if (next.length <= MEMORY_SEARCH_QUERY_LIMIT) expanded = next;
+  }
+  return expanded;
 }
 
 interface MemoryChunk {

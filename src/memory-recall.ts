@@ -73,6 +73,68 @@ export type RecallOutcome =
   | "judge_failed"
   | "revalidate_failed";
 
+export type RecallFailureStage = "index_open" | "initial_refresh" | "embedding"
+  | "post_embedding_refresh" | "candidate_search" | "revalidation_refresh"
+  | "revision_lookup" | "search" | "judge" | "revalidate" | "unexpected";
+type RecallFailureReason = "exception" | "refresh_timeout" | "refresh_failed" | "refresh_incomplete";
+type RecallRefreshWarning = "DUPLICATE_ID" | "IO_ERROR" | "MALFORMED_NOTE" | "UNSAFE_ENTRY";
+
+export interface RecallFailure {
+  stage: RecallFailureStage;
+  reason: RecallFailureReason;
+  errorType?: string;
+  code?: string;
+  sqliteCode?: string;
+  warningCodes?: RecallRefreshWarning[];
+  scanTruncated?: boolean;
+  warningsTruncated?: boolean;
+}
+
+const SAFE_ERROR_TYPES = new Set(["Error", "TypeError", "RangeError", "SyntaxError", "AbortError", "TimeoutError", "SearchInputError", "MutationBusyError"]);
+const SAFE_ERROR_CODES = new Set(["INVALID_INPUT", "MUTATION_BUSY", "EACCES", "EPERM", "ENOENT", "EIO", "ENOSPC", "EBUSY", "EMFILE", "ENFILE", "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "ERR_SQLITE_ERROR", "ERR_INVALID_STATE", "ABORT_ERR"]);
+const SQLITE_CODES: Record<number, string> = { 1: "SQLITE_ERROR", 5: "SQLITE_BUSY", 6: "SQLITE_LOCKED", 8: "SQLITE_READONLY", 10: "SQLITE_IOERR", 11: "SQLITE_CORRUPT", 13: "SQLITE_FULL", 14: "SQLITE_CANTOPEN", 21: "SQLITE_MISUSE", 26: "SQLITE_NOTADB" };
+
+/** Never copy messages, stacks, paths, arbitrary names/codes, or provider payloads. */
+function safeErrorFields(error: unknown): Pick<RecallFailure, "errorType" | "code" | "sqliteCode"> {
+  if (error === undefined) return {};
+  try {
+    if (!isRecord(error)) return { errorType: "unknown" };
+    const name = error.name;
+    const code = error.code;
+    const errcode = error.errcode;
+    const sqliteCode = typeof errcode === "number" && Number.isSafeInteger(errcode) && errcode >= 0
+      ? SQLITE_CODES[errcode & 0xff] : undefined;
+    return {
+      errorType: typeof name === "string" && SAFE_ERROR_TYPES.has(name) ? name : "unknown",
+      ...(typeof code === "string" && SAFE_ERROR_CODES.has(code) ? { code } : {}),
+      ...(sqliteCode ? { sqliteCode } : {}),
+    };
+  } catch { return { errorType: "unknown" }; }
+}
+
+export class RecallOperationError extends Error {
+  readonly failure: RecallFailure;
+  constructor(stage: RecallFailureStage, reason: RecallFailureReason, cause?: unknown,
+    refresh?: { warnings: Array<{ code: RecallRefreshWarning }>; scanTruncated: boolean; warningsTruncated: boolean }) {
+    super("Memory recall operation failed", { cause });
+    this.failure = { stage, reason, ...safeErrorFields(cause), ...(refresh ? {
+      warningCodes: [...new Set(refresh.warnings.map(({ code }) => code))].sort(),
+      scanTruncated: refresh.scanTruncated, warningsTruncated: refresh.warningsTruncated,
+    } : {}) };
+  }
+}
+
+export async function runRecallOperation<T>(stage: RecallFailureStage, operation: () => T | Promise<T>): Promise<T> {
+  try { return await operation(); }
+  catch (error) {
+    throw error instanceof RecallOperationError ? error : new RecallOperationError(stage, "exception", error);
+  }
+}
+
+function recallFailure(stage: RecallFailureStage, error: unknown): RecallFailure {
+  return error instanceof RecallOperationError ? error.failure : { stage, reason: "exception", ...safeErrorFields(error) };
+}
+
 /** Contains identifiers, timings, and probabilities only; never message or note text. */
 export interface RecallLogRecord {
   at: string;
@@ -86,6 +148,7 @@ export interface RecallLogRecord {
   ms: { search?: number; judge?: number; total: number };
   candidates: RecallDecision[];
   proposals?: { edits: RecallDecision[]; add: { probability: number; proposed: boolean } };
+  failure?: RecallFailure;
 }
 
 export interface RecallMessage {
@@ -319,8 +382,9 @@ export async function recallMemories(
     let retrieved: RecallCandidate[];
     try {
       retrieved = (await dependencies.retrieve(window.queries)).slice(0, RECALL_CANDIDATE_LIMIT);
-    } catch {
+    } catch (error) {
       record.ms.search = elapsed(searchStarted);
+      record.failure = recallFailure("search", error);
       return await finish("search_failed");
     }
     record.ms.search = elapsed(searchStarted);
@@ -339,8 +403,9 @@ export async function recallMemories(
       record.model = judged.model;
       if (judged.inputTokens !== undefined) record.inputTokens = judged.inputTokens;
       probabilities = judged.probabilities;
-    } catch {
+    } catch (error) {
       record.ms.judge = elapsed(judgeStarted);
+      record.failure = recallFailure("judge", error);
       record.candidates.push(...candidates.map((candidate) => ({ ...decisionFor(candidate), result: "not_judged" as const })));
       return await finish("judge_failed");
     }
@@ -349,7 +414,8 @@ export async function recallMemories(
     let current: Map<string, string>;
     try {
       current = await dependencies.currentRevisions();
-    } catch {
+    } catch (error) {
+      record.failure = recallFailure("revalidate", error);
       return await finish("revalidate_failed");
     }
     const unseen = (note: { id: string; revision: string }) => !window.injected.has(`${note.id}\n${note.revision}`);
@@ -378,7 +444,8 @@ export async function recallMemories(
     return recalled.length === 0 && edits.length === 0 && !add
       ? await finish("none_selected")
       : await finish("injected", renderRecallMessage(recalled, edits, add));
-  } catch {
+  } catch (error) {
+    record.failure = recallFailure("unexpected", error);
     return await finish("search_failed");
   }
 }
