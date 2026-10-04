@@ -266,6 +266,12 @@ question per candidate, rechecks visibility, and returns passing notes as one
 hidden `memory-recall` session message. It leaves the system prompt
 unchanged to preserve prompt caching, and it fails open. See
 [ADR-0037](docs/adr/0037-recall-memory-with-jev-before-each-turn.md).
+Human Telegram turns also ask independent edit questions per candidate and an
+overall addition question in that same batch, including when search finds no
+notes. High-confidence proposals enter the hidden context for the main agent
+to assess and offer for explicit user approval. Already recalled notes remain
+eligible for edit checks. No memories are saved automatically. See
+[ADR-0047](docs/adr/0047-propose-memories-in-batched-jev-recall.md).
 Automatic recall filters semantic sections below cosine similarity 0.18 and
 requires content words for lexical candidates before fusion. Explicit search
 keeps its existing behavior; date-overlap candidates remain eligible. Empty
