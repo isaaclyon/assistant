@@ -40,7 +40,7 @@ function dependencies(overrides: Partial<MemoryRecallDependencies> = {}) {
   const logs: RecallLogRecord[] = [];
   const judge = vi.fn(async (request: SemanticJudgeRequest) => ({
     model: "jev-1.13.0",
-    probabilities: Object.fromEntries(Object.keys(request.questions).map((key) => [key, 0.9])),
+    probabilities: Object.fromEntries(Object.keys(request.questions).map((key) => [key, key.startsWith("n") ? 0.9 : 0])),
   }));
   const deps = {
     retrieve: vi.fn(async (_queries: string[]) => [candidate("allergy")]),
@@ -54,9 +54,9 @@ function dependencies(overrides: Partial<MemoryRecallDependencies> = {}) {
 }
 
 describe("memory recall prompt classification", () => {
-  it("skips Jev and records no_candidates when retrieval finds nothing", async () => {
+  it("skips Jev for jobs when retrieval finds nothing", async () => {
     const { deps, logs } = dependencies({ retrieve: vi.fn(async () => []) });
-    await expect(recallMemories({ prompt: "[telegram] what day is today", entries: [], sessionId: "s" }, deps))
+    await expect(recallMemories({ prompt: "Scheduled job 'x' fired.\n\nwhat day is today", entries: [], sessionId: "s" }, deps))
       .resolves.toBeUndefined();
     expect(deps.judge).not.toHaveBeenCalled();
     expect(deps.currentRevisions).not.toHaveBeenCalled();
@@ -178,12 +178,12 @@ describe("memory recall", () => {
     expect(long.logs[0]!.candidates[1]).toMatchObject({ id: "b", result: "over_limit" });
   });
 
-  it("neither re-judges nor re-injects a note revision already in context", async () => {
+  it("still checks edits for an already recalled note without recalling it again", async () => {
     const entries = [...dinnerThread, recalled([{ id: "allergy", revision: "r1" }])];
     const { deps, logs } = dependencies();
     await expect(recallMemories({ prompt: "[telegram] ok do it", entries, sessionId: "s" }, deps)).resolves.toBeUndefined();
-    expect(deps.judge).not.toHaveBeenCalled();
-    expect(logs[0]).toMatchObject({ outcome: "no_candidates", candidates: [{ id: "allergy", result: "already_injected" }] });
+    expect(deps.judge).toHaveBeenCalledOnce();
+    expect(logs[0]).toMatchObject({ outcome: "none_selected", candidates: [{ id: "allergy", result: "already_injected" }] });
     // An edited revision is new information and may be recalled again.
     deps.retrieve.mockImplementationOnce(async () => [candidate("allergy", { revision: "r2" })]);
     deps.currentRevisions.mockImplementationOnce(async () => new Map([["allergy", "r2"]]));
@@ -222,6 +222,91 @@ describe("memory recall", () => {
     const path = join(root, MEMORY_RECALL_LOG_FILE);
     expect((await readFile(path, "utf8")).trim().split("\n").map((line) => JSON.parse(line).outcome)).toEqual(["none_selected", "injected"]);
     expect((await stat(path)).mode & 0o777).toBe(0o600);
+  });
+});
+
+describe("memory proposals", () => {
+  it("batches independent recall, edit, and add questions and delivers all three", async () => {
+    const { deps, logs } = dependencies({ judge: vi.fn(async () => ({
+      model: "jev", probabilities: { n0: 0.9, edit_n0: 0.95, add: 0.96 },
+    })) });
+    const result = await recallMemories({ prompt: "[telegram] I've moved to Denver and prefer aisle seats", entries: [], sessionId: "s" }, deps);
+    expect(deps.judge).toHaveBeenCalledOnce();
+    expect(Object.keys(deps.judge.mock.calls[0]![0].questions)).toEqual(["n0", "edit_n0", "add"]);
+    expect(result!.content).toContain("Potentially relevant memories");
+    expect(result!.content).toContain("Potential memory edits");
+    expect(result!.content).toContain("Potential new memory");
+    expect(result!.content).toContain("explicitly accepts");
+    expect(result!.details.proposals).toEqual({ edits: [{ id: "allergy", revision: "r1" }], add: true });
+    expect(logs[0]!.proposals).toMatchObject({ add: { probability: 0.96, proposed: true } });
+    expect(JSON.stringify(logs)).not.toContain("Denver");
+  });
+
+  it("checks additions with no candidates and suppresses weak proposals", async () => {
+    const { deps } = dependencies({ retrieve: vi.fn(async () => []), judge: vi.fn(async () => ({
+      model: "jev", probabilities: { add: 0.95 },
+    })) });
+    const result = await recallMemories({ prompt: "[telegram] I prefer aisle seats", entries: [], sessionId: "s" }, deps);
+    expect(Object.keys(deps.judge.mock.calls[0]![0].questions)).toEqual(["add"]);
+    expect(result!.details.notes).toEqual([]);
+    expect(result!.details.proposals!.add).toBe(true);
+    deps.judge.mockImplementationOnce(async () => ({ model: "jev", probabilities: { add: 0.8 } }));
+    await expect(recallMemories({ prompt: "[telegram] Could I move?", entries: [], sessionId: "s" }, deps)).resolves.toBeUndefined();
+  });
+
+  it("checks already recalled notes for edits and drops changed or invisible edit targets", async () => {
+    const { deps } = dependencies({ judge: vi.fn(async () => ({ model: "jev", probabilities: { n0: 0.9, edit_n0: 0.96, add: 0 } })) });
+    const input = { prompt: "[telegram] My allergy changed", entries: [recalled([{ id: "allergy", revision: "r1" }])], sessionId: "s" };
+    const result = await recallMemories(input, deps);
+    expect(result!.details.notes).toEqual([]);
+    expect(result!.details.proposals!.edits).toEqual([{ id: "allergy", revision: "r1" }]);
+    deps.currentRevisions.mockImplementationOnce(async () => new Map());
+    await expect(recallMemories(input, deps)).resolves.toBeUndefined();
+  });
+
+  it("keeps jobs recall-only and includes explicit positive and negative proposal examples", async () => {
+    const { deps } = dependencies();
+    await recallMemories({ prompt: "Scheduled job 'x' fired.\n\nPlan dinner", entries: [], sessionId: "s" }, deps);
+    expect(Object.keys(deps.judge.mock.calls[0]![0].questions)).toEqual(["n0"]);
+    await recallMemories({ prompt: "[telegram] I moved", entries: [], sessionId: "s" }, deps);
+    const questions = deps.judge.mock.calls[1]![0].questions;
+    expect(questions.edit_n0!.criteria.true).toContain("Denver");
+    expect(questions.edit_n0!.criteria.false).toContain("still");
+    expect(questions.add!.criteria.false).toContain("hypothetical");
+    expect(questions.add!.instructions).toContain("independent");
+  });
+
+  it("selects edits independently of recall with a strict threshold and two-target cap", async () => {
+    const { deps, logs } = dependencies({
+      retrieve: vi.fn(async () => ["a", "b", "c", "d"].map((id) => candidate(id))),
+      judge: vi.fn(async () => ({ model: "jev", probabilities: {
+        n0: 0.1, n1: 0.1, n2: 0.1, n3: 0.1,
+        edit_n0: 0.84, edit_n1: 0.85, edit_n2: 0.95, edit_n3: 0.99, add: 0,
+      } })),
+    });
+    const result = await recallMemories({ prompt: "[telegram] My plans changed", entries: [], sessionId: "s" }, deps);
+    expect(result!.details.notes).toEqual([]);
+    expect(result!.details.proposals!.edits.map((note) => note.id)).toEqual(["d", "c"]);
+    expect(logs[0]!.proposals!.edits.map((decision) => [decision.id, decision.result])).toEqual([
+      ["d", "injected"], ["c", "injected"], ["b", "over_limit"], ["a", "below_threshold"],
+    ]);
+  });
+
+  it("does not let already recalled candidates consume the recall budget", async () => {
+    const { deps } = dependencies({
+      retrieve: vi.fn(async () => ["a", "b", "c", "d", "e"].map((id) => candidate(id))),
+    });
+    const result = await recallMemories({ prompt: "[telegram] plans", entries: [recalled([{ id: "a", revision: "r1" }])], sessionId: "s" }, deps);
+    expect(result!.details.notes.map((note) => note.id)).toEqual(["b", "c", "d", "e"]);
+  });
+
+  it("suppresses additions if canonical revalidation fails", async () => {
+    const { deps, logs } = dependencies({ retrieve: vi.fn(async () => []),
+      judge: vi.fn(async () => ({ model: "jev", probabilities: { add: 0.99 } })),
+      currentRevisions: vi.fn(async () => { throw new Error("unavailable"); }),
+    });
+    await expect(recallMemories({ prompt: "[telegram] I moved to Denver", entries: [], sessionId: "s" }, deps)).resolves.toBeUndefined();
+    expect(logs[0]!.outcome).toBe("revalidate_failed");
   });
 });
 

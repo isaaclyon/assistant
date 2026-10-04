@@ -156,7 +156,7 @@ describe("search extension", () => {
     let judge: (questions: string[]) => Response = (questions) => new Response(JSON.stringify({
       model: "jev-1.13.0",
       usage: { input_tokens: 4096 },
-      answers: Object.fromEntries(questions.map((id) => [id, { type: "noul", noul: 0.91 }])),
+      answers: Object.fromEntries(questions.map((id) => [id, { type: "noul", noul: id.startsWith("n") ? 0.91 : 0.1 }])),
     }));
     const fetcher = vi.fn(async (url: string, init: RequestInit) => {
       if (url.includes("typesafe")) {
@@ -198,13 +198,16 @@ describe("search extension", () => {
       expect((JSON.parse(String(embeddingCalls[0]![1].body)) as { input: string[] }).input.slice(0, 3))
         .toEqual(["ok do it", "Want me to book the crab shack?", "find Friday dinner"]);
       expect(typesafeBodies).toHaveLength(1);
+      expect(Object.keys(JSON.parse(typesafeBodies[0]!).questions)).toContain("add");
+      expect(Object.keys(JSON.parse(typesafeBodies[0]!).questions)).toContain("edit_n0");
       expect(typesafeBodies.join("") + JSON.stringify(fetcher.mock.calls)).not.toContain("emma-private-dinner-secret");
 
       weakQuery = true;
       await expect(beforeAgentStart({ prompt: "[telegram] what day is today" }, {
         sessionManager: { buildContextEntries: () => [], getSessionId: () => "unrelated-session" },
       })).resolves.toBeUndefined();
-      expect(typesafeBodies).toHaveLength(1);
+      expect(typesafeBodies).toHaveLength(2);
+      expect(Object.keys(JSON.parse(typesafeBodies[1]!).questions)).toEqual(["add"]);
       weakQuery = false;
 
       // The question has no words in common with the saved event. With
@@ -236,8 +239,8 @@ describe("search extension", () => {
       unbind();
     }
     const log = (await readFile(join(state, "memory-recall.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-    expect(log.map((record) => record.outcome)).toEqual(["injected", "no_candidates", "injected", "judge_failed"]);
-    expect(log.map((record) => record.inputTokens)).toEqual([4096, undefined, 4096, undefined]);
+    expect(log.map((record) => record.outcome)).toEqual(["injected", "none_selected", "injected", "judge_failed"]);
+    expect(log.map((record) => record.inputTokens)).toEqual([4096, 4096, 4096, undefined]);
     expect(JSON.stringify(log)).not.toMatch(/shellfish|crab shack|ok do it/);
   }, 15_000);
 
