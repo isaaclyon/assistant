@@ -3,6 +3,11 @@
   "resources": {
     "extensions": [
       {
+        "id": "usage",
+        "path": ".pi/extensions/usage.ts",
+        "enabled": true
+      },
+      {
         "id": "private-browser-input",
         "path": ".pi/extensions/private-browser-input.ts",
         "enabled": true
@@ -146,7 +151,7 @@
   "profiles": [
     {
       "id": "personal-isaac",
-      "extensions": ["core-memory", "reload", "restart", "fast", "skills", "search", "memory", "places", "google-workspace", "subagents", "private-browser-input"],
+      "extensions": ["core-memory", "reload", "restart", "fast", "usage", "skills", "search", "memory", "places", "google-workspace", "subagents", "private-browser-input"],
       "skills": [
         "agent-browser",
         "check-weather",
@@ -165,7 +170,7 @@
     },
     {
       "id": "personal-emma",
-      "extensions": ["core-memory", "reload", "restart", "fast", "skills", "search", "memory", "subagents", "private-browser-input"],
+      "extensions": ["core-memory", "reload", "restart", "fast", "usage", "skills", "search", "memory", "subagents", "private-browser-input"],
       "skills": [
         "agent-browser",
         "check-weather",
@@ -179,7 +184,7 @@
     },
     {
       "id": "household-shared",
-      "extensions": ["core-memory", "reload", "restart", "fast", "skills", "search", "memory", "subagents"],
+      "extensions": ["core-memory", "reload", "restart", "fast", "usage", "skills", "search", "memory", "subagents"],
       "skills": [
         "agent-browser",
         "check-weather",
@@ -193,7 +198,7 @@
     },
     {
       "id": "builder",
-      "extensions": ["deploy", "reload", "restart", "fast", "skills", "search", "subagents", "private-browser-input"],
+      "extensions": ["deploy", "reload", "restart", "fast", "usage", "skills", "search", "subagents", "private-browser-input"],
       "skills": [
         "agent-browser",
         "check-weather",

@@ -15,6 +15,12 @@ The host explicitly loads the pinned, repo-installed Codex conversion, Codex web
 
 ## State
 
+The repo-local `/usage` command calls a read-only host capability that creates a
+fresh official Pi context, reuses Codex conversion's subscription usage client,
+and returns only formatted active-model allowance and even-use pace. It fetches
+on demand under a ten-second deadline; no provider payload or credentials reach
+Telegram. See [ADR-0046](docs/adr/0046-telegram-model-usage-and-pace.md).
+
 | State | Location | Owner |
 | --- | --- | --- |
 | Pi session | `<stateDir>/sessions` | Pi `SessionManager` |
