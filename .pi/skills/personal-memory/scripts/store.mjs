@@ -27,7 +27,7 @@ export const MEMORY_TYPES = Object.freeze([
 export const MEMORY_STATUSES = Object.freeze(["active", "superseded", "archived"]);
 export const MEMORY_SCOPES = Object.freeze(["personal", "household"]);
 export const MEMORY_OWNERS = Object.freeze(["isaac", "emma"]);
-/** Optional ranking override; each type has a default (ADR-0043). */
+/** Optional ranking override; each type has a default (ADR-0045). */
 export const MEMORY_DECAYS = Object.freeze(["durable", "fading"]);
 
 export const MEMORY_TYPE_FOLDERS = Object.freeze({

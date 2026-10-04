@@ -17,7 +17,7 @@ export interface CorpusOperationStatus {
 export interface SearchIndex {
   memoryScan: MemoryScanStore;
   semantic: MemorySemanticStore;
-  /** Notes whose `decay` header overrides the type default (ADR-0043). */
+  /** Notes whose `decay` header overrides the type default (ADR-0045). */
   memoryDecayOverrides(): Map<string, "durable" | "fading">;
   withRefreshLock<T>(corpus: SearchCorpus, operation: () => Promise<T>): Promise<T>;
   sessionScanCursor(instanceId: string, principalId: string): string | undefined;

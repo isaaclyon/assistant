@@ -36,7 +36,7 @@ The host explicitly loads the pinned, repo-installed Codex conversion, Codex web
 | Pending direct place-add draft | `<stateDir>/places-add-draft.json` | Places extension |
 | Personal memory vault | `~/.local/share/pi-telegram-bridge/memory` (override: `PI_TELEGRAM_MEMORY_DIR`) | `personal-memory` skill CLI |
 | Derived memory/session search index | `<stateDir>/search-index.db` | Search extension/coordinator |
-| Memory recall decision log (IDs, timings, probabilities) | `<stateDir>/memory-recall.jsonl` | Search extension |
+| Memory recall decision log (IDs, timings, probabilities, reported Jev input tokens) | `<stateDir>/memory-recall.jsonl` | Search extension |
 | Memory read log (time, note ID) | `<stateDir>/memory-usage.jsonl` | Memory extension |
 | Google Places cache and monthly attempt accounting | `<stateDir>/google-places.db` | Google extension/gateway |
 | Google OAuth client/tokens and keyring | External `gogcli` configuration selected per instance | gogcli / operator |
@@ -157,6 +157,15 @@ website delivery checks bind it to the protected step; no email content or code
 reaches Pi. Unavailable or ambiguous lookup retains manual input. See
 [ADR-0042](docs/adr/0042-private-email-verification-codes.md).
 
+The same private extension exposes `browser_takeover`: a signed Telegram Mini
+App displays the selected stock-Chrome Xvfb session through an authenticated
+WebSocket gateway and the existing owned VNC supervisor. The browser observer
+stays disconnected and the crash gate stays held until viewer revocation and
+cleanup. The user chooses a clean private return or explicitly shares the
+current website so in-page state can survive. Only a fixed status reaches Pi;
+see [ADR-0044](docs/adr/0044-telegram-browser-takeover.md) and
+[the takeover guide](docs/browser-takeover.md).
+
 When `PI_TELEGRAM_SESSION_IDLE_HOURS` is enabled, the host records only accepted
 human prompt time and replacement correlation under each instance state tree.
 Jobs do not advance the clock. Immediately before a qualifying Telegram or job
@@ -251,7 +260,7 @@ Search and recall then move unused `fading` notes (lists, events, purchases,
 or any note with a `decay: fading` header) down up to three places. Usage comes
 from the recall log and a per-instance agent-read log, tallied in memory, so the
 disposable index and canonical notes hold no usage. See
-[ADR-0043](docs/adr/0043-rank-memory-by-usage-and-decay.md).
+[ADR-0045](docs/adr/0045-rank-memory-by-usage-and-decay.md).
 
 Before human turns, the host resolves bounded English date phrases with
 Chrono using the original Telegram timestamp and instance timezone. The search
@@ -260,6 +269,14 @@ hidden date context even when memory recall is disabled. Opted-in recall also
 retrieves visible notes with explicit overlapping date intervals and gives
 Jev the resolved ranges. No canonical memory is written automatically. See
 [ADR-0038](docs/adr/0038-resolve-date-context-before-memory-recall.md).
+
+Optional recall, semantic-memory search, and conversation routing use the typed
+per-instance feature registry in `src/feature-flags.ts`. Both environment-file
+preflight and process configuration validate it. Existing Jev flags retain
+their `jev`/`off` opt-in; `PI_TELEGRAM_MEMORY_SEMANTIC=off` independently disables
+embeddings while retaining keys and cached vectors. Unset semantic mode preserves
+key-gated behavior. Flags take effect on restart and never widen capability or
+memory boundaries. See [ADR-0043](docs/adr/0043-per-instance-feature-flags.md).
 
 ## Startup
 

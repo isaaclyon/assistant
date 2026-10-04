@@ -1,7 +1,7 @@
 # Memory usage and decay plan
 
 Status: implemented; see
-[ADR-0043](adr/0043-rank-memory-by-usage-and-decay.md) and the
+[ADR-0045](adr/0045-rank-memory-by-usage-and-decay.md) and the
 [usage ranking notes](search-index.md#usage-ranking-and-decay)
 ([#165](https://github.com/isaaclyon/assistant/issues/165); links in
 [#166](https://github.com/isaaclyon/assistant/issues/166)). It relates to [ADR-0026](adr/0026-use-derived-fts-indexes-for-memory-and-session-search.md),

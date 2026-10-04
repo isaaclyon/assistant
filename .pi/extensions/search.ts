@@ -226,7 +226,7 @@ export default function searchExtension(pi: ExtensionAPI): void {
     activeIndex?.close();
   }
 
-  // ADR-0043: usage ranking is a hint. If a log cannot be read, results keep
+  // ADR-0045: usage ranking is a hint. If a log cannot be read, results keep
   // their match order. Call after the final canonical refresh.
   let usage: { stateDir: string; tally: MemoryUsageTally } | undefined;
   const usageRanking = async (activeIndex: SearchIndex, context: SearchContext): Promise<MemoryRanking | undefined> => {

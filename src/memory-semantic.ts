@@ -167,7 +167,7 @@ export function visibleMemoryRevisions(
 
 /**
  * Call only after a successful canonical refresh, including after inference.
- * An optional usage ranking (ADR-0043) moves fading notes down a few places
+ * An optional usage ranking (ADR-0045) moves fading notes down a few places
  * before the result list is trimmed.
  */
 export function searchHybridMemories(

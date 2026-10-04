@@ -94,7 +94,10 @@ Set `PI_TELEGRAM_MEMORY_RECALL=jev` and `PI_TELEGRAM_TYPESAFE_API_KEY_FILE` in
 an instance's private environment file to recall relevant notes before each
 Telegram message, scheduled job, and one-time reminder. Heartbeat reactions,
 webhooks, and background-subagent completions never trigger recall. Without
-`PI_TELEGRAM_OPENAI_API_KEY_FILE`, candidates come from keyword search only.
+`PI_TELEGRAM_OPENAI_API_KEY_FILE`, or with `PI_TELEGRAM_MEMORY_SEMANTIC=off`,
+candidates come from keyword and applicable date-interval search. Set
+`PI_TELEGRAM_MEMORY_RECALL=off` to disable automatic recall while keeping explicit
+search tools available. See the [feature flags](../README.md#feature-flags).
 
 Before the turn starts, the search extension builds up to three queries: the
 incoming text, the previous assistant message, and the previous user message.
@@ -107,9 +110,11 @@ snippet characters, are added to the session as one hidden `memory-recall`
 message with note IDs and revisions. A note revision already recalled in the
 active context is not judged or added again.
 
-This sends recent conversation excerpts and candidate note titles and
-snippets to TypeSafe on every qualifying turn, in addition to query text sent
-to OpenAI. Enable it only with the instance owner's approval. The same
+When new candidates remain after duplicate suppression, this sends recent
+conversation excerpts and candidate note titles and snippets to TypeSafe in
+one request, in addition to embedding text sent to OpenAI when semantic search
+is configured. No Jev request is made when no candidates remain. Enable it only
+with the instance owner's approval. The same
 visibility filters and canonical rechecks as the search tool apply, plus one
 more recheck after judgment. Any failure adds nothing, and the turn proceeds
 as it would without recall. The Jev call has one attempt with a three-second
@@ -117,7 +122,9 @@ timeout; there is no overall recall deadline yet.
 
 Each qualifying turn appends one line to `<stateDir>/memory-recall.jsonl`
 (mode `0600`) with the outcome, per-stage timings, and each candidate's note
-ID, revision, probability, and result. It never contains message or note text.
+ID, revision, probability, and result. Successful Jev responses also record
+provider-reported `inputTokens` when available, including judgments that select
+no memories. Missing usage is unknown, not zero. It never contains message or note text.
 For example, to see the added latency and injection rate:
 
 ```bash
@@ -126,6 +133,31 @@ jq -s '{turns: length, injected: map(select(.outcome == "injected")) | length,
 ```
 
 See [ADR-0037](adr/0037-recall-memory-with-jev-before-each-turn.md).
+
+### Recall cost measurement
+
+[TypeSafe's published Jev 1.13 rate](https://docs.typesafe.ai/models), checked
+2026-10-03, is $0.042 per million input tokens with free output. Sum reported
+usage for a measured subtotal (verify the current rate before budgeting):
+
+```bash
+MEMORY_RECALL_LOG="$HOME/.local/state/pi-telegram-bridge/instances/isaac/memory-recall.jsonl"
+jq -s '
+  (map(select(.inputTokens != null)) | map(.inputTokens) | add // 0) as $tokens |
+  {turns: length,
+   reported_judgments: (map(select(.inputTokens != null)) | length),
+   unmetered_judgments: (map(select(.inputTokens == null and
+     (.ms.judge != null or .outcome == "judge_failed"))) | length),
+   input_tokens: $tokens, estimated_reported_jev_usd: ($tokens / 1000000 * 0.042)}
+' "$MEMORY_RECALL_LOG"
+```
+
+This subtotal excludes requests whose usage was unavailable, embeddings, other
+Jev features, and the main assistant's processing of recalled context. Failed
+requests may still incur provider charges. At one judgment per message, 100
+messages/day × 30 days × 4,000 input tokens costs about $0.50/month for Jev.
+Context is bounded; it does not grow with the entire session history. The log
+currently has no rotation, so totals cover all retained entries.
 
 ## Usage ranking and decay
 
@@ -157,7 +189,7 @@ jq -s '[.[].candidates[] | select((.drop // 0) > 0)] | group_by(.id)
 ```
 
 Usage is counted per instance. See
-[ADR-0043](adr/0043-rank-memory-by-usage-and-decay.md).
+[ADR-0045](adr/0045-rank-memory-by-usage-and-decay.md).
 
 ## Refresh and recovery
 

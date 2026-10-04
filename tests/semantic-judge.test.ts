@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { createTypeSafeJudge, SEMANTIC_JUDGE_MODEL } from "../src/semantic-judge.js";
+import { createTypeSafeJudge, parseJudgeResponse, SEMANTIC_JUDGE_MODEL } from "../src/semantic-judge.js";
 
 const request = {
   state: { items: [{ id: "t1", subject: "Re: Move-out" }] },
@@ -31,6 +31,17 @@ function answer(noul: unknown, status = 200): Response {
 }
 
 describe("createTypeSafeJudge", () => {
+  it("preserves reported input usage and ignores missing or malformed accounting", () => {
+    const body = { model: SEMANTIC_JUDGE_MODEL, answers: { item_0: { type: "noul", noul: 0.9 } } };
+    for (const inputTokens of [0, 4096]) {
+      expect(parseJudgeResponse({ ...body, usage: { input_tokens: inputTokens } }, ["item_0"]).inputTokens)
+        .toBe(inputTokens);
+    }
+    for (const usage of [undefined, null, {}, { input_tokens: -1 }, { input_tokens: 1.5 }, { input_tokens: "42" }]) {
+      expect(parseJudgeResponse({ ...body, usage }, ["item_0"]).inputTokens).toBeUndefined();
+    }
+  });
+
   it("posts the pinned model with a just-in-time bearer key and returns P(yes)", async () => {
     const fetcher = vi.fn(async () => answer(0.93));
     const judge = createTypeSafeJudge({

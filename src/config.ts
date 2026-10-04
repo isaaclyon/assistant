@@ -13,6 +13,7 @@ import {
   selectBridgeInstance,
 } from "./instances.js";
 import { validateCredentialEnvironmentFile } from "./credential-environment.js";
+import { FEATURE_FLAGS, isFeatureEnabled, type FeatureFlag } from "./feature-flags.js";
 
 export interface BridgeInstanceConfig {
   instanceId: string;
@@ -50,9 +51,7 @@ type BridgeEnvironment = Readonly<Record<string, string | undefined>>;
 const MAX_SESSION_IDLE_HOURS = 8_760;
 
 export function resolveSessionRouting(value: string | undefined): "jev" | undefined {
-  if (!value?.trim() || value.trim() === "off") return undefined;
-  if (value.trim() === "jev") return "jev";
-  throw new Error("PI_TELEGRAM_SESSION_ROUTING must be jev or off");
+  return isFeatureEnabled("PI_TELEGRAM_SESSION_ROUTING", { PI_TELEGRAM_SESSION_ROUTING: value }) ? "jev" : undefined;
 }
 
 function resolveSessionIdleMs(value: string | undefined): number {
@@ -80,6 +79,8 @@ export function resolveBridgeInstanceConfig(
   defaultResourceRoot = process.cwd(),
 ): BridgeInstanceConfig {
   const instance = selectBridgeInstance(manifest, instanceId);
+  // Validate the actual process environment too, including service overrides.
+  for (const key of Object.keys(FEATURE_FLAGS) as FeatureFlag[]) isFeatureEnabled(key, env);
   const resourceRoot = resolveFromHome(
     env.PI_TELEGRAM_BRIDGE_RESOURCE_ROOT,
     defaultResourceRoot,

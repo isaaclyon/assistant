@@ -55,7 +55,7 @@ export class MemoryApplication {
     return executeMemoryOperation(command, request, { env: this.env, cwd: this.cwd, confirmed });
   }
 
-  /** An agent read; also a usage signal for ranking (ADR-0043). */
+  /** An agent read; also a usage signal for ranking (ADR-0045). */
   async read(id: string) {
     const note = await this.run("read", { id });
     // Usage is a ranking hint; a failed log write never fails the read.

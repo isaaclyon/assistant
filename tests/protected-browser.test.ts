@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PrivateCdp, protectBrowserPage, type ProtectedInputRequest } from "../src/protected-browser.js";
 import { openTableRequest } from "../src/opentable-private-flow.js";
 import { createPrivateLoginSubmission } from "../src/private-login-submission.js";
+import { protectBrowserTakeover } from "../src/browser-takeover-protection.js";
 
 const exec = promisify(execFile);
 const chrome = "/usr/bin/google-chrome";
@@ -230,5 +231,22 @@ describe.skipIf(!available)("protected CDP against real Chrome and a synthetic H
     expect(await page.isEmailCodeFor("synthetic@example.invalid")).toBe(false);
     await expect(page.submit(["123456"], "synthetic@example.invalid")).rejects.toThrow();
     await page.close(); expect(f.steps).toHaveLength(1);
+  }, 30_000);
+  it.each(["private", "share"] as const)("restores a takeover with %s handback semantics", async mode => {
+    const f = await fixture();
+    const before = await PrivateCdp.connect(f.port);
+    const original = (await before.request("Target.getTargets")).targetInfos.find((t: any) => t.type === "page").targetId;
+    before.close();
+    const takeover = await protectBrowserTakeover(f.port, { session: "test", resumeUrl: f.spec.resumeUrl });
+    await takeover.finish(mode);
+    const after = await PrivateCdp.connect(f.port);
+    try {
+      await vi.waitFor(async () => {
+        const pages = (await after.request("Target.getTargets")).targetInfos.filter((t: any) => t.type === "page");
+        expect(pages).toHaveLength(1);
+        expect(pages[0].url).toBe(mode === "private" ? f.spec.resumeUrl : f.spec.pageUrl);
+        if (mode === "private") expect(pages[0].targetId).not.toBe(original); else expect(pages[0].targetId).toBe(original);
+      });
+    } finally { after.close(); }
   }, 30_000);
 });

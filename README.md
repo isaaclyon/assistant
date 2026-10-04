@@ -145,6 +145,41 @@ PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT=1
 Keep the file mode `0600` and restart the service after changing it. Shell
 invocations of the memory CLI may still set these variables directly.
 
+### Feature flags
+
+Optional behavior is controlled per instance in the same private environment
+file. Changes take effect after restart and survive deployments. The typed
+registry in `src/feature-flags.ts` owns accepted values and defaults; deployment
+preflight and startup reject invalid values, including empty assignments.
+
+| Flag | Enable | Disable | When unset |
+| --- | --- | --- | --- |
+| `PI_TELEGRAM_MEMORY_RECALL` | `jev` | `off` | Off |
+| `PI_TELEGRAM_MEMORY_SEMANTIC` | `on` | `off` | Enabled only when an OpenAI key file is configured |
+| `PI_TELEGRAM_SESSION_ROUTING` | `jev` | `off` | Off |
+
+For proactive recall, configure these values in the intended personal instance:
+
+```text
+PI_TELEGRAM_MEMORY_RECALL=jev
+PI_TELEGRAM_MEMORY_SEMANTIC=on
+PI_TELEGRAM_TYPESAFE_API_KEY_FILE=/absolute/path/to/private-typesafe-key
+PI_TELEGRAM_OPENAI_API_KEY_FILE=/absolute/path/to/private-openai-key
+```
+
+Key files must be owned by the service user with mode `0600`. A flag never grants
+capabilities or changes the instance's memory permissions. Recall performs
+bounded search followed by one batched Jev relevance judgment before a turn;
+see [recall behavior and cost measurement](docs/search-index.md#automatic-memory-recall).
+Disabling recall leaves explicit memory searches available. Disabling semantic
+search keeps keyword and date-based recall available without embedding requests,
+and retains existing cached vectors for re-enabling. It does not disable Jev
+judgment. Conversation routing remains an independent opt-in.
+
+New operational switches belong in this registry with a consumer, tests, and
+documentation. Capability profiles still own which tools and extensions load;
+feature flags only control optional behavior within them.
+
 The Codex adapter defaults to normal mode for the bridge's `openai-codex` model, exposing `exec_command`, `write_stdin`, `apply_patch`, and image viewing. The separately pinned Codex web extension provides `web_run`. Image generation is disabled. Its settings are independent of normal Pi sessions. The pinned extension receives this separate path through the version-checked patch in `scripts/patch-codex-conversion.mjs`; update that patch deliberately when changing the extension version.
 
 ## Personal memory

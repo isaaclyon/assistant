@@ -55,8 +55,9 @@ The tool waits for input and then resumes the same turn. It disconnects the norm
 browser observer before entry and destroys sensitive page documents after a fill
 attempt, opening the requested clean resume page. `submitted` does not prove
 login succeeded: inspect that clean page afterward. This discards transient page
-state, so use SSH handoff for challenges that cannot survive reopening, JavaScript-only
-forms, embedded fields, multiple tabs, passkeys, or CAPTCHA.
+state, so use `browser_takeover` for manual challenges that need their page state,
+JavaScript-only forms, embedded fields or CAPTCHA. Passkeys need a compatible
+authenticator in the remote browser. SSH handoff remains a fallback.
 
 While private input is active, do not run parallel browser work, inspect runtime
 or profile files, or access raw CDP. If `browser_blocked` is returned, use the
@@ -129,6 +130,37 @@ tests. Installation or rotation does not require a bridge restart because the
 provider reads the private files only when a credential is requested.
 
 ## Secure interactive handoff
+
+### Take over inside Telegram
+
+Prefer `browser_takeover` when available for an authorized manual browser step
+or when the user asks to take control. It displays the live browser inside a
+private Telegram Mini App and holds the active turn until handback or expiry.
+Start with one HTTPS tab and supply `session` plus a clean same-origin
+`resumeUrl`, without query or fragment. Tell the user to keep Tailscale connected,
+tap **Take over**, tap the remote field and use **Keyboard** as needed, then tap
+**Hand back**. The view fits the available phone space automatically, including
+keyboard changes. Drag with two fingers to scroll. **Zoom** enables a larger
+view with panning; **Desktop** shows a wider view for sites or popups that need it.
+
+The user chooses **Return privately** (destroy old page documents and reopen the
+safe URL while retaining cookies) or **Continue from this page** (explicitly
+share the visible website and form contents, preserving in-page state). Never
+choose sharing on the user's behalf. Disconnecting the viewer leaves the agent
+paused; cancellation and expiry use private cleanup. Verify the page afterward.
+
+While takeover is active, do not run other tools, inspect browser/runtime/profile
+files, read a VNC password, capture screenshots, or bypass the gate with raw CDP.
+If `browser_blocked` is returned, stop that session through the stock helper
+before reopening it. Do not delete the gate or reset Tailscale Serve mappings.
+
+The user performs consequential actions directly; handback grants no new
+permission for the assistant to make purchases or account changes. Passkeys
+still require a compatible authenticator in the remote browser. This tool does
+not install/unlock 1Password or relay phone biometrics. See
+[`docs/browser-takeover.md`](../../../docs/browser-takeover.md).
+
+### SSH fallback
 
 Use the tracked handoff helper when the user must enter a passkey, TOTP, payment
 details, or another secret that cannot safely pass through the model. It attaches

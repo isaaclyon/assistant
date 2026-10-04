@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { MEMORY_RECALL_LOG_FILE } from "./memory-recall.js";
 
 /**
- * ADR-0043: usage-based ranking. Notes earn points when recall injects them,
+ * ADR-0045: usage-based ranking. Notes earn points when recall injects them,
  * when the agent reads them, and when they are edited. Points halve every 90
  * days. After a 30-day grace period, a fading note with few points drops up to
  * three places in search and recall results. Durable notes never move.

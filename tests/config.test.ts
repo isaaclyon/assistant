@@ -38,6 +38,10 @@ const resolveIsaac = (env: Record<string, string>) =>
   resolveBridgeInstanceConfig(singleInstanceManifest(), "isaac", env, "/home/tester", "/release");
 
 describe("resolveBridgeInstanceConfig", () => {
+  it("rejects invalid feature flags from process-level overrides", () => {
+    expect(() => resolveIsaac({ PI_TELEGRAM_MEMORY_RECALL: "yes" })).toThrow(/must be jev or off/);
+    expect(() => resolveIsaac({ PI_TELEGRAM_MEMORY_SEMANTIC: "yes" })).toThrow(/must be on or off/);
+  });
   it("requires explicit per-instance opt-in for Jev conversation routing", () => {
     expect(resolveIsaac({}).sessionRouting).toBeUndefined();
     expect(resolveIsaac({ PI_TELEGRAM_SESSION_ROUTING: "off" }).sessionRouting).toBeUndefined();
