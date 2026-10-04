@@ -15,6 +15,12 @@ The host explicitly loads the pinned, repo-installed Codex conversion, Codex web
 
 ## State
 
+Opt-in `/debug` messages expose tool execution, core/date context, and automatic
+memory recall in the originating chat/topic. A source-checked Telegram patch
+supplies authorized command targets and a plain-text active-turn transport.
+Diagnostics are redacted, bounded, process-local, and fail-open; see
+[ADR-0046](docs/adr/0046-telegram-debug-messages.md).
+
 The repo-local `/usage` command calls a read-only host capability that creates a
 fresh official Pi context, reuses Codex conversion's subscription usage client,
 and returns only formatted active-model allowance and even-use pace. It fetches

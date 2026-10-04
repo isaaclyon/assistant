@@ -6,6 +6,7 @@
 // resolves the real module. Keep it in sync with the fork's public surface.
 
 export interface TelegramExtensionCommandContext {
+  target?: { chatId: number; threadId?: number };
   name: string;
   args: string;
   reply: (text: string) => Promise<void>;

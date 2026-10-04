@@ -14,6 +14,16 @@ one systemd user service per instance
 
 Instances use separate mutable workspaces, but all extension, skill, and instruction code is selected from the shared immutable release through `.pi/capabilities.json`. The host disables hierarchical discovery; the root `AGENTS.md` remains developer guidance. Fleet conversations and inboxes live under `~/.local/state/pi-telegram-bridge/instances/<id>`.
 
+## Telegram debugging
+
+Use `/debug` to toggle messages showing tool calls/results, core memory,
+automatic recall decisions and snippets, and date context in the current
+chat/topic. `/debug on`, `/debug off`, and `/debug status` are also available.
+Debug starts off and resets when the bridge restarts. Messages redact common
+secrets, omit sensitive sign-in/credential output, and truncate long results.
+They are plain Telegram messages and do not enter the model's conversation.
+Status reports failed sends and messages dropped when the bounded queue fills.
+
 ## Initial setup
 
 Pi updates arrive as a weekly grouped Dependabot PR after a three-day release
