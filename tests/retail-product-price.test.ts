@@ -1,72 +1,57 @@
 import { describe, expect, it } from "vitest";
-import { observeRetailProduct, parseRetailArgs, PRODUCTS } from "../src/checkers/retail-product-price.js";
+import { observeRetailProduct, parseRetailArgs, type PriceSource } from "../src/checkers/retail-product-price.js";
+import { publicPriceUrl } from "../src/public-price-fetch.js";
 
-const args = (product = "puppy-love-matches", baselineCents = "1300") => parseRetailArgs(JSON.stringify({ product, baselineCents }));
-const shopify = (price: unknown, available = true, currency = "USD", id = 10002913526026) => async (url: string) => new Response(new URL(url).pathname.endsWith(".js") ? JSON.stringify({ id, variants: [{ price, available }] }) : `Shopify.currency = {"active":"${currency}","rate":"1"};`);
-describe("retail product prices", () => {
-  it("matches exactly 20% off with a fixed baseline", async () => {
-    const result = await observeRetailProduct(args(), shopify(1040));
-    expect(result.value).toBe(8000);
-    expect(result.context).toMatchObject({ currency: "USD", baselineCents: 1300, priceCents: 1040 });
-  });
-  it("does not round a smaller discount into eligibility", async () => {
+const source: PriceSource = { kind: "shopify", url: "https://shop.example.com/products/sample", id: "123", currency: "USD" };
+const args = (extra: Partial<PriceSource> = {}, mode = "ratio") => parseRetailArgs(JSON.stringify({ source: JSON.stringify({ ...source, ...extra }), baselineCents: "1300", mode }));
+const shopify = (price: unknown, available = true, currency = "USD", id = 123) => async (url: string) =>
+  new Response(new URL(url).pathname.endsWith(".js") ? JSON.stringify({ id, variants: [{ id: 456, price, available }] }) : `Shopify.currency = {"active":"${currency}"};`);
+
+describe("configured price adapters", () => {
+  it("uses an arbitrary configured product and exact inclusive discount boundary", async () => {
+    expect((await observeRetailProduct(args(), shopify(1040))).value).toBe(8000);
     expect((await observeRetailProduct(args(), shopify(1041))).value).toBeGreaterThan(8000);
+    expect((await observeRetailProduct(args({}, "price"), shopify(1040))).value).toBe(10.4);
   });
-  it("does not qualify an out-of-stock item", async () => {
-    expect((await observeRetailProduct(args(), shopify(500, false))).value).toBe(10000);
+  it("never matches unavailable stock", async () => {
+    expect((await observeRetailProduct(args(), shopify(500, false))).value).toBe(Number.MAX_SAFE_INTEGER);
   });
-  it.each([shopify("1040"), shopify(0), shopify(1040, true, "EUR"), shopify(1040, true, "USD", 123)])("rejects invalid prices, currency and identity", async (fetcher) => {
+  it.each([shopify("1040"), shopify(0), shopify(1040, true, "EUR"), shopify(1040, true, "USD", 999)])("rejects price, currency and identity mismatches", async fetcher => {
     await expect(observeRetailProduct(args(), fetcher)).rejects.toThrow();
   });
-  it("reads the exact schema product rather than unrelated prices", async () => {
-    const data = [{ "@type": "Product", sku: "other", offers: { price: "1.00" } }, { "@type": "Product", sku: "B039", url: PRODUCTS["dog-gramaphone-matches"].url, offers: { price: "12.00", priceCurrency: "USD", availability: "https://schema.org/InStock" } }];
-    const result = await observeRetailProduct(args("dog-gramaphone-matches", "1500"), async () => new Response(`<script type="application/ld+json">${JSON.stringify(data)}</script>`));
-    expect(result.value).toBe(8000);
+  it("pins a configured variant, rejects ambiguity, and supports explicit lowest available selection", async () => {
+    const fetcher = async (url: string) => new Response(new URL(url).pathname.endsWith(".js") ? JSON.stringify({ id: 123,
+      variants: [{ id: 1, available: false, price: 100 }, { id: 2, available: true, price: 1040 }, { id: 3, available: true, price: 1500 }] }) : 'Shopify.currency = {"active":"USD"};');
+    await expect(observeRetailProduct(args(), fetcher)).rejects.toThrow(/variants/);
+    expect((await observeRetailProduct(args({ variantId: "3" }), fetcher)).context?.priceCents).toBe(1500);
+    expect((await observeRetailProduct(args({ variantPolicy: "lowest-available" }), fetcher)).context?.priceCents).toBe(1040);
+    await expect(observeRetailProduct(args({ variantId: "99" }), fetcher)).rejects.toThrow(/variants/);
   });
-  it.each([
-    ["https://schema.org/OutOfStock", "USD", false],
-    ["https://schema.org/PreOrder", "USD", true],
-    ["https://schema.org/InStock", "EUR", true],
-  ])("handles schema availability and currency conservatively", async (availability, priceCurrency, fails) => {
-    const data = { "@type": "Product", sku: "B039", url: PRODUCTS["dog-gramaphone-matches"].url, offers: { price: "10.00", priceCurrency, availability } };
-    const result = observeRetailProduct(args("dog-gramaphone-matches", "1500"), async () => new Response(`<script type="application/ld+json">${JSON.stringify(data)}</script>`));
-    if (fails) await expect(result).rejects.toThrow();
-    else expect((await result).value).toBe(10000);
+  it("pins the configured presentment currency in both Shopify requests", async () => {
+    const urls: string[] = [];
+    await observeRetailProduct(args(), async url => { urls.push(url); return shopify(1040)(url); });
+    expect(urls).toHaveLength(2);
+    expect(urls.every(url => new URL(url).searchParams.get("currency") === "USD")).toBe(true);
   });
-  it("reads a US Steam model and flags stock for verification", async () => {
-    const result = await observeRetailProduct(args("steam-deck-512-oled", "78900"), async () => new Response(JSON.stringify({ "946113": { success: true, data: { name: "Steam Deck 512 GB OLED", price: { currency: "USD", final: 63120 } } } })));
-    expect(result.value).toBe(8000);
-    expect(result.context?.availability).toBe("requires-verification");
+  it("matches the exact schema offer and fails on ambiguous identity", async () => {
+    const product = { "@type": "Product", sku: "123", url: source.url, offers: { price: "10.40", priceCurrency: "USD", availability: "https://schema.org/InStock" } };
+    const page = (nodes: unknown[]) => async () => new Response(`<script type="application/ld+json">${JSON.stringify(nodes)}</script>`);
+    expect((await observeRetailProduct(args({ kind: "schema" }), page([product]))).value).toBe(8000);
+    await expect(observeRetailProduct(args({ kind: "schema" }), page([product, product]))).rejects.toThrow(/ambiguous/);
   });
-  it.each([
-    { name: "Steam Deck 1 TB OLED", price: { currency: "USD", final: 63120 } },
-    { name: "Steam Deck 512 GB OLED", price: { currency: "EUR", final: 63120 } },
-    { name: "Steam Deck 512 GB OLED", price: { currency: "USD", final: "63120" } },
-  ])("rejects Steam model and pricing mismatches", async (data) => {
-    await expect(observeRetailProduct(args("steam-deck-512-oled", "78900"), async () => new Response(JSON.stringify({ "946113": { success: true, data } })))).rejects.toThrow();
+  it("validates configured Steam package name and currency and flags unknown stock", async () => {
+    const configured = args({ kind: "steam", url: "https://store.steampowered.com/sub/123", name: "Sample package", country: "us" });
+    const page = (name: string, currency: string) => async () => new Response(JSON.stringify({ "123": { success: true, data: { name, price: { currency, final: 1040 } } } }));
+    expect((await observeRetailProduct(configured, page("Sample package", "USD"))).context?.availability).toBe("requires-verification");
+    await expect(observeRetailProduct(configured, page("Wrong package", "USD"))).rejects.toThrow();
+    await expect(observeRetailProduct(configured, page("Sample package", "EUR"))).rejects.toThrow();
   });
-  it("pins the book's USD price on both requests", async () => {
-    const fetcher = shopify(3600, true, "USD", 9095217185010);
-    const requested: string[] = [];
-    const result = await observeRetailProduct(args("book-on-zines", "4500"), async (url) => {
-      requested.push(url);
-      return fetcher(url);
-    });
-    expect(result.value).toBe(8000);
-    expect(result.display).toContain("USD 36.00");
-    expect(requested).toHaveLength(2);
-    expect(requested.every((url) => new URL(url).searchParams.get("currency") === "USD")).toBe(true);
+  it.each(["https://localhost/a", "https://127.0.0.1/a", "http://shop.example.com/a", "https://host.ts.net/a", "https://user:pass@shop.example.com/a"])("rejects non-public source URLs %s", url => {
+    expect(() => publicPriceUrl(url)).toThrow();
   });
-  it("rejects a book response that falls back to HKD", async () => {
-    await expect(observeRetailProduct(args("book-on-zines", "4500"), shopify(38000, true, "HKD", 9095217185010))).rejects.toThrow(/currency/);
-  });
-  it("rejects variant changes rather than switching the baseline to a different edition", async () => {
-    await expect(observeRetailProduct(args(), async (url) => new Response(new URL(url).pathname.endsWith(".js") ? JSON.stringify({ id: 10002913526026, variants: [{ price: 500, available: true }, { price: 1500, available: true }] }) : 'Shopify.currency = {"active":"USD"};'))).rejects.toThrow(/variants/);
-  });
-  it("rejects HTTP failures instead of recording no discount", async () => {
-    await expect(observeRetailProduct(args(), async () => new Response("", { status: 429 }))).rejects.toThrow(/HTTP/);
-  });
-  it.each([{ product: "https://localhost", baselineCents: "100" }, { product: "book-on-zines", baselineCents: "0" }, { product: "book-on-zines", baselineCents: "1.2" }, { product: "book-on-zines", baselineCents: "9007199254740992" }])("rejects invalid configuration", (value) => {
-    expect(() => parseRetailArgs(JSON.stringify(value))).toThrow();
+  it("rejects unsupported config, precision and HTTP failures", async () => {
+    expect(() => args({ currency: "JPY" })).toThrow();
+    expect(() => parseRetailArgs('{"product":"old-product","baselineCents":"100"}')).toThrow();
+    await expect(observeRetailProduct(args(), async () => new Response("", { status: 429 }))).rejects.toThrow();
   });
 });

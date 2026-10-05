@@ -9,6 +9,14 @@ You are explicitly allowed to improve this agent from inside its own repository.
 
 ## Choose the smallest mechanism
 
+Separate the task from its mechanism before choosing an implementation.
+One-off and situational work, including recurring watches, belongs in private
+`<stateDir>/temporary/<task-kind>/<id>/` data with an end condition and retirement
+path. Skills explain reusable workflows; adapters implement reusable source
+interfaces. Neither should enumerate the user's current products, URLs, people,
+or baselines. A new task using an existing interface must need configuration
+only. Do not promote a one-off workaround into durable infrastructure.
+
 - **Skill** (`.pi/skills/<name>/SKILL.md`): instructions for work the model can already perform with its available tools. Start from [the skill scaffold](templates/skill/SKILL.md).
 - **Extension** (`.pi/extensions/<name>.ts`): executable Pi behavior such as a custom tool, command, event hook, or UI integration. Start from [the single-file extension scaffold](templates/extension.ts).
 - **Core source** (`src/`): host lifetime, persistence, Telegram capability boundaries, resource loading, setup, or service behavior. Read [the project map](references/project-map.md) first.
