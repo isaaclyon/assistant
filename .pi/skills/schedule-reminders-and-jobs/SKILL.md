@@ -195,7 +195,7 @@ credentials from the bridge's existing environment or credential stores.
 
 `retail-product-price` reads fixed public retail sources with a job-owned price
 baseline. Args are `product` and `baselineCents` (a positive integer string in
-the source currency's minor units). Supported products: `book-on-zines` (HKD),
+the source currency's minor units). Supported products: `book-on-zines` (USD),
 `puppy-love-matches` (USD), `dog-gramaphone-matches` (USD),
 `steam-deck-512-oled` and `steam-deck-1tb-oled` (US/USD). Baselines stay fixed
 until explicitly edited; record their source and verification date in the job

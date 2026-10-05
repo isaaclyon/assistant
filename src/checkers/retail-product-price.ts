@@ -3,7 +3,7 @@ import type { HeartbeatObservationV1 } from "../heartbeat.js";
 
 // Fixed public sources keep checker arguments from becoming arbitrary network requests.
 export const PRODUCTS = {
-  "book-on-zines": { url: "https://victionary.com/products/a-book-on-zines", currency: "HKD", id: "9095217185010", kind: "shopify" },
+  "book-on-zines": { url: "https://victionary.com/products/a-book-on-zines", currency: "USD", id: "9095217185010", kind: "shopify" },
   "puppy-love-matches": { url: "https://maisongodillot.com/en-us/products/matchbox-puppy-love-archivist", currency: "USD", id: "10002913526026", kind: "shopify" },
   "dog-gramaphone-matches": { url: "https://www.judyattherink.com/dog-and-gramaphone-square-safety-matches.html", currency: "USD", id: "B039", kind: "schema" },
   "steam-deck-512-oled": { url: "https://store.steampowered.com/steamdeck?cc=us&l=english", currency: "USD", id: "946113", kind: "steam" },
