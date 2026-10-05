@@ -18,6 +18,20 @@
   gates and source-checked install patches, and do not auto-merge updates.
 - Do not enable or restart the live service during tests unless explicitly working on deployment.
 
+## Git worktrees
+
+- Create new worktrees inside the repository's primary checkout at
+  `.worktrees/<task-name>/`. Do not create sibling `assistant-*` directories or
+  worktrees under `/tmp`.
+- Inspect `git worktree list --porcelain` to locate the primary checkout. When
+  already in a linked worktree, use an absolute path under the primary
+  checkout's `.worktrees/`; do not nest worktrees inside the current worktree.
+- From the primary checkout, for example:
+  `git worktree add .worktrees/my-task -b feat/my-task`.
+- Preserve existing worktrees and their uncommitted changes. Move or remove
+  them only as part of an explicitly requested migration or appropriate
+  post-merge cleanup.
+
 ## Extension & skill filtering (why the bridge can't see global Pi resources)
 
 `src/host.ts` disables normal extension/skill discovery and passes Pi only the

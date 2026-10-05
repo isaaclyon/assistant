@@ -12,6 +12,7 @@ const Tags = Type.Array(Type.String({ minLength: 1, maxLength: 80 }), { maxItems
 const Status = StringEnum(["active", "superseded", "archived"] as const);
 const Decay = StringEnum(["durable", "fading"] as const);
 const Patch = Type.Object({
+  bodyDiff: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 200_000 }), { minItems: 1, maxItems: 20 })),
   title: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   tags: Type.Optional(Tags), status: Type.Optional(Status),
   decay: Type.Optional(Type.Union([Decay, Type.Null()])),
@@ -92,7 +93,7 @@ export default function memoryExtension(pi: ExtensionAPI): void {
       "Use assistant_memory for full-note reads and changes. Persist only memories the user explicitly asks to save.",
       "Before creating, call prepare_create and inspect possibleDuplicates. Update an existing note when it covers the same fact; use the creationToken only for a distinct new note. Reuse that token when checking a retried creation.",
       "Notes rank by usage. Person, preference, recipe, and reference notes are durable; list, event, and purchase notes fade when unused. Set decay to fading for a time-bound fact or idea of a durable type, or durable for a list or event that stays relevant; null restores the type default.",
-      "Read the current revision before updating. Use bodyEdits with expectedText that occurs exactly once and replacementText; preserve unrelated content. Reread on REVISION_CONFLICT or TEXT_CONFLICT.",
+      "Read the current revision before updating. Use bodyDiff hunks (space-prefixed context, - removal, + addition; no headers; unique existing context), or bodyEdits with expectedText that occurs exactly once and replacementText; preserve unrelated content. Store stable facts in person notes, collections in lists, dated plans in events. Follow explicit list names and confirm the actual saved destination after success. Reread on REVISION_CONFLICT or TEXT_CONFLICT.",
       "For deletion or sharing a personal note with the household, call request_delete or request_share. The direct Telegram buttons own confirmation. Wait for the user and never claim success while confirmation is pending; never bypass this through the CLI.",
     ],
     parameters: Type.Union([

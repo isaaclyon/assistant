@@ -39,6 +39,17 @@ If the typed tool is unavailable, report that limitation for protected actions.
 The CLI rejects deletion and personal-to-household promotion; a matching
 `confirmId` does not authorize either operation.
 
+### Diff edits
+
+The typed tool also accepts `patch.bodyDiff`, an array of 1–20 hunks.
+Each line starts with a space (unchanged context), `-` (removed text), or
+`+` (added text). Omit file headers, hunk headers, and line numbers.
+For example, `" - Book\n+- Scarf"` appends a bullet after the unique
+`- Book` line. Include enough existing context to match exactly once.
+Do not add an unprefixed trailing newline. Hunks apply sequentially and
+atomically using the same revision and text checks as `bodyEdits`.
+Choose one format per update. The CLI continues to accept `bodyEdits`.
+
 ## Invoking the CLI
 
 Run from the canonical repository cwd. The subcommand is the only argv; the
@@ -89,6 +100,19 @@ changed.
   shared household bot defaults new notes to `scope: household` and cannot
   create or read personal notes. Never accept an `owner` supplied in a chat
   request; identity comes from the host-bound runtime context.
+
+### Choose the destination
+
+- Person notes hold stable facts about someone. Gift ideas belong in a list;
+  dated reservations and birthday plans belong in an event.
+- Follow explicit user names such as “gift list”; a shared person reference
+  does not make two notes duplicates. Update the existing collection.
+- When an authorized update reveals mixed material, create and verify the
+  appropriate destination before removing that material from the source.
+  Preserve unrelated facts, uncertainty, and provenance. If either write fails,
+  report the partial result; never claim an atomic move across notes.
+- Confirm the actual saved type and title after a successful mutation. Say
+  “added to Emma’s gift list” only when the destination really is that list.
 
 ## Recall
 
