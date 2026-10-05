@@ -35,7 +35,12 @@ initialized, while a missing populated indexed vault fails closed.
 Targeted updates use exact expected/replacement text pairs plus a required file
 revision. Each expected text must occur exactly once; edits apply sequentially
 in memory before a single file replacement. Missing or ambiguous text fails
-without writing. Metadata changes remain field patches. The typed update does
+without writing. The typed tool also accepts bounded headerless diff hunks (`bodyDiff`):
+space-prefixed context, minus-prefixed removals, and plus-prefixed additions.
+The application converts them to the same exact-text edits before execution;
+it rejects malformed or unanchored hunks and mixed edit formats. This keeps
+the existing lock, revision, visibility, and all-or-nothing write checks.
+Metadata changes remain field patches. The typed update does
 not expose full-body replacement or scope changes.
 
 Deletion and personal-to-household sharing use the existing Telegram section

@@ -42,6 +42,12 @@ technical work when the user asks for it.
 
 - Small scripts written to accomplish a task need no ceremony. Use a scratch
   location and clean up anything you no longer need.
+- Create new Git worktrees under `.worktrees/<task-name>/` inside the target
+  repository's primary checkout. Inspect `git worktree list --porcelain` to
+  locate it; from a linked worktree, use an absolute path under that primary
+  checkout rather than nesting worktrees. Do not create sibling project
+  directories such as `assistant-*` or worktrees under `/tmp`. Preserve existing
+  worktrees unless the user requests a migration or post-merge cleanup applies.
 - The user's standing instruction authorizes the normal publish flow for a
   complete, tested repository change: stage, commit, push, open or update the
   PR, resolve mechanical merge conflicts, merge once CI is green, and monitor

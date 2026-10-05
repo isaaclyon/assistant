@@ -119,3 +119,17 @@ it("binds creation to its validated content, expires drafts, and accepts no scop
   expect(() => app.update(String(created.id), String(created.revision), { scope: "household" } as never))
     .toThrow(/confirmation/);
 });
+
+it("applies diff hunks with revision checks and atomic conflicts", async () => {
+  const { app, note } = await fixture();
+  const id = String(note.id), revision = String(note.revision);
+  const bodyDiff = [" Quiet restaurants. Likes coffee.\n+- Gift idea"];
+  const updated = await app.update(id, revision, { bodyDiff });
+  expect(updated.body).toBe("Quiet restaurants. Likes coffee.\n- Gift idea");
+  await expect(app.update(id, revision, { bodyDiff })).rejects.toMatchObject({ code: "REVISION_CONFLICT" });
+  await expect(app.update(id, String(updated.revision), { bodyDiff: ["-- Gift idea\n+- Other", "-missing\n+new"] })).rejects.toMatchObject({ code: "TEXT_CONFLICT" });
+  expect((await app.read(id)).body).toBe(updated.body);
+  expect(() => app.update(id, String(updated.revision), { bodyDiff: ["+unanchored"] })).toThrow();
+  expect(() => app.update(id, String(updated.revision), { bodyDiff: ["@@ header"] })).toThrow();
+  expect(() => app.update(id, String(updated.revision), { bodyDiff, bodyEdits: [] })).toThrow();
+});

@@ -12,6 +12,7 @@ import { appendMemoryRead, type MemoryDecay } from "./memory-usage.js";
 export interface MemoryDraft { type: string; title: string; tags?: string[]; body: string; decay?: MemoryDecay }
 export interface MemoryPatch {
   title?: string; tags?: string[]; status?: string; decay?: MemoryDecay | null;
+  bodyDiff?: string[];
   bodyEdits?: Array<{ expectedText: string; replacementText: string }>;
 }
 export type MemoryConfirmationOperation = "delete" | "share";
@@ -93,8 +94,30 @@ export class MemoryApplication {
 
   update(id: string, ifRevision: string, patch: MemoryPatch) {
     if (!patch || Object.keys(patch).length === 0 ||
-        Object.keys(patch).some(key => !["title", "tags", "status", "decay", "bodyEdits"].includes(key))) {
+        Object.keys(patch).some(key => !["title", "tags", "status", "decay", "bodyEdits", "bodyDiff"].includes(key))) {
       fail("INVALID_INPUT", "Use targeted text edits or metadata changes; sharing requires confirmation");
+    }
+    if (patch.bodyDiff !== undefined) {
+      if (patch.bodyEdits !== undefined || !Array.isArray(patch.bodyDiff) ||
+          patch.bodyDiff.length < 1 || patch.bodyDiff.length > 20) {
+        fail("INVALID_INPUT", "Choose 1–20 diff hunks or bodyEdits");
+      }
+      const { bodyDiff, ...metadata } = patch;
+      const bodyEdits = bodyDiff.map(hunk => {
+        if (typeof hunk !== "string" || !hunk.length || hunk.length > 200_000) fail("INVALID_INPUT", "Invalid diff hunk");
+        const before: string[] = [], after: string[] = [];
+        let changed = false;
+        for (const line of hunk.split("\n")) {
+          const prefix = line[0], text = line.slice(1);
+          if (![" ", "+", "-"].includes(prefix!)) fail("INVALID_INPUT", "Prefix every diff line with space, +, or -; omit headers");
+          if (prefix !== "+") before.push(text);
+          if (prefix !== "-") after.push(text);
+          if (prefix !== " ") changed = true;
+        }
+        if (!changed || !before.join("\n")) fail("INVALID_INPUT", "Include existing context or removed text and a change");
+        return { expectedText: before.join("\n"), replacementText: after.join("\n") };
+      });
+      return this.run("update", { id, ifRevision, patch: { ...metadata, bodyEdits } });
     }
     return this.run("update", { id, ifRevision, patch });
   }
