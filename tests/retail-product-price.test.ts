@@ -45,17 +45,20 @@ describe("retail product prices", () => {
   ])("rejects Steam model and pricing mismatches", async (data) => {
     await expect(observeRetailProduct(args("steam-deck-512-oled", "78900"), async () => new Response(JSON.stringify({ "946113": { success: true, data } })))).rejects.toThrow();
   });
-  it("tracks the book in its native HKD currency", async () => {
-    const fetcher = shopify(30400, true, "HKD", 9095217185010);
+  it("pins the book's USD price on both requests", async () => {
+    const fetcher = shopify(3600, true, "USD", 9095217185010);
     const requested: string[] = [];
-    const result = await observeRetailProduct(args("book-on-zines", "38000"), async (url) => {
+    const result = await observeRetailProduct(args("book-on-zines", "4500"), async (url) => {
       requested.push(url);
       return fetcher(url);
     });
     expect(result.value).toBe(8000);
-    expect(result.display).toContain("HKD 304.00");
+    expect(result.display).toContain("USD 36.00");
     expect(requested).toHaveLength(2);
-    expect(requested.every((url) => new URL(url).searchParams.get("currency") === "HKD")).toBe(true);
+    expect(requested.every((url) => new URL(url).searchParams.get("currency") === "USD")).toBe(true);
+  });
+  it("rejects a book response that falls back to HKD", async () => {
+    await expect(observeRetailProduct(args("book-on-zines", "4500"), shopify(38000, true, "HKD", 9095217185010))).rejects.toThrow(/currency/);
   });
   it("rejects variant changes rather than switching the baseline to a different edition", async () => {
     await expect(observeRetailProduct(args(), async (url) => new Response(new URL(url).pathname.endsWith(".js") ? JSON.stringify({ id: 10002913526026, variants: [{ price: 500, available: true }, { price: 1500, available: true }] }) : 'Shopify.currency = {"active":"USD"};'))).rejects.toThrow(/variants/);
