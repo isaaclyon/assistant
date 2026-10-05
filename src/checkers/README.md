@@ -1,6 +1,9 @@
 # Heartbeat checkers
 
-Put repository-specific heartbeat checkers here as TypeScript. The normal build
+Put reusable heartbeat checkers here as TypeScript. Individual products, URLs,
+and baselines belong in private temporary task configuration, never constants
+in this directory. See the watch-prices skill for the price-watch lifecycle.
+The normal build
 emits them under `dist/src/checkers/`. Jobs refer to the filename stem as
 `checker.id`; the host resolves and executes that compiled JavaScript beside its
 own immutable-release modules, not source from the canonical checkout or a shell

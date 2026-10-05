@@ -38,6 +38,7 @@ Telegram. See [ADR-0046](docs/adr/0046-telegram-model-usage-and-pace.md).
 | 1Password agent vault token/config | `<configRoot>/onepassword/<credential-scope>.{token,json}` | User / credential provider |
 | Temporary browser handoff | `<browserRuntime>/handoff.{json,log}` and `handoff-password` | Browser handoff supervisor |
 | Scheduled job definitions | `<stateDir>/jobs.json` | Agent/user |
+| Temporary price-watch manifests | `<coordinatorStateDir>/temporary/price-watches/<id>/watch.json` | watch-prices skill/helper |
 | Scheduled job run state | `<stateDir>/jobs-state.json` | Host |
 | Materialized job occurrences and terminal identities | `<coordinatorStateDir>/job-occurrences.db` | Scheduler |
 | Recipient job claims, acceptance, and recovery evidence | `<stateDir>/job-handoffs/` | Host / explicit operator recovery |
@@ -93,6 +94,11 @@ are judged again; see
 bounded `checker.args` to a checker as one JSON argument, which lets the reusable
 `web-page-items` checker watch any public HTTPS page; see
 [ADR-0032](docs/adr/0032-pass-bounded-arguments-to-heartbeat-checkers.md).
+
+Price watches are temporary private task manifests, projected into scheduler
+jobs by a reusable helper. Product identities and baselines are configuration;
+the release contains only reusable source adapters and lifecycle guidance.
+See [ADR-0049](docs/adr/0049-temporary-price-watch-configuration.md).
 
 The places extension presents its deterministic Telegram UI through a
 pi-telegram registered section. Slash commands and active-turn tool handoffs

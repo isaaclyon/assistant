@@ -110,6 +110,11 @@
         "enabled": true
       },
       {
+        "id": "watch-prices",
+        "path": ".pi/skills/watch-prices/SKILL.md",
+        "enabled": true
+      },
+      {
         "id": "schedule-reminders-and-jobs",
         "path": ".pi/skills/schedule-reminders-and-jobs/SKILL.md",
         "enabled": true
@@ -166,6 +171,7 @@
         "find-places",
         "message-link",
         "schedule-reminders-and-jobs",
+        "watch-prices",
         "manage-ynab",
         "personal-memory",
         "plan-weekend",
@@ -181,6 +187,7 @@
         "check-weather",
         "message-link",
         "schedule-reminders-and-jobs",
+        "watch-prices",
         "manage-ynab",
         "personal-memory",
         "plan-weekend"
@@ -195,6 +202,7 @@
         "check-weather",
         "message-link",
         "schedule-reminders-and-jobs",
+        "watch-prices",
         "manage-ynab",
         "personal-memory",
         "plan-weekend"
@@ -209,6 +217,7 @@
         "check-weather",
         "extend-this-agent",
         "schedule-reminders-and-jobs",
+        "watch-prices",
         "track-improvement-ideas"
       ],
       "instructions": "telegram-default"

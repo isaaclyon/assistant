@@ -1,15 +1,11 @@
 import { fileURLToPath } from "node:url";
 import type { HeartbeatObservationV1 } from "../heartbeat.js";
+import { fetchPublicPrice, publicPriceUrl } from "../public-price-fetch.js";
 
-// Fixed public sources keep checker arguments from becoming arbitrary network requests.
-export const PRODUCTS = {
-  "book-on-zines": { url: "https://victionary.com/products/a-book-on-zines", currency: "USD", id: "9095217185010", kind: "shopify" },
-  "puppy-love-matches": { url: "https://maisongodillot.com/en-us/products/matchbox-puppy-love-archivist", currency: "USD", id: "10002913526026", kind: "shopify" },
-  "dog-gramaphone-matches": { url: "https://www.judyattherink.com/dog-and-gramaphone-square-safety-matches.html", currency: "USD", id: "B039", kind: "schema" },
-  "steam-deck-512-oled": { url: "https://store.steampowered.com/steamdeck?cc=us&l=english", currency: "USD", id: "946113", kind: "steam" },
-  "steam-deck-1tb-oled": { url: "https://store.steampowered.com/steamdeck?cc=us&l=english", currency: "USD", id: "946114", kind: "steam" },
-} as const;
-type ProductKey = keyof typeof PRODUCTS;
+export interface PriceSource {
+  url: string; currency: string; id: string; kind: "shopify" | "schema" | "steam";
+  variantId?: string; variantPolicy?: "lowest-available"; name?: string; country?: string;
+}
 type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
 type RecordValue = Record<string, unknown>;
 function record(value: unknown): RecordValue {
@@ -20,11 +16,26 @@ function cents(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) throw new Error("Invalid price");
   return value;
 }
-export function parseRetailArgs(raw: string | undefined): { product: ProductKey; baselineCents: number } {
+export function parseRetailArgs(raw: string | undefined): { source: PriceSource; baselineCents: number; mode: "ratio" | "price" } {
   const args = record(JSON.parse(raw ?? "{}"));
-  if (typeof args.product !== "string" || !Object.hasOwn(PRODUCTS, args.product)) throw new Error("Unknown product");
+  if (Object.keys(args).some(key => !["source", "baselineCents", "mode"].includes(key)) || typeof args.source !== "string" || args.source.length > 1024) throw new Error("Invalid source configuration");
+  const source = record(JSON.parse(args.source));
+  if (Object.keys(source).some(key => !["url", "currency", "id", "kind", "variantId", "variantPolicy", "name", "country"].includes(key)) ||
+      !["shopify", "schema", "steam"].includes(String(source.kind)) ||
+      typeof source.url !== "string" || typeof source.id !== "string" || !source.id || source.id.length > 100 ||
+      typeof source.currency !== "string" || !/^[A-Z]{3}$/.test(source.currency)) throw new Error("Invalid source");
+  // These adapters use currencies with two decimal minor units only.
+  if (!["USD", "EUR", "GBP", "CAD", "AUD", "HKD", "NZD", "CHF"].includes(source.currency)) throw new Error("Unsupported currency precision");
+  const url = publicPriceUrl(source.url);
+  if (source.variantId !== undefined && (typeof source.variantId !== "string" || !/^\d+$/.test(source.variantId))) throw new Error("Invalid variant");
+  if (source.variantPolicy !== undefined && (source.kind !== "shopify" || source.variantPolicy !== "lowest-available" || source.variantId !== undefined)) throw new Error("Invalid variant policy");
+  if (source.kind === "shopify" && (url.search || !/\/products\/[^/]+$/.test(url.pathname))) throw new Error("Expected canonical Shopify product URL");
+  if (source.kind === "steam" && (url.origin !== "https://store.steampowered.com" || !/^\d+$/.test(source.id) ||
+      typeof source.name !== "string" || !source.name || source.name.length > 200 ||
+      typeof source.country !== "string" || !/^[a-z]{2}$/.test(source.country))) throw new Error("Invalid Steam package");
+  if (args.mode !== undefined && args.mode !== "ratio" && args.mode !== "price") throw new Error("Invalid observation mode");
   if (typeof args.baselineCents !== "string" || !/^[1-9]\d*$/.test(args.baselineCents)) throw new Error("Invalid baseline");
-  return { product: args.product as ProductKey, baselineCents: cents(Number(args.baselineCents)) };
+  return { source: source as unknown as PriceSource, baselineCents: cents(Number(args.baselineCents)), mode: args.mode === "price" ? "price" : "ratio" };
 }
 async function read(url: string, fetcher: Fetcher): Promise<string> {
   const response = await fetcher(url, { signal: AbortSignal.timeout(15_000), redirect: "error", headers: { "user-agent": "pi-telegram-price-checker/1" } });
@@ -34,8 +45,8 @@ async function read(url: string, fetcher: Fetcher): Promise<string> {
   if (Buffer.byteLength(text) > 2_000_000) throw new Error("Product response too large");
   return text;
 }
-export async function observeRetailProduct(args: ReturnType<typeof parseRetailArgs>, fetcher: Fetcher = fetch): Promise<HeartbeatObservationV1> {
-  const product = PRODUCTS[args.product];
+export async function observeRetailProduct(args: ReturnType<typeof parseRetailArgs>, fetcher: Fetcher = fetchPublicPrice): Promise<HeartbeatObservationV1> {
+  const product = args.source;
   let price: number;
   let availability = "in-stock";
   if (product.kind === "shopify") {
@@ -48,8 +59,17 @@ export async function observeRetailProduct(args: ReturnType<typeof parseRetailAr
     const currency = page.match(/Shopify\.currency\s*=\s*\{\s*"active"\s*:\s*"([A-Z]{3})"/)?.[1];
     if (currency !== product.currency) throw new Error("Unexpected or missing currency");
     const data = record(JSON.parse(body));
-    if (String(data.id) !== product.id || !Array.isArray(data.variants) || data.variants.length !== 1) throw new Error("Product identity or variants changed");
-    const variant = record(data.variants[0]);
+    if (String(data.id) !== product.id || !Array.isArray(data.variants)) throw new Error("Product identity or variants changed");
+    let variants = product.variantId ? data.variants.map(record).filter(variant => String(variant.id) === product.variantId) : data.variants;
+    if (product.variantPolicy === "lowest-available") {
+      const all = data.variants.map(record);
+      if (!all.length || all.some(variant => typeof variant.available !== "boolean")) throw new Error("Missing availability");
+      for (const variant of all) cents(variant.price);
+      const available = all.filter(variant => variant.available);
+      variants = [(available.length ? available : all).sort((a, b) => Number(a.price) - Number(b.price))[0]];
+    }
+    if (variants.length !== 1) throw new Error("Missing or ambiguous variants");
+    const variant = record(variants[0]);
     if (typeof variant.available !== "boolean") throw new Error("Missing availability");
     availability = variant.available ? "in-stock" : "out-of-stock";
     price = cents(variant.price);
@@ -70,14 +90,13 @@ export async function observeRetailProduct(args: ReturnType<typeof parseRetailAr
     if (typeof offer.price !== "string" || !/^\d+\.\d{2}$/.test(offer.price)) throw new Error("Invalid price");
     price = cents(Math.round(Number(offer.price) * 100));
   } else {
-    const data = record(JSON.parse(await read(`https://store.steampowered.com/api/packagedetails?packageids=${product.id}&cc=us&l=english`, fetcher)));
+    const data = record(JSON.parse(await read(`https://store.steampowered.com/api/packagedetails?packageids=${product.id}&cc=${product.country}&l=english`, fetcher)));
     const entry = record(data[product.id]);
     if (entry.success !== true) throw new Error("Steam package unavailable");
     const details = record(entry.data);
-    const expected = args.product === "steam-deck-512-oled" ? "Steam Deck 512 GB OLED" : "Steam Deck 1 TB OLED";
-    if (details.name !== expected) throw new Error("Steam model changed");
+    if (details.name !== product.name) throw new Error("Steam model changed");
     const pricing = record(details.price);
-    if (pricing.currency !== "USD") throw new Error("Unexpected currency");
+    if (pricing.currency !== product.currency) throw new Error("Unexpected currency");
     price = cents(pricing.final);
     // Package pricing does not establish hardware stock. The alert turn verifies it.
     availability = "requires-verification";
@@ -85,9 +104,9 @@ export async function observeRetailProduct(args: ReturnType<typeof parseRetailAr
   return {
     version: 1,
     // basis points, rounded UP: never turn a near-20% discount into a match.
-    value: availability === "out-of-stock" ? 10000 : Math.ceil(price * 10000 / args.baselineCents),
+    value: availability === "out-of-stock" ? Number.MAX_SAFE_INTEGER : args.mode === "price" ? price / 100 : Number((BigInt(price) * 10000n + BigInt(args.baselineCents) - 1n) / BigInt(args.baselineCents)),
     display: `${product.currency} ${(price / 100).toFixed(2)} (${availability})`,
-    context: { url: product.kind === "shopify" ? `${product.url}?currency=${product.currency}` : product.url, product: args.product, currency: product.currency, priceCents: price, baselineCents: args.baselineCents, availability, shipping: "not included; verify before alert" },
+    context: { url: product.kind === "shopify" ? `${product.url}?currency=${product.currency}` : product.url, productId: product.id, currency: product.currency, priceCents: price, baselineCents: args.baselineCents, availability, shipping: "not included; verify before alert" },
   };
 }
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

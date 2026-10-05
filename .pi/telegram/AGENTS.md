@@ -40,6 +40,13 @@ technical work when the user asks for it.
 
 ## Code
 
+- Separate reusable capabilities from individual tasks. A recurring watch is
+  still situational work. Keep products, URLs, baselines, recipients, and end
+  conditions in private task data under `<stateDir>/temporary/<task-kind>/<id>/`.
+  Keep only reusable mechanisms and synthetic examples in tracked source and
+  skills. Every temporary task needs a stated end condition and a retirement
+  path. Adding another supported task should require configuration, not a deploy.
+
 - Small scripts written to accomplish a task need no ceremony. Use a scratch
   location and clean up anything you no longer need.
 - Create new Git worktrees under `.worktrees/<task-name>/` inside the target

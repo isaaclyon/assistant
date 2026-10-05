@@ -18,7 +18,22 @@
   gates and source-checked install patches, and do not auto-merge updates.
 - Do not enable or restart the live service during tests unless explicitly working on deployment.
 
-## Git worktrees
+## Durable capabilities and temporary tasks
+
+- Keep reusable mechanisms in skills and source. Keep individual requests,
+  products, people, URLs, baselines, deadlines, and task-specific state in
+  private task configuration outside the repository.
+- Recurring execution does not make a task durable infrastructure. Represent
+  situational work under `<stateDir>/temporary/<task-kind>/<task-id>/`, with
+  its purpose, creation date, end condition, and a retirement operation.
+- Before adding a capability, ask whether a new instance of the same task
+  could be configured without editing code or deploying. If not, separate
+  the reusable mechanism from the task data. Use synthetic examples in tests.
+- Do not turn a one-off workaround into a permanent adapter without evidence
+  that it represents a reusable interface. Unsupported sources can remain
+  temporary research tasks; they do not justify product-specific infrastructure.
+
+## Git worktree placement
 
 - Create new worktrees inside the repository's primary checkout at
   `.worktrees/<task-name>/`. Do not create sibling `assistant-*` directories or
