@@ -120,16 +120,73 @@ it("binds creation to its validated content, expires drafts, and accepts no scop
     .toThrow(/confirmation/);
 });
 
-it("applies diff hunks with revision checks and atomic conflicts", async () => {
+it("appends and edits atomically with metadata and revision checks", async () => {
   const { app, note } = await fixture();
   const id = String(note.id), revision = String(note.revision);
-  const bodyDiff = [" Quiet restaurants. Likes coffee.\n+- Gift idea"];
-  const updated = await app.update(id, revision, { bodyDiff });
-  expect(updated.body).toBe("Quiet restaurants. Likes coffee.\n- Gift idea");
-  await expect(app.update(id, revision, { bodyDiff })).rejects.toMatchObject({ code: "REVISION_CONFLICT" });
-  await expect(app.update(id, String(updated.revision), { bodyDiff: ["-- Gift idea\n+- Other", "-missing\n+new"] })).rejects.toMatchObject({ code: "TEXT_CONFLICT" });
+  const updated = await app.edit(id, revision, { append: "- Gift idea", set: { title: "Ideas" },
+    edits: [{ oldText: "coffee", newText: "tea" }] });
+  expect(updated.body).toBe("Quiet restaurants. Likes tea.\n- Gift idea");
+  expect(updated.title).toBe("Ideas");
+  await expect(app.edit(id, revision, { append: "- Duplicate" })).rejects.toMatchObject({ code: "REVISION_CONFLICT" });
+  await expect(app.edit(id, String(updated.revision), { set: { title: "Failed" }, append: "- Lost",
+    edits: [{ oldText: "tea", newText: "coffee" }, { oldText: "missing", newText: "new" }] })).rejects.toMatchObject({ code: "TEXT_CONFLICT" });
   expect((await app.read(id)).body).toBe(updated.body);
-  expect(() => app.update(id, String(updated.revision), { bodyDiff: ["+unanchored"] })).toThrow();
-  expect(() => app.update(id, String(updated.revision), { bodyDiff: ["@@ header"] })).toThrow();
-  expect(() => app.update(id, String(updated.revision), { bodyDiff, bodyEdits: [] })).toThrow();
+  expect((await app.read(id)).title).toBe("Ideas");
+  await expect(app.edit(id, String(updated.revision), { append: "" })).rejects.toMatchObject({ code: "INVALID_INPUT" });
+});
+
+it("lists bounded pages with filters and rejects stale pagination", async () => {
+  const { app, note } = await fixture();
+  const draft = await app.prepareCreate({ type: "list", title: "Gifts", body: "- Book" });
+  await app.create(draft.creationToken);
+  const page = await app.list({ limit: 1 });
+  expect(page.memories).toHaveLength(1);
+  expect(page.nextCursor).toBeTruthy();
+  const next = await app.list({ limit: 1, cursor: page.nextCursor! });
+  expect(next.memories).toHaveLength(1);
+  expect(next.memories[0]!.id).not.toBe(page.memories[0]!.id);
+  expect(next.nextCursor).toBeNull();
+  expect((await app.list({ types: ["list"] })).memories).toHaveLength(1);
+  await app.update(String(note.id), String(note.revision), { status: "archived" });
+  await expect(app.list({ limit: 1, cursor: page.nextCursor! })).rejects.toMatchObject({ code: "CURSOR_CONFLICT" });
+  expect((await app.list({})).memories).toHaveLength(1);
+  expect((await app.list({ statuses: ["archived"] })).memories).toHaveLength(1);
+});
+
+it("preserves append separators and rejects duplicate matches without writing", async () => {
+  const { app } = await fixture();
+  for (const body of ["", "Existing", "Existing\n", "Existing\n\n"]) {
+    const draft = await app.prepareCreate({ type: "list", title: "Append", body });
+    const note = await app.create(draft.creationToken);
+    const before = String((await app.read(String(note.id))).body);
+    const result = await app.edit(String(note.id), String(note.revision), { append: "- New" });
+    expect(result.body).toBe(before + (before && !before.endsWith("\n") ? "\n" : "") + "- New");
+  }
+  const draft = await app.prepareCreate({ type: "list", title: "Repeated", body: "- Book\n- Book" });
+  const note = await app.create(draft.creationToken);
+  await expect(app.edit(String(note.id), String(note.revision), {
+    edits: [{ oldText: "- Book", newText: "- Scarf" }], append: "- Lost",
+  })).rejects.toMatchObject({ code: "TEXT_CONFLICT" });
+  expect((await app.read(String(note.id))).body).toBe("- Book\n- Book");
+});
+
+it("filters list pages by the runtime principal and never returns other owners", async () => {
+  const { app, env, note } = await fixture();
+  await executeMemoryOperation("add", { type: "list", title: "Other owner", body: "Private" }, {
+    env: { ...env, PI_TELEGRAM_PRINCIPAL: "emma" },
+  });
+  const shared = await executeMemoryOperation("add", { type: "list", title: "Shared", body: "Household", scope: "household" }, { env });
+  expect((await app.list({})).memories.map(item => item.id).sort()).toEqual([note.id, shared.id].sort());
+  const household = new MemoryApplication({ env: { ...env, PI_TELEGRAM_PRINCIPAL: "household", PI_TELEGRAM_MEMORY_VIEW: "household" } });
+  expect((await household.list({})).memories.map(item => item.id)).toEqual([shared.id]);
+});
+
+it("allows only one of two concurrent appends against the same revision", async () => {
+  const { app, note } = await fixture();
+  const outcomes = await Promise.allSettled(["First", "Second"].map(append =>
+    app.edit(String(note.id), String(note.revision), { append })));
+  expect(outcomes.filter(item => item.status === "fulfilled")).toHaveLength(1);
+  expect(outcomes.filter(item => item.status === "rejected")).toHaveLength(1);
+  const body = String((await app.read(String(note.id))).body);
+  expect(body.includes("First") !== body.includes("Second")).toBe(true);
 });

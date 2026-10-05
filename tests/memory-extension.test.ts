@@ -52,13 +52,23 @@ it("exposes typed CRUD and user-only, single-use confirmation callbacks with no 
     const call = async (params: Record<string, unknown>) => (await tool.execute("test", params)).details;
     expect((await call({ action: "read", id: "anything" })).ok).toBe(false);
     handlers.get("session_start")!();
-    const preparation = await call({ action: "prepare_create", type: "preference", title: "Dining", body: "Quiet restaurants." });
-    expect(preparation, JSON.stringify(preparation)).toMatchObject({ ok: true });
+    const preparation = await call({ action: "create", draft: { type: "preference", title: "Dining", body: "Quiet restaurants." } });
+    expect(preparation, JSON.stringify(preparation)).toMatchObject({ ok: true, status: "review_required" });
+    expect((await call({ action: "list" })).result!.memories).toEqual([]);
     const draft = preparation.result!;
-    const added = (await call({ action: "create", creationToken: draft.creationToken })).result!;
+    const added = (await call({ action: "create", draftToken: draft.draftToken })).result!;
     expect((await call({ action: "read", id: added.id })).result!.body).toBe("Quiet restaurants.");
-    const pending = await call({ action: "request_share", id: added.id, ifRevision: added.revision });
-    expect(pending.result).toMatchObject({ status: "awaiting_confirmation" });
+    const saved = await call({ action: "update", id: added.id, revision: added.revision,
+      edits: [{ oldText: "Quiet", newText: "Small" }], append: "Likes tea.", set: { title: "Dining preferences" } });
+    expect(saved).toMatchObject({ ok: true, status: "saved", result: { type: "preference", title: "Dining preferences",
+      body: "Small restaurants.\nLikes tea." } });
+    expect(await call({ action: "update", id: added.id, revision: added.revision, append: "stale" }))
+      .toMatchObject({ ok: false, status: "conflict", error: { code: "REVISION_CONFLICT" } });
+    expect(await call({ action: "update", id: added.id, revision: saved.result!.revision, set: { scope: "household" } }))
+      .toMatchObject({ ok: false, status: "error" });
+    added.revision = saved.result!.revision;
+    const pending = await call({ action: "share", id: added.id, revision: added.revision });
+    expect(pending).toMatchObject({ status: "confirmation_required" });
     const button = presented.replyMarkup!.inline_keyboard[0]![0]!;
     const [action, token] = button.callback_data.split(":");
     expect(button.text).toBe("Confirm sharing");
@@ -75,18 +85,21 @@ it("exposes typed CRUD and user-only, single-use confirmation callbacks with no 
     expect(presented.text).toContain("expired");
 
     deliveryFails = true;
-    expect((await call({ action: "request_delete", id: shared.id, ifRevision: shared.revision })).ok).toBe(false);
+    expect((await call({ action: "delete", id: shared.id, revision: shared.revision })).ok).toBe(false);
     const failedToken = presented.replyMarkup!.inline_keyboard[0]![0]!.callback_data.split(":")[1]!;
     await section.handleCallback({ ...ctx, action: "confirm", payload: failedToken });
     expect((await call({ action: "read", id: added.id })).ok).toBe(true);
     deliveryFails = false;
-    await call({ action: "request_delete", id: shared.id, ifRevision: shared.revision });
+    await call({ action: "delete", id: shared.id, revision: shared.revision });
     const deleteToken = presented.replyMarkup!.inline_keyboard[0]![0]!.callback_data.split(":")[1]!;
     handlers.get("session_shutdown")!();
     handlers.get("session_start")!();
     await registry.getSections()[0]!.registration.handleCallback({ ...ctx, action: "confirm", payload: deleteToken });
     expect((await call({ action: "read", id: added.id })).ok).toBe(true);
     expect(JSON.stringify(tool.parameters)).not.toContain('"confirmationToken"');
+    for (const retired of ["prepare_create", "bodyDiff", "bodyEdits", "ifRevision", "request_delete", "request_share"]) {
+      expect(JSON.stringify(tool.parameters)).not.toContain(`"${retired}"`);
+    }
   } finally {
     handlers.get("session_shutdown")?.(); unbind(); registry.clear();
   }

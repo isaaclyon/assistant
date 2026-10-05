@@ -773,13 +773,15 @@ export function createMarkdownMemoryStore(options) {
       if (typeof ifRevision !== "string" || !patch || typeof patch !== "object" || Array.isArray(patch)) {
         fail("INVALID_INPUT", "Memory update is invalid");
       }
-      const allowed = new Set(["status", "decay", "scope", "title", "tags", "body", "bodyEdits"]);
+      const allowed = new Set(["status", "decay", "scope", "title", "tags", "body", "bodyEdits", "append"]);
       if (Object.keys(patch).some((key) => !allowed.has(key))) fail("INVALID_INPUT", "Memory update is invalid");
       if (Object.hasOwn(patch, "body") && Object.hasOwn(patch, "bodyEdits")) fail("INVALID_INPUT", "Choose body replacement or targeted edits");
       const location = await locate(id);
       const { note } = await readLocated(location);
       assertVisible(note);
       if (note.revision !== ifRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
+      if (Object.hasOwn(patch, "append") && (typeof patch.append !== "string" ||
+          !patch.append.trim() || patch.append.length > 200_000)) fail("INVALID_INPUT", "Append must contain nonempty Markdown");
       const scope = Object.hasOwn(patch, "scope")
         ? validateScope(patch.scope)
         : note.scope;
@@ -800,6 +802,11 @@ export function createMarkdownMemoryStore(options) {
           : Object.hasOwn(patch, "body") ? validateBody(patch.body) : note.body,
         updated: now().toISOString(),
       };
+      if (Object.hasOwn(patch, "append")) {
+        // Keep existing text intact; insert a separator only when needed.
+        updated.body = validateBody(updated.body +
+          (updated.body && !updated.body.endsWith("\n") ? "\n" : "") + patch.append);
+      }
       const raw = renderNote(updated);
       const tempPath = await writeTemp(dirname(location.path), id, raw);
       try {

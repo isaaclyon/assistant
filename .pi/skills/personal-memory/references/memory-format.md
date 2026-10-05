@@ -156,30 +156,47 @@ by `action`; identity and scope come from the runtime, never the request.
 
 ```json
 {"action":"read","id":"2f5f167d-7a18-4457-8de7-f2f801f1e934"}
-{"action":"prepare_create","type":"preference","title":"Coffee preference","body":"Prefers light-roast coffee."}
-{"action":"create","creationToken":"<token from prepare_create>"}
-{"action":"update","id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","ifRevision":"sha256:…","patch":{"bodyEdits":[{"expectedText":"light-roast","replacementText":"medium-roast"}]}}
-{"action":"request_delete","id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","ifRevision":"sha256:…"}
-{"action":"request_share","id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","ifRevision":"sha256:…"}
+{"action":"create","draft":{"type":"preference","title":"Coffee preference","body":"Prefers light-roast coffee."}}
+{"action":"create","draftToken":"<token from draft review>"}
+{"action":"update","id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","revision":"sha256:…","edits":[{"oldText":"light-roast","newText":"medium-roast"}]}
+{"action":"update","id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","revision":"sha256:…","append":"Also enjoys tea.","set":{"tags":["drinks"]}}
+{"action":"list","types":["list"],"limit":20}
+{"action":"delete","id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","revision":"sha256:…"}
+{"action":"share","id":"2f5f167d-7a18-4457-8de7-f2f801f1e934","revision":"sha256:…"}
 ```
 
-Responses use `{ok:true,result:…}` or `{ok:false,error:{code,message}}`.
+Responses use `{ok:true,status,result:…}` or `{ok:false,status,error:{code,message}}`.
+Operation status is `saved`, `read`, `listed`, `review_required`,
+`confirmation_required`, `conflict`, or `error`. It is separate from the
+note lifecycle status inside `result`. A successful mutation returns the
+actual note ID, type, title, and revision. Drafts and pending confirmations
+are successful requests, but are not saved memories.
 Preparation validates the draft and returns up to five `possibleDuplicates`
-from current hybrid search, retrieval status, and a `creationToken`. This does
+from current hybrid search, retrieval status, and a `draftToken`. This does
 not save a note; the first preparation may initialize an empty private vault.
 Candidates are related notes, not automatic duplicate judgments. Tokens bind
 the exact draft for ten minutes in the current session; repeated creation with
 the same token returns the same settled outcome, including an in-flight write.
 Reset/restart invalidates tokens, so search again before preparing a new one.
 
-Typed updates accept `title`, `tags`, `status`, and `bodyEdits`. Edits are ordered
-`expectedText`/`replacementText` pairs; each expected passage must occur exactly
+Typed updates accept `edits`, `append`, and metadata `set` (`title`, `tags`,
+`status`, `decay`). Edits are ordered `oldText`/`newText` pairs; each old passage must occur exactly
 once in the body at that step. A missing or repeated passage returns
-`TEXT_CONFLICT`. All edits and metadata changes commit together or none do.
-`ifRevision` remains mandatory. The CLI's ordinary update also supports
+`TEXT_CONFLICT`. Append runs after edits; it inserts a newline only when the
+existing body is nonempty and does not end in a newline. Existing text and
+supplied Markdown are otherwise preserved. Append must contain non-whitespace
+text. All edits, append, and metadata changes commit together or none do.
+`revision` remains mandatory. The CLI's maintenance update still uses `ifRevision` and
 `bodyEdits`, but cannot combine them with a complete `body` replacement.
 
-Delete and share requests return `awaiting_confirmation` and display a direct
+Listing returns bounded `memories` metadata and `nextCursor` (null at the end).
+Use the same filters on subsequent pages. Results sort by stable ID and default
+to active notes. Limit defaults to 20, maximum 100. Cursors bind the current
+visible metadata and filters; `CURSOR_CONFLICT` requires restarting the list.
+The implementation scans the visible vault for each page; pagination bounds
+output, not scan cost, and does not promise a persistent snapshot.
+
+Delete and share requests return `confirmation_required` and display a direct
 Telegram preview with Confirm/Cancel buttons. No authorization token is returned
 to the model and there is no model-callable approval action. A callback token
 binds the current instance/session, chat, operation, note ID, and revision. It

@@ -226,7 +226,10 @@ executor in `.pi/skills/personal-memory/scripts/memory.mjs`, including the
 mutation lock and optional Git preflight/commit. The CLI also exposes
 schema-checked lint and bounded `#core` preview operations. The memory extension
 owns session-local creation drafts and direct Telegram approval callbacks;
-see [ADR-0035](docs/adr/0035-typed-memory-operations.md). Core output is
+see [ADR-0035](docs/adr/0035-typed-memory-operations.md). Its standard CRUD
+interface uses exact text edits, atomic append, metadata set, and bounded
+listing; the CLI is a maintenance interface. See
+[ADR-0048](docs/adr/0048-standard-memory-interface.md). Core output is
 disposable derived state compiled directly from notes. A repo-local extension
 appends it to the system prompt at each `before_agent_start`, but only while the
 host's token-guarded process-local runtime marker is bound; ordinary Pi sessions
