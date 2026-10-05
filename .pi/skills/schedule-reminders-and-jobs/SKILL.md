@@ -193,6 +193,26 @@ credentials from the bridge's existing environment or credential stores.
 
 ### Rules
 
+`retail-product-price` reads fixed public retail sources with a job-owned price
+baseline. Args are `product` and `baselineCents` (a positive integer string in
+the source currency's minor units). Supported products: `book-on-zines` (HKD),
+`puppy-love-matches` (USD), `dog-gramaphone-matches` (USD),
+`steam-deck-512-oled` and `steam-deck-1tb-oled` (US/USD). Baselines stay fixed
+until explicitly edited; record their source and verification date in the job
+prompt. Shopify checks verify page currency, product identity, and availability;
+the matches HTML checker reads the exact Product offer. Steam's package API
+establishes price but not hardware stock: verify US availability before alerting.
+Shipping and tax are excluded from all observations.
+
+Its numeric value is current price divided by baseline in basis points, rounded
+up; unavailable items emit 10000. For **at least 20% off**, use a `less-than`
+condition with target `8001`. A `for: "1s"` condition still needs two successful
+matching observations: schedule e.g. `0,5 9 * * *` to confirm five minutes later
+rather than waiting another day. Notifications are once per sale episode, not
+every additional price cut. Failures preserve the last successful observation.
+New baseline prices must be verified in the source currency; never assume
+Shopify's integer price is USD or continually reset the baseline to sale prices.
+
 `changed` silently establishes its first successful observation as a baseline,
 then prompts once for each structurally different value:
 
