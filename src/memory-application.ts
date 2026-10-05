@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { executeMemoryOperation } from "../.pi/skills/personal-memory/scripts/memory.mjs";
 import { createMarkdownMemoryStore, MemoryError, validateMemoryDraft } from "../.pi/skills/personal-memory/scripts/store.mjs";
@@ -12,7 +12,7 @@ import { appendMemoryRead, type MemoryDecay } from "./memory-usage.js";
 export interface MemoryDraft { type: string; title: string; tags?: string[]; body: string; decay?: MemoryDecay }
 export interface MemoryPatch {
   title?: string; tags?: string[]; status?: string; decay?: MemoryDecay | null;
-  bodyDiff?: string[];
+  append?: string;
   bodyEdits?: Array<{ expectedText: string; replacementText: string }>;
 }
 export type MemoryConfirmationOperation = "delete" | "share";
@@ -94,32 +94,55 @@ export class MemoryApplication {
 
   update(id: string, ifRevision: string, patch: MemoryPatch) {
     if (!patch || Object.keys(patch).length === 0 ||
-        Object.keys(patch).some(key => !["title", "tags", "status", "decay", "bodyEdits", "bodyDiff"].includes(key))) {
+        Object.keys(patch).some(key => !["title", "tags", "status", "decay", "bodyEdits", "append"].includes(key))) {
       fail("INVALID_INPUT", "Use targeted text edits or metadata changes; sharing requires confirmation");
     }
-    if (patch.bodyDiff !== undefined) {
-      if (patch.bodyEdits !== undefined || !Array.isArray(patch.bodyDiff) ||
-          patch.bodyDiff.length < 1 || patch.bodyDiff.length > 20) {
-        fail("INVALID_INPUT", "Choose 1–20 diff hunks or bodyEdits");
-      }
-      const { bodyDiff, ...metadata } = patch;
-      const bodyEdits = bodyDiff.map(hunk => {
-        if (typeof hunk !== "string" || !hunk.length || hunk.length > 200_000) fail("INVALID_INPUT", "Invalid diff hunk");
-        const before: string[] = [], after: string[] = [];
-        let changed = false;
-        for (const line of hunk.split("\n")) {
-          const prefix = line[0], text = line.slice(1);
-          if (![" ", "+", "-"].includes(prefix!)) fail("INVALID_INPUT", "Prefix every diff line with space, +, or -; omit headers");
-          if (prefix !== "+") before.push(text);
-          if (prefix !== "-") after.push(text);
-          if (prefix !== " ") changed = true;
-        }
-        if (!changed || !before.join("\n")) fail("INVALID_INPUT", "Include existing context or removed text and a change");
-        return { expectedText: before.join("\n"), replacementText: after.join("\n") };
-      });
-      return this.run("update", { id, ifRevision, patch: { ...metadata, bodyEdits } });
-    }
     return this.run("update", { id, ifRevision, patch });
+  }
+
+  async edit(id: string, revision: string, changes: {
+    edits?: Array<{ oldText: string; newText: string }>;
+    append?: string;
+    set?: Pick<MemoryPatch, "title" | "tags" | "status" | "decay">;
+  }) {
+    if (Object.keys(changes).some(key => !["edits", "append", "set"].includes(key)) ||
+        (changes.set !== undefined && (!changes.set || Array.isArray(changes.set) ||
+          Object.keys(changes.set).some(key => !["title", "tags", "status", "decay"].includes(key))))) {
+      fail("INVALID_INPUT", "Use edits, append, and metadata set; sharing requires confirmation");
+    }
+    if (changes.edits !== undefined && (!Array.isArray(changes.edits) ||
+        changes.edits.length < 1 || changes.edits.length > 20 || changes.edits.some(edit =>
+          !edit || Object.keys(edit).some(key => !["oldText", "newText"].includes(key)) ||
+          typeof edit.oldText !== "string" || !edit.oldText || edit.oldText.length > 200_000 ||
+          typeof edit.newText !== "string" || edit.newText.length > 200_000))) {
+      fail("INVALID_INPUT", "Provide 1–20 exact oldText/newText edits");
+    }
+    return this.update(id, revision, { ...changes.set,
+      ...(changes.edits === undefined ? {} : { bodyEdits: changes.edits.map(edit => ({
+        expectedText: edit.oldText, replacementText: edit.newText,
+      })) }),
+      ...(changes.append === undefined ? {} : { append: changes.append }),
+    });
+  }
+
+  async list({ types, statuses, limit = 20, cursor }: {
+    types?: string[]; statuses?: string[]; limit?: number; cursor?: string;
+  }) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) fail("INVALID_INPUT", "List limit must be 1–100");
+    const result = await this.run("list", { types, statuses });
+    const memories = (result.memories as Array<Record<string, unknown>>).sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    const digest = createHash("sha256").update(JSON.stringify({ types: types?.slice().sort(),
+      statuses: statuses?.slice().sort(), memories })).digest("hex");
+    let offset = 0;
+    if (cursor !== undefined) {
+      if (typeof cursor !== "string" || !/^[0-9a-f]{64}:[0-9]{1,10}$/.test(cursor)) fail("INVALID_INPUT", "Invalid list cursor");
+      const [expected, position] = cursor.split(":");
+      if (expected !== digest) fail("CURSOR_CONFLICT", "Memories or filters changed; restart listing without a cursor");
+      offset = Number(position);
+      if (offset > memories.length) fail("INVALID_INPUT", "Invalid list cursor");
+    }
+    return { memories: memories.slice(offset, offset + limit),
+      nextCursor: offset + limit < memories.length ? `${digest}:${offset + limit}` : null };
   }
 
   async requestConfirmation(operation: MemoryConfirmationOperation, id: string, revision: string) {

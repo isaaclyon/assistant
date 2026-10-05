@@ -8,49 +8,60 @@ description: "Stores, recalls, corrects, and forgets explicitly requested person
 Durable personal memory lives in a private Markdown directory outside this
 repository (default `~/.local/share/pi-telegram-bridge/memory`). Retrieve it
 through `assistant_memory_search`. Use `assistant_memory` for full-note reads,
-creation, updates, deletion, and sharing. Use the CLI below for list/happenings
-queries, adding happenings, lint, and core inspection. Never edit files directly
+creation, updates, filtered listing, deletion, and sharing. The CLI is for
+maintenance such as lint and core inspection. Never edit files directly
 or interpolate user text into shell commands.
 
 ## Typed memory operations
 
 - `read`: pass the stable `id`; the result includes the body and current revision.
-- `prepare_create`: pass `type`, `title`, `body`, and optional `tags` and
-  `decay` (see Ranking and decay). Inspect
+- `create` with `draft`: pass `type`, `title`, `body`, and optional `tags` and
+  `decay` inside `draft` (see Ranking and decay). Inspect
   `possibleDuplicates`, which uses current hybrid search when configured.
   Related results are suggestions, not proven duplicates. Read candidates when
   needed; update a matching note instead of creating another.
-- `create`: pass the returned `creationToken` only for a distinct new note.
+- `create` with `draftToken`: pass the returned token only for a distinct new note.
   Preparation saves no note. Tokens bind the draft, expire after ten minutes,
   and return the same result on retries within that session. A reset invalidates
   them; search again before preparing a replacement.
-- `update`: pass `id`, `ifRevision`, and a patch of `title`, `tags`, `status`,
-  `decay`, or `bodyEdits`. Each edit contains `expectedText` and `replacementText`; expected
-  text must occur exactly once. Edits apply sequentially and all must succeed
-  before anything is written. To append text, replace a unique ending passage
-  with itself plus the addition.
-- `request_delete` / `request_share`: pass `id` and `ifRevision`. The direct
+- `update`: pass `id`, `revision`, and `edits`, `append`, and/or `set`.
+  Each edit contains `oldText` and `newText`; old text must occur exactly once.
+  Edits apply sequentially, then `append` adds Markdown at the end. Append
+  inserts one newline only when the existing body is nonempty and does not
+  already end with a newline; supplied Markdown is otherwise preserved.
+  `set` accepts `title`, `tags`, `status`, and `decay`. All changes succeed
+  together or leave the note unchanged. Use text edits for insertion under a
+  heading. There is no custom diff syntax or special list-item language.
+- `list`: optional `types`, `statuses` (default active), `limit` (1–100,
+  default 20), and `cursor`. Follow `nextCursor` with the same filters until
+  null. If the visible notes or filters change, restart on `CURSOR_CONFLICT`.
+- `delete` / `share`: pass `id` and `revision`. The direct
   Telegram section displays the version-bound preview and Confirm/Cancel
   buttons. Only its authorized callback can apply the change. Do not generate
   a prompt button, ask for a typed approval instead, or route around it with
-  shell/CLI calls. `awaiting_confirmation` is not persistence success.
+  shell/CLI calls. `confirmation_required` is not persistence success.
 
 If the typed tool is unavailable, report that limitation for protected actions.
 The CLI rejects deletion and personal-to-household promotion; a matching
 `confirmId` does not authorize either operation.
 
-### Diff edits
+### Examples and results
 
-The typed tool also accepts `patch.bodyDiff`, an array of 1–20 hunks.
-Each line starts with a space (unchanged context), `-` (removed text), or
-`+` (added text). Omit file headers, hunk headers, and line numbers.
-For example, `" - Book\n+- Scarf"` appends a bullet after the unique
-`- Book` line. Include enough existing context to match exactly once.
-Do not add an unprefixed trailing newline. Hunks apply sequentially and
-atomically using the same revision and text checks as `bodyEdits`.
-Choose one format per update. The CLI continues to accept `bodyEdits`.
+```json
+{"action":"update","id":"note-id","revision":"current-revision","edits":[{"oldText":"- Wool scarf","newText":"- Blue wool scarf"}]}
+{"action":"update","id":"note-id","revision":"current-revision","append":"- Ceramic vase"}
+{"action":"update","id":"note-id","revision":"current-revision","set":{"status":"archived"}}
+```
 
-## Invoking the CLI
+The tool returns `{ok, status, result}` or `{ok:false, status, error}`.
+`saved` means the mutation succeeded; its result identifies the actual note
+type, title, ID, and revision. `read` and `listed` are read-only successes.
+`review_required` and `confirmation_required` save nothing. `conflict` means
+reread (or restart listing); `error` means the operation failed.
+The note's lifecycle `result.status` is separate from the operation status.
+Never claim persistence from `ok:true` alone.
+
+## Maintenance CLI
 
 Run from the canonical repository cwd. The subcommand is the only argv; the
 request is exactly one JSON line delivered on stdin via a quoted heredoc, which
@@ -59,8 +70,8 @@ list. Write the JSON literally inside the heredoc — never interpolate it from
 shell variables or command substitution.
 
 ```bash
-node .pi/skills/personal-memory/scripts/memory.mjs list <<'EOF'
-{"types":["preference"]}
+node .pi/skills/personal-memory/scripts/memory.mjs lint <<'EOF'
+{}
 EOF
 ```
 
@@ -70,8 +81,8 @@ stderr. `lint` is the exception: an invalid vault still prints its complete
 `ok:true` report on stdout and exits `3`. Request and response shapes are in
 [references/memory-format.md](references/memory-format.md).
 
-Only claim something was remembered, updated, or forgotten after observing
-`ok:true` for that operation. Summarize results concisely; never dump raw JSON
+Only claim something was remembered or updated after observing `saved` from
+the tool; deletion is reported by its confirmation callback. Summarize results concisely; never dump raw JSON
 envelopes, full note bodies, or error objects to the user.
 
 When Git auto-commit is enabled, mutating responses include `git.committed`.
@@ -87,7 +98,7 @@ changed.
   statements, infer preferences, or derive facts from behavior.
 - Refuse to store credentials, auth tokens, full card numbers, or other
   secrets. Store purchase and reference notes only on explicit request.
-- Use `prepare_create` before creating. If an existing note clearly covers the
+- Use `create` with a draft before committing its token. If an existing note clearly covers the
   same fact, update it instead. Ask only when the target or content is materially
   ambiguous. If semantic retrieval is unavailable, the preparation reports
   keyword fallback; do not treat the suggestions as exhaustive.
@@ -120,8 +131,8 @@ changed.
   person, pet, place, event, preference, or other saved fact, search memory
   first unless the conversation clearly establishes a public or general topic.
   Do not jump to web search or ask for clarification before this lookup.
-- Use the `assistant_memory_search` tool for retrieval. Fall back to the CLI's
-  `search` scan only if that tool fails. Use `assistant_memory` with `read` for the relevant top result(s)
+- Use the `assistant_memory_search` tool for retrieval. If search fails, use
+  filtered `list` and report the retrieval limitation. Use `assistant_memory` with `read` for the relevant top result(s)
   when the bounded search metadata and snippet are insufficient.
 - Use `assistant_session_search` instead when the user asks what was discussed, decided,
   attempted, or observed in an earlier conversation. Session evidence is
@@ -136,11 +147,11 @@ changed.
 ## Correct
 
 - Search and `read` the note to obtain its current `revision`, then `update`
-  with `ifRevision` and a patch containing only the requested changes
-  (`title`, `tags`, `bodyEdits`, and/or `status`). Use unique expected text for
+  with `revision` and only the requested `edits`, `append`, or metadata `set`.
+  Use unique old text for
   body changes so unrelated passages remain intact; unknown frontmatter is preserved.
 - Treat promotion from `personal` to `household` as an explicit disclosure:
-  use `request_share` to present the user-only confirmation. This shares the
+  use `share` to present the user-only confirmation. This shares the
   whole note. A household bot cannot demote or claim ownership of a personal note.
 - On `REVISION_CONFLICT` or `TEXT_CONFLICT`, reread the note and reconsider the
   requested edit. Do not silently replace the whole body to bypass a conflict.
@@ -190,7 +201,7 @@ changed.
   propose the link rather than silently adding it when the relationship is not
   sufficiently certain; add it after the user explicitly requests or confirms
   it. Do not present an inferred link as an established fact.
-- Verify every add or backlink update with an `ok:true` mutation result before
+- Verify every add or backlink update with a `saved` mutation result before
   claiming the relationship is linked.
 
 ## Session provenance
@@ -209,7 +220,7 @@ changed.
 
 - Find the exact note and show the user a minimal preview (title, type, date —
   not the body) before doing anything.
-- Call `request_delete` with the current `ifRevision`. The direct Telegram
+- Call `delete` with the current `revision`. The direct Telegram
   confirmation executes the exact deletion once and reports its result.
   Expired, cancelled, stale, or session-reset buttons cannot authorize deletion.
 - Deletion permanently removes the canonical note only. When material, explain
@@ -244,9 +255,9 @@ Entity notes may contain a strict, Obsidian-friendly history section:
 Happenings use date-only `YYYY-MM-DD` values, ordinary Markdown bullets, and
 chronological order. They are historical context, not an operational change
 log, and should normally live on the relevant entity note rather than in a
-separate note. Add them through the CLI's `happening-add` operation so the
-section stays parseable and revision-safe. Use `happenings` for global queries
-with optional `from`, `to`, `query`, `types`, and `limit` filters. Existing
+separate note. Read the current note, then use ordinary text edits to maintain
+the exact heading, date format, chronological order, and avoid duplicates.
+Use memory search to find historical occurrences. Existing
 notes are not migrated automatically; stable facts remain stable facts, while
 new dated occurrences belong in `## Happenings`.
 
