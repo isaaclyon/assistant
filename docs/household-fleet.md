@@ -118,6 +118,13 @@ home. Broker configuration and its service-account token are mode `0600` and
 owned by the separate broker identity. Provision the required Node version
 outside administrative home directories; the OS's default Node may be too old.
 
+Provision the runtime's destination-only 1Password config and token under
+`<configRoot>/onepassword/` as root-owned mode `0440` files, with the runtime's
+primary group. Their canonical parent directories must be root-owned and not
+group- or world-writable. The credential provider also supports service-owned
+mode `0600` files for ordinary user deployments. Keep the broker's source-vault
+token separate and inaccessible to the runtime.
+
 Before registering that production routing file, use a separate root-owned
 policy path for inventory and rehearsals. The built coordinator accepts:
 

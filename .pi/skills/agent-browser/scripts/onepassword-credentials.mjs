@@ -4,8 +4,6 @@ import { spawnSync } from "node:child_process";
 import {
   chmod,
   mkdir,
-  lstat,
-  readFile,
   rename,
   rm,
   writeFile,
@@ -13,6 +11,7 @@ import {
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { readPrivateCredentialFile } from "../../../lib/private-credential-file.mjs";
 
 const PROTOCOL = "agent-browser.plugin.v1";
 const SCOPES = new Set([
@@ -62,18 +61,7 @@ function resolvedScope() {
 }
 
 async function readPrivateFile(path) {
-  const metadata = await lstat(path);
-  if (!metadata.isFile()) {
-    throw new Error("1Password credential paths must be regular files");
-  }
-  if ((metadata.mode & 0o777) !== 0o600) {
-    throw new Error("1Password credential files must have mode 0600");
-  }
-  const uid = process.getuid?.();
-  if (uid !== undefined && metadata.uid !== uid) {
-    throw new Error("1Password credential files must be owned by the service user");
-  }
-  return await readFile(path, "utf8");
+  return readPrivateCredentialFile(path);
 }
 
 function parseTargetUrl(raw) {
