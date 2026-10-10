@@ -51,6 +51,7 @@ function isCredentialScope(value: string): value is CredentialScope {
 export async function validateCredentialEnvironmentFile(
   path: string,
   expectedScope: string,
+  expectedUid = process.getuid?.(),
 ): Promise<CredentialEnvironmentSummary> {
   if (!isCredentialScope(expectedScope)) {
     throw new Error(`Unknown credential scope: ${expectedScope}`);
@@ -61,8 +62,7 @@ export async function validateCredentialEnvironmentFile(
   if (!administratorOwned && (metadata.mode & 0o777) !== 0o600) {
     throw new Error(`Credential environment file must have mode 0600: ${path}`);
   }
-  const currentUid = process.getuid?.();
-  if (!administratorOwned && currentUid !== undefined && metadata.uid !== currentUid) {
+  if (!administratorOwned && expectedUid !== undefined && metadata.uid !== expectedUid) {
     throw new Error(`Credential environment file must be owned by the service user: ${path}`);
   }
 

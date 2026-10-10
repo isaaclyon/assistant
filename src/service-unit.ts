@@ -60,6 +60,7 @@ export interface IsolatedInstanceServiceUnitOptions extends InstanceServiceUnitO
   privateHome: string;
   networkNamespace: string;
   resolverPath: string;
+  auditPolicyPath: string;
   trustedSocket: string;
   browserAddress: string;
   privateInputOrigin: string;
@@ -90,7 +91,7 @@ export function renderIsolatedInstanceServiceUnit(
   const insideHome = (path: string) => path === privateHome || path.startsWith(`${privateHome}${sep}`);
   const mutable = [config.agentDir, config.stateRoot, config.stateDir, config.sessionDir, config.workspaceCwd];
   const immutable = [options.manifestPath, options.nodePath, options.projectDir, config.resourceRoot,
-    config.configRoot, config.environmentFilePath, options.resolverPath];
+    config.configRoot, config.environmentFilePath, options.resolverPath, options.auditPolicyPath];
   for (const path of [...mutable, ...immutable]) {
     if (!isAbsolute(path) || normalize(path) !== path || /[\r\n\0%]/.test(path)) {
       throw new Error("Isolated service paths must be normalized absolute paths without unit specifiers");
@@ -111,8 +112,10 @@ export function renderIsolatedInstanceServiceUnit(
     "RestrictSUIDSGID=yes", "ProtectKernelTunables=yes", "ProtectKernelModules=yes",
     "ProtectControlGroups=yes", "RestrictRealtime=yes", "LockPersonality=yes",
     "ProtectProc=invisible",
+    "PassEnvironment=PI_TELEGRAM_RECOVERY_AUTHORIZATION",
+    `ExecStartPre=${quote(options.nodePath)} ${quote(join(options.projectDir, "dist/src/isolation-start-check.js"))} ${quote(options.auditPolicyPath)} ${options.networkNamespace}`,
     `NetworkNamespacePath=/run/netns/${options.networkNamespace}`,
-    `BindReadOnlyPaths=${quote(`${options.resolverPath}:/etc/resolv.conf`)}`,
+    `BindReadOnlyPaths=${quote(options.resolverPath)}:/etc/resolv.conf`,
     ...Object.entries(endpointEnv).map(([key, value]) => `Environment=${quote(`${key}=${value}`)}`),
     `ReadWritePaths=${quote(privateHome)}`, `Environment=${quote(`HOME=${privateHome}`)}`,
   ].join("\n");

@@ -63,6 +63,32 @@ remains limited to the existing [OpenTable specialization](private-browser-input
 with its audited sender, recipient, freshness and challenge checks. Passkeys
 still require a compatible authenticator in remote Chrome.
 
+## Source-vault approval in an isolated deployment
+
+When a separately provisioned trusted broker is available,
+`find_login_candidates` returns nonsecret source item references for the exact
+website. Pass a selected `source:<item-id>` as `credentialItem`, with a short
+`purpose`, to `private_browser_login`. The protected browser operation waits
+while the broker sends the paired user a Telegram approval identifying the
+assistant, login/account, source vault, website and purpose.
+
+- **Allow Once** authorizes one protected username/password sign-in operation.
+  It creates no destination item; website cookies may remain reusable.
+- **Always Allow** creates an independent destination Login with only the
+  username, password and website, then verifies it before delivery.
+- **Deny**, cancellation and expiry release nothing.
+
+The broker binds decisions to the shown message, item version and exact origin.
+It consumes a decision once, including across restarts. It never retries an
+ambiguous website submission or uncertain vault creation automatically. A
+verified copy remains a successful copy even when website sign-in fails; these
+outcomes are reported separately. Source edits do not update an existing copy.
+Manual verification codes and takeover retain the existing supported behavior.
+
+This flow requires the [isolated runtime and broker](household-fleet.md#isolated-personal-deployment);
+the ordinary runtime has no source-vault approval authority. Production enablement
+requires real Telegram, synthetic-vault and protected-browser acceptance.
+
 ## Privacy and recovery
 
 The operation holds the stock session mutex and durable crash gate, and detaches

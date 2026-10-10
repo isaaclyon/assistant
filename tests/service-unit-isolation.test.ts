@@ -20,6 +20,7 @@ const options = {
   releaseSha: "a".repeat(40), user: "test-personal", group: "test-personal",
   privateHome: "/var/lib/test-personal",
   networkNamespace: "pi-synthetic", resolverPath: "/etc/test-personal/resolv.conf",
+  auditPolicyPath: "/etc/test-personal/isolation-policy.json",
   trustedSocket: "/run/pi-broker-test/telegram.sock", browserAddress: "10.253.250.2",
   privateInputOrigin: "https://test.tail123.ts.net:8446", privateTakeoverOrigin: "https://test.tail123.ts.net:8447",
 };
@@ -33,6 +34,7 @@ describe("isolated personal system unit", () => {
     expect(contents).toContain("ProtectSystem=strict");
     expect(contents).toContain("ProtectHome=yes");
     expect(contents).toContain("NetworkNamespacePath=/run/netns/pi-synthetic");
+    expect(contents).toContain('BindReadOnlyPaths="/etc/test-personal/resolv.conf":/etc/resolv.conf');
     expect(contents).toContain("PI_TELEGRAM_TRUSTED_SOCKET=/run/pi-broker-test/telegram.sock");
     expect(contents).toContain('ReadWritePaths="/var/lib/test-personal"');
     expect(contents).toContain('Environment="PI_CODING_AGENT_DIR=/var/lib/test-personal/agent"');

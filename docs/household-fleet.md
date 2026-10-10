@@ -28,8 +28,10 @@ environment must independently contain the allowed scoped key.
 | `shared` | one exact group, two exact actors | household only | household only | shared assistant |
 | `builder` | private chat | none | engineering only | capability/code maintenance |
 
-These are semantic enforcement boundaries, not operating-system sandboxes. All
-processes run as the same Unix user. The host enforces the manifest invariants,
+In the ordinary user-manager fleet these are semantic enforcement boundaries;
+processes run as the same Unix user. The optional
+[isolated personal deployment](#isolated-personal-deployment) adds an OS boundary
+and a separate trusted broker. The host enforces the manifest invariants,
 loads only the selected release-local resources, injects the trusted principal
 and memory view, and validates credential key namespaces before startup.
 Unauthorized group updates are rejected in the Telegram transport before Pi
@@ -98,6 +100,65 @@ Credential rotation is file replacement followed by fleet deployment or a
 targeted service restart. Write a new mode-`0600` file atomically, run preflight,
 restart only the affected instance, and verify its exact runtime metadata. Keep
 the prior value available in the secret manager until the smoke test succeeds.
+
+## Isolated personal deployment
+
+This mode requires administrator provisioning and the acceptance gates in the
+[migration plan](personal-runtime-isolation-plan.md). It supports one isolated
+personal system service alongside separately managed user services. It does
+not activate merely by deploying these modules.
+
+Keep the routing policy at
+`/etc/pi-telegram-bridge/isolated-deployment.json`, under canonical root-owned
+ancestry. `src/isolated-deployment-config.ts` defines its strict schema: numeric
+service identities, private roots, a root-owned Node executable and release
+directory, checkpoint directory, network namespace and fixed browser endpoints.
+Personal configuration and the self-only manifest remain outside its writable
+home. Broker configuration and its service-account token are mode `0600` and
+owned by the separate broker identity. Provision the required Node version
+outside administrative home directories; the OS's default Node may be too old.
+
+Before registering that production routing file, use a separate root-owned
+policy path for inventory and rehearsals. The built coordinator accepts:
+
+```text
+node dist/src/isolated-deploy-cli.js <full-sha> <built-source-release> inventory <policy-path> <migration-path>
+node dist/src/isolated-deploy-cli.js <full-sha> <built-source-release> preflight <policy-path> [migration-path]
+node dist/src/isolated-deploy-cli.js <full-sha> <built-source-release> activate <policy-path> [migration-path]
+```
+
+Run these commands as the administrator with bounded execution. Inventory
+prints role names, counts and sizes. Preflight stages and verifies the immutable
+release and checks configuration without stopping writers. Registering the
+production routing file makes normal `activate-fleet.sh` deployments delegate
+to this coordinator; the old direct user-service installer then refuses to run.
+
+The optional, one-time migration plan uses the schema in
+`src/isolated-migration.ts`. Select each state, session, memory, browser,
+workspace and scoped credential asset explicitly. Never select the entire
+administrator home or global Pi directory. List exact exclusions and explicit
+JSON/session-header path transformations. Embedded operational paths in free
+text fail for operator correction; conversation message bytes remain intact.
+An optional named Telegram selection transfers its real token and next update
+offset only after the old poller stops. The runtime receives only that selected
+profile with a surrogate token. An absent saved offset starts at zero without
+discarding pending updates.
+
+Activation places maintenance holds, stops and disables all configured writers,
+verifies quiescence, captures the paired checkpoint, then refreshes migration
+assets from the stopped sources. It retains original selected bytes and replaced
+destinations. Completed unchanged migrations are idempotent; partial migration
+requires inspection. The candidate-started barrier forbids refreshing from old
+poller state after any candidate starts. The coordinator installs and verifies
+the protected runtime, network, broker and private browser proxies before
+clearing holds. It masks the old personal user unit.
+
+On failure, retain the holds and checkpoint. Verify all writers are stopped;
+inspect the underlying administrator diagnostic and reconcile accepted work.
+The offline `restoreIsolatedRecovery` helper permits only pre-start restoration;
+there is no automatic post-start rollback. Never resume the old poller over a
+discarded broker queue or rewind consumed approvals. Application rollback after
+startup requires preserving current state and explicit reconciliation.
 
 ## Inactivity-based session rotation
 

@@ -43,6 +43,11 @@ describe("paired recovery snapshot rehearsal", () => {
     await rm(daemon); await originalFs.symlink(join(f.stateRoot, "jobs-state.json"), daemon);
     await expect(captureRecoverySnapshot(f)).rejects.toThrow(/release.*symlink/i);
   });
+  it("rejects release entries writable by another identity", async () => {
+    const f = await fixture();
+    await originalFs.chmod(join(f.release, "dist", "src", "daemon.js"), 0o666);
+    await expect(captureRecoverySnapshot(f)).rejects.toThrow("untrusted modification");
+  });
   it("captures in-tree release hard links and rejects ones shared outside the release", async () => {
     const f = await fixture();
     const binary = join(f.release, "node_modules", "pkg", "bin", "tool");
