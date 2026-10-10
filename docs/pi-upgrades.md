@@ -42,8 +42,9 @@ release is not permission to float these dependencies or ignore patch guards.
 1. Work in an isolated checkout. Read the changes since the installed release,
    especially session persistence, provider context, extension events, tools,
    and CLI flags. Use the candidate package's own docs and declarations.
-2. Update all four Pi pins and regenerate `package-lock.json`. Check all five
-   source/version-checked install patches still apply. Keep any fork adjustment
+2. Update all four Pi pins and regenerate `package-lock.json`. Check all
+   source/version-checked install patches still apply, including proactive
+   `NO_REPLY` suppression (`tests/telegram-silent-veto.test.ts`). Keep any fork adjustment
    in its own reviewed commit and pin that complete SHA.
 3. Run `npm ci`, `npm run check`, and `npm run build`. For focused diagnosis,
    use `npm run test:pi-compat`.

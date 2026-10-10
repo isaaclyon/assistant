@@ -23,6 +23,7 @@ export type HeartbeatCheckerArgs = Record<string, string | string[]>;
 export interface HeartbeatChecker {
   id: string;
   args?: HeartbeatCheckerArgs;
+  mode?: "incremental";
 }
 
 export interface ChangedRule {
@@ -86,6 +87,7 @@ export interface HeartbeatRunner {
 
 interface StoredObservation {
   value: JsonValue;
+  cursor?: JsonObject;
   display?: string;
   context?: JsonObject;
   observedAt: number;
@@ -384,6 +386,12 @@ export function parseHeartbeatFields(
   }
 
   const triggerValue = entry.onTrigger;
+  if (isRecord(checkerValue) && checkerValue.mode !== undefined) {
+    if (checkerValue.mode !== "incremental" || rule?.type !== "semantic-match") {
+      errors.push(`${label}: checker.mode must be incremental and requires semantic-match`);
+      valid = false;
+    } else if (checker) checker.mode = "incremental";
+  }
   let onTrigger: PromptTrigger | undefined;
   if (!isRecord(triggerValue) || triggerValue.type !== "prompt") {
     errors.push(`${label}: "onTrigger" must be an object with type "prompt"`);
@@ -416,11 +424,12 @@ export function runCompiledHeartbeatChecker(
   checkerId: string,
   timeoutMs: number,
   args?: HeartbeatCheckerArgs,
+  cursor?: JsonObject | null,
 ): Promise<HeartbeatCheckResult> {
   const argv = [resolveHeartbeatCheckerPath(checkerId)];
   if (args !== undefined) argv.push(JSON.stringify(args));
   return new Promise((resolve) => {
-    execFile(
+    const child = execFile(
       process.execPath,
       argv,
       { timeout: timeoutMs, maxBuffer: 1024 * 1024 },
@@ -428,12 +437,14 @@ export function runCompiledHeartbeatChecker(
         resolve({ ok: !error, stdout: stdout ?? "" });
       },
     );
+    child.stdin?.on("error", () => { /* process failure is handled above */ });
+    child.stdin?.end(cursor === undefined ? "" : JSON.stringify({ version: 1, cursor }));
   });
 }
 
-function parseObservation(stdout: string, observedAt: number): StoredObservation {
-  if (Buffer.byteLength(stdout, "utf8") > MAX_OBSERVATION_BYTES) {
-    throw new Error("checker stdout exceeds 4 KB");
+function parseObservation(stdout: string, observedAt: number, incremental = false): StoredObservation {
+  if (Buffer.byteLength(stdout, "utf8") > (incremental ? 64 * 1024 : MAX_OBSERVATION_BYTES)) {
+    throw new Error(`checker stdout exceeds ${incremental ? 64 : 4} KB`);
   }
   let parsed: unknown;
   try {
@@ -441,8 +452,12 @@ function parseObservation(stdout: string, observedAt: number): StoredObservation
   } catch {
     throw new Error("checker stdout is not valid JSON");
   }
-  if (!isRecord(parsed) || parsed.version !== 1 || !hasOwn(parsed, "value")) {
-    throw new Error('checker stdout must be an observation object with "version": 1 and "value"');
+  if (!isRecord(parsed) || parsed.version !== (incremental ? 2 : 1) || !hasOwn(parsed, "value")) {
+    throw new Error('checker stdout must be an observation object with the expected "version" and "value"');
+  }
+  if (incremental && (!isRecord(parsed.cursor) || !isJsonValue(parsed.cursor) ||
+    Buffer.byteLength(JSON.stringify(parsed.cursor)) > 32 * 1024)) {
+    throw new Error("incremental observation requires a JSON cursor of at most 32 KB");
   }
   if (!isJsonValue(parsed.value)) throw new Error("checker observation value must be valid JSON");
   if (
@@ -460,6 +475,7 @@ function parseObservation(stdout: string, observedAt: number): StoredObservation
   }
   return {
     value: parsed.value,
+    ...(incremental ? { cursor: parsed.cursor as JsonObject } : {}),
     observedAt,
     ...(parsed.display === undefined ? {} : { display: parsed.display as string }),
     ...(parsed.context === undefined ? {} : { context: parsed.context as JsonObject }),
@@ -474,6 +490,7 @@ function isStoredObservation(value: unknown): value is StoredObservation {
   if (!isRecord(value) || !hasOwn(value, "value") || !isJsonValue(value.value)) return false;
   if (typeof value.observedAt !== "number" || !Number.isFinite(value.observedAt)) return false;
   if (value.display !== undefined && typeof value.display !== "string") return false;
+  if (value.cursor !== undefined && (!isRecord(value.cursor) || !isJsonValue(value.cursor))) return false;
   return (
     value.context === undefined ||
     (isRecord(value.context) && Object.values(value.context).every(isJsonValue))
@@ -673,6 +690,7 @@ async function evaluateSemanticObservation(
   previousObservation: StoredObservation | null,
   currentObservation: StoredObservation,
   judge: SemanticJudge,
+  incremental = false,
 ): Promise<SemanticEvaluation> {
   // The first successful observation is a silent baseline, as with `changed`.
   if (previousObservation === null) return { matches: [], judged: 0 };
@@ -683,7 +701,7 @@ async function evaluateSemanticObservation(
     return { matches: [], judged: 0 };
   }
   const fresh = parseSemanticItems(currentObservation.value).filter(
-    (item) => !previousIds.has(item.id as string),
+    (item) => incremental || !previousIds.has(item.id as string),
   );
   if (fresh.length === 0) return { matches: [], judged: 0 };
 
@@ -729,6 +747,7 @@ export function createHeartbeatRunner({
     checkerId: string,
     timeoutMs: number,
     args?: HeartbeatCheckerArgs,
+    cursor?: JsonObject | null,
   ) => Promise<HeartbeatCheckResult>;
   inject: (
     prompt: string,
@@ -812,7 +831,9 @@ export function createHeartbeatRunner({
       let result: HeartbeatCheckResult;
       try {
         result =
-          job.checker.args === undefined
+          job.checker.mode === "incremental"
+            ? await runCheck(job.checker.id, checkTimeoutMs, job.checker.args, state.lastObservation?.cursor ?? null)
+            : job.checker.args === undefined
             ? await runCheck(job.checker.id, checkTimeoutMs)
             : await runCheck(job.checker.id, checkTimeoutMs, job.checker.args);
       } catch (error) {
@@ -830,7 +851,11 @@ export function createHeartbeatRunner({
 
       let currentObservation: StoredObservation;
       try {
-        currentObservation = parseObservation(result.stdout, now);
+        currentObservation = parseObservation(result.stdout, now, job.checker.mode === "incremental");
+        if (job.checker.mode === "incremental" && state.lastObservation === null &&
+          parseSemanticItems(currentObservation.value).length !== 0) {
+          throw new Error("incremental checker must establish an empty initial baseline");
+        }
         if (job.rule.type === "condition" && typeof currentObservation.value !== "number") {
           throw new Error('condition rule requires a numeric observation "value"');
         }
@@ -854,7 +879,14 @@ export function createHeartbeatRunner({
             state.lastObservation,
             currentObservation,
             judge,
+            job.checker.mode === "incremental",
           );
+          if (evaluation.matches.length > 0 && Buffer.byteLength(eventPrompt(job, {
+            type: "semantic-match", currentObservation, matches: evaluation.matches,
+            model: evaluation.model ?? "unknown",
+          })) > 32 * 1024) {
+            throw new Error("semantic event exceeds the 32 KB handoff limit; reduce checker batch size");
+          }
         } catch (error) {
           // A judge failure is not a "no": keep the old baseline so these items are judged again.
           await persistFailure(job, state, now);
