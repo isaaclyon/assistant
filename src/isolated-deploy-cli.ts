@@ -12,7 +12,7 @@ import { evaluateIsolationIdentity, parseLinuxProcessStatus } from "./isolation-
 import { renderIsolationSupportUnits } from "./isolation-support-units.js";
 import { activateIsolatedDeployment } from "./isolated-deployment.js";
 import { applyIsolatedMigration, inventoryIsolatedMigration, type IsolatedMigrationPlan } from "./isolated-migration.js";
-import { migrateTelegramOwnership, splitTelegramOwnership } from "./isolated-telegram-migration.js";
+import { migrateTelegramOwnership, parsePrivateTelegramJson, splitTelegramOwnership } from "./isolated-telegram-migration.js";
 import { loadIsolatedDeploymentConfig, type ManagedRuntime } from "./isolated-deployment-config.js";
 import { captureIsolatedRecovery, markIsolatedRecoveryStarted, setTreeOwnership, writeDurableExclusive, type IsolatedRecoverySource } from "./isolated-recovery.js";
 import { assertConfiguredBridgeUnits, assertServiceQuiescent, controlService, systemManager, type ManagedService } from "./isolated-service-control.js";
@@ -96,13 +96,13 @@ async function preflight(): Promise<void> {
   const endpoint = JSON.parse(await readFile(policy.endpointConfigPath, "utf8"));
   if (endpoint.PI_PRIVATE_BROWSER_BIND_ADDRESS !== policy.network.runtimeAddress || endpoint.PI_PRIVATE_INPUT_ORIGIN !== policy.privateInputOrigin ||
       endpoint.PI_PRIVATE_TAKEOVER_ORIGIN !== policy.privateTakeoverOrigin) throw new Error("Private endpoint configuration differs from deployment policy");
-  const broker = parseTrustedBrokerConfig(JSON.parse(await readFile(policy.broker.configPath, "utf8")));
+  const broker = parseTrustedBrokerConfig(parsePrivateTelegramJson(await readFile(policy.broker.configPath, "utf8")));
   if (migration?.telegram) {
     const source = migration.telegram;
     const metadata = await lstat(source.sourcePath);
     if (!metadata.isFile() || metadata.nlink !== 1 || metadata.uid !== source.sourceUid || (metadata.mode & 0o777) !== 0o600 ||
         await realpath(source.sourcePath) !== source.sourcePath) throw new Error("Unsafe selected Telegram migration source");
-    splitTelegramOwnership(JSON.parse(await readFile(source.sourcePath, "utf8")), source.profile, broker);
+    splitTelegramOwnership(parsePrivateTelegramJson(await readFile(source.sourcePath, "utf8")), source.profile, broker);
   }
   if (broker.instance !== personal.instanceId || broker.socketPath !== socketPath || broker.databasePath !== join(policy.broker.stateDir, "telegram.db") ||
       broker.vault.home !== policy.broker.home) throw new Error("Broker configuration differs from deployment policy");

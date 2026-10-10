@@ -20,7 +20,9 @@ describe.skipIf(available.some(value => !value))("real authenticated noVNC takeo
   afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.unstubAllEnvs(); });
   it("renders stock Chrome, transmits private keyboard input, and resumes only after explicit page sharing", async () => {
     const root = await mkdtemp(join(tmpdir(), "takeover-real-browser-"));
-    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    // Chrome descendants can finish profile writes just after their process
+    // group receives its stop signal. Bound the directory-removal retry.
+    cleanup.push(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
     await mkdir(join(root, "run"), { mode: 0o700 });
     vi.stubEnv("XDG_RUNTIME_DIR", join(root, "run")); vi.stubEnv("XDG_DATA_HOME", join(root, "data")); vi.stubEnv("PI_TELEGRAM_BRIDGE_INSTANCE_ID", "takeover-test");
     // Only this synthetic fixture relaxes Chrome's sandbox for CI runners.

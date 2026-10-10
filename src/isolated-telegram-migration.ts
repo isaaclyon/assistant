@@ -19,6 +19,9 @@ const record = (value: unknown): value is Record<string, unknown> => !!value && 
 const identityKeys = ["botToken", "botUsername", "botId", "allowedUserId", "lastUpdateId"];
 const sharedKeys = ["proactivePush", "assistant", "draftPreviews", "richDraftPreviews", "assistantRendering", "voice", "time"];
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+export function parsePrivateTelegramJson(raw: string): unknown {
+  try { return JSON.parse(raw); } catch { throw new Error("Private Telegram migration JSON is invalid"); }
+}
 
 /** Select one named identity; the real token is emitted only into the broker
  * configuration. Preserve the exact stopped poller's next update offset. */
@@ -66,11 +69,11 @@ async function migrateBeforeStart(spec: TelegramOwnershipMigration, checkpoint: 
     const info = await lstat(path);
     if (!info.isFile() || info.nlink !== 1 || info.uid !== uid || (info.mode & 0o777) !== 0o600 || info.size > 64_000) throw new Error("Unsafe Telegram migration source ownership");
   }
-  const source = await readFile(spec.sourcePath, "utf8"), template = parseTrustedBrokerConfig(JSON.parse(await readFile(spec.brokerPath, "utf8")));
-  const split = splitTelegramOwnership(JSON.parse(source), spec.profile, template);
+  const source = await readFile(spec.sourcePath, "utf8"), template = parseTrustedBrokerConfig(parsePrivateTelegramJson(await readFile(spec.brokerPath, "utf8")));
+  const split = splitTelegramOwnership(parsePrivateTelegramJson(source), spec.profile, template);
   // Root-private paired evidence includes the original shared token file. Its
   // bytes are never copied into the personal runtime or logged.
-  await writeDurableExclusive(join(checkpoint, "telegram-ownership-original.json"), JSON.parse(source));
+  await writeDurableExclusive(join(checkpoint, "telegram-ownership-original.json"), parsePrivateTelegramJson(source));
   const replacements = [{ path: spec.runtimePath, uid: spec.runtimeUid, gid: spec.runtimeGid, value: split.runtime },
     { path: spec.brokerPath, uid: spec.brokerUid, gid: spec.brokerGid, value: split.broker }];
   const digests: string[] = [];
