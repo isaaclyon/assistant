@@ -95,6 +95,13 @@ bounded `checker.args` to a checker as one JSON argument, which lets the reusabl
 `web-page-items` checker watch any public HTTPS page; see
 [ADR-0032](docs/adr/0032-pass-bounded-arguments-to-heartbeat-checkers.md).
 
+Incremental semantic checkers receive a host-owned cursor on stdin and emit
+version-2 batches with the next cursor. The host commits that cursor with the
+judgment and any pending event. `gmail-inbox` uses this protocol for bounded,
+paginated readonly inbox checks. Proactive assistant reviews can veto delivery
+with an exact `NO_REPLY` final response. See
+[ADR-0050](docs/adr/0050-incremental-inbox-heartbeats.md).
+
 Price watches are temporary private task manifests, projected into scheduler
 jobs by a reusable helper. Product identities and baselines are configuration;
 the release contains only reusable source adapters and lifecycle guidance.
