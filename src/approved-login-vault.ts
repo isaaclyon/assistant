@@ -1,10 +1,8 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { lstat, readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import { promisify } from "node:util";
 import type { CredentialApproval } from "./trusted-telegram-store.js";
 
-const execFileAsync = promisify(execFile);
 export interface ApprovedVaultConfig {
   binary: string;
   tokenFile: string;
@@ -40,15 +38,46 @@ export function privateVaultCommand(config: ApprovedVaultConfig): PrivateVaultCo
       if (!stat.isFile() || (stat.mode & 0o7777) !== 0o600 || stat.uid !== process.getuid?.()) throw new Error();
       const token = (await readFile(config.tokenFile, "utf8")).trim();
       if (!token.startsWith("ops_") || token.length > 20_000 || /\s/.test(token)) throw new Error();
-      // execFile has no stdin option; the child pipe carries the template.
-      const operation = execFileAsync(config.binary, [...args, "--format=json"], {
+      // Node child stdin is a socket on Unix. op ignores templates on that
+      // descriptor: it requires an actual pipe. Fixed shell code creates one;
+      // the binary and every argument remain separate positional parameters.
+      const piped = input !== undefined;
+      const command = piped ? "/bin/sh" : config.binary;
+      const commandArgs = piped
+        ? ["-c", '/bin/cat | exec "$@"', "approved-login-vault", config.binary, ...args, "--format=json"]
+        : [...args, "--format=json"];
+      const child = spawn(command, commandArgs, {
         env: { HOME: config.home, PATH: "/usr/bin:/bin", LANG: "C.UTF-8", OP_SERVICE_ACCOUNT_TOKEN: token },
-        timeout: 20_000, killSignal: "SIGKILL", maxBuffer: 2 * 1024 * 1024, encoding: "utf8",
+        detached: piped,
+        stdio: ["pipe", "pipe", "pipe"],
       });
-      operation.child.stdin?.on("error", () => {});
-      operation.child.stdin?.end(input);
-      const result = await operation;
-      return JSON.parse(result.stdout);
+      const output = await new Promise<string>((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        let bytes = 0, failed = false;
+        const stop = () => {
+          // Kill the whole pipeline, including op if its shell already exited.
+          try { if (child.pid) process.kill(piped ? -child.pid : child.pid, "SIGKILL"); } catch { /* Already exited. */ }
+        };
+        const fail = () => { failed = true; stop(); reject(new Error("Private command failed")); };
+        const timer = setTimeout(fail, 20_000);
+        const accept = (chunk: Buffer, retain: boolean) => {
+          bytes += chunk.length;
+          if (bytes > 2 * 1024 * 1024) fail();
+          else if (retain && !failed) chunks.push(chunk);
+        };
+        child.stdout.on("data", chunk => accept(chunk, true));
+        child.stderr.on("data", chunk => accept(chunk, false));
+        child.stdin.on("error", fail);
+        child.on("error", () => { clearTimeout(timer); fail(); });
+        child.on("close", code => {
+          clearTimeout(timer);
+          if (piped) stop();
+          if (code !== 0 || failed) reject(new Error("Private command failed"));
+          else resolve(Buffer.concat(chunks).toString("utf8"));
+        });
+        child.stdin.end(input);
+      });
+      return JSON.parse(output);
     } catch { throw new Error("Approved-login vault operation unavailable"); }
   };
 }

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ApprovedLoginVault, parsePrivateLogin, type PrivateVaultCommand } from "../src/approved-login-vault.js";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ApprovedLoginVault, parsePrivateLogin, privateVaultCommand, type PrivateVaultCommand } from "../src/approved-login-vault.js";
 import type { CredentialApproval } from "../src/trusted-telegram-store.js";
 
 const sourceId = "a".repeat(26), destinationId = "b".repeat(26), selectedId = "c".repeat(26), copyId = "d".repeat(26);
@@ -15,6 +18,21 @@ const claim = (state: "once" | "always" = "once"): CredentialApproval => ({ id: 
     vaultName: "Test source", origin: "https://example.test", purpose: "Check account" } });
 
 describe("approved source login and independent copy", () => {
+  it("delivers create templates through a real pipe without interpreting arguments", async () => {
+    const home = await mkdtemp(join(tmpdir(), "approved-vault-pipe-"));
+    try {
+      const binary = join(home, "synthetic op"), tokenFile = join(home, "token");
+      await writeFile(tokenFile, "ops_synthetic_test", { mode: 0o600 });
+      await writeFile(binary, `#!${process.execPath}\nconst fs = require('node:fs');
+if (!fs.fstatSync(0).isFIFO()) process.exit(2);
+const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+console.log(JSON.stringify({ input, args: process.argv.slice(2) }));\n`, { mode: 0o700 });
+      const command = privateVaultCommand({ ...config, binary, tokenFile, home });
+      const args = ["item", "create", "-", "literal; $(exit 99)"];
+      const input = { title: "Synthetic", password: "synthetic-only" };
+      await expect(command(args, JSON.stringify(input))).resolves.toEqual({ input, args: [...args, "--format=json"] });
+    } finally { await rm(home, { recursive: true, force: true }); }
+  });
   it("resolves Once without writing to the destination", async () => {
     const calls: string[][] = [];
     const vault = new ApprovedLoginVault(config, async args => { calls.push([...args]); return item(); });
