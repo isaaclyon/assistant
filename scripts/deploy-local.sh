@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Deploy one already-merged revision from a self-hosted GitHub Actions runner.
 set -Eeuo pipefail
+umask 022
 
 EXPECTED_SHA="${1:-}"
 DEPLOY_PATH="${DEPLOY_PATH:-$HOME/projects/assistant}"
@@ -84,6 +85,8 @@ if [[ ! -f "$RELEASE_PATH/dist/src/daemon.js" ]]; then
     npm ci --no-audit --no-fund
     npm run build
   )
+  # Package archives can carry permissive modes independently of our umask.
+  chmod -R go-w "$STAGING_PATH"
   rm -rf "$RELEASE_PATH"
   mv "$STAGING_PATH" "$RELEASE_PATH"
 fi
