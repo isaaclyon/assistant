@@ -12,6 +12,7 @@ import type { BridgeInstanceConfig } from "./config.js";
 import { withMutationLock } from "../.pi/lib/mutation-lock.mjs";
 import { preparePrivateEmailCode } from "./private-email-code.js";
 import { createPrivateLoginSubmission } from "./private-login-submission.js";
+import { privateBrowserEndpoint } from "./private-browser-endpoint.js";
 
 const exec = promisify(execFile);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -59,11 +60,16 @@ export async function runPrivateBrowserInput(options: {
       // A single fixed private port serializes temporary input across instances.
       // Never replace another instance's endpoint or add public ingress.
       const port = 8446;
-      assertDemoPortUnused(await tailscale("serve", "status", "--json"), port);
-      const dns: unknown = (await tailscale("status", "--json")).Self?.DNSName;
-      if (typeof dns !== "string" || !/^[a-z0-9.-]+\.ts\.net\.$/.test(dns)) throw new Error();
-      const hostPort = `${dns.slice(0, -1)}:${port}`, origin = `https://${hostPort}`;
+      const fixed = privateBrowserEndpoint("input");
+      let origin = fixed?.origin;
+      if (!origin) {
+        assertDemoPortUnused(await tailscale("serve", "status", "--json"), port);
+        const dns: unknown = (await tailscale("status", "--json")).Self?.DNSName;
+        if (typeof dns !== "string" || !/^[a-z0-9.-]+\.ts\.net\.$/.test(dns)) throw new Error();
+        origin = `https://${dns.slice(0, -1)}:${port}`;
+      }
       server = await startPrivateInputServer({ ...profile, origin, request, signal: controller.signal,
+        ...(fixed ? { listen: fixed.listen } : {}),
         assetsDir: join(config.resourceRoot, "web/private-input"),
         submit: async (values) => {
           if (controller.signal.aborted || (await current(request.session))?.launchId !== browser.launchId) throw new Error();
@@ -71,16 +77,18 @@ export async function runPrivateBrowserInput(options: {
           return privateSubmission ? privateSubmission.submit(values, signal) : protectedPage!.submit(values);
         },
       });
-      const target = `http://127.0.0.1:${server.port}`;
+      const target = `http://${fixed?.listen.host ?? "127.0.0.1"}:${server.port}`;
+      if (!fixed) {
       proxy = spawn("sudo", ["-n", "tailscale", "serve", "--yes", "--bg=false", `--https=${port}`, target], { stdio: "ignore" });
       proxy.once("error", abort); proxy.once("exit", abort);
       let ready = false;
       for (let attempt = 0; attempt < 30 && !controller.signal.aborted; attempt++) {
-        if (isPrivateDemoProxy(await tailscale("serve", "status", "--json"), hostPort, target)) { ready = true; break; }
+        if (isPrivateDemoProxy(await tailscale("serve", "status", "--json"), new URL(origin).host, target)) { ready = true; break; }
         await sleep(200);
       }
       if (!ready || controller.signal.aborted) throw new Error();
-      const health = await fetch(`${origin}/healthz`, { signal: AbortSignal.timeout(5_000) });
+      }
+      const health = await fetch(`${fixed ? target : origin}/healthz`, { signal: AbortSignal.timeout(5_000) });
       if (!health.ok) throw new Error();
       messageId = await demoTelegramRequest(profile.botToken, "sendMessage", {
         chat_id: profile.userId, ...(options.threadId ? { message_thread_id: options.threadId } : {}),

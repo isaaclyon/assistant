@@ -3,7 +3,7 @@ import { readFile, realpath } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join, sep } from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
-import { validateMiniAppIdentity } from "./secure-input-demo.js";
+import { validateRuntimeMiniAppIdentity } from "./runtime-telegram-transport.js";
 import { validTakeoverViewport, type TakeoverViewport } from "./browser-takeover-viewport.js";
 import { validLoginValues, type LoginStep } from "./private-login.js";
 
@@ -22,6 +22,7 @@ export async function startTakeoverServer(options: {
   upstreamPort: number; password: string; resumeUrl: string; signal: AbortSignal; durationMs?: number;
   resize?(viewport: TakeoverViewport): Promise<void>;
   login?: PrivateLoginOperations;
+  listen?: { host: string; port: number };
 }) {
   const origin = new URL(options.origin), duration = options.durationMs ?? 600_000;
   if (origin.protocol !== "https:" || origin.origin !== options.origin || origin.username || origin.password ||
@@ -93,7 +94,7 @@ export async function startTakeoverServer(options: {
       try { input = JSON.parse(raw.toString("utf8")); } finally { raw.fill(0); }
       const keys = req.url === "/api/auth" ? ["requestId", "initData", "viewport", "takeover", "step"] : req.url === "/api/viewport" ? ["requestId", "initData", "ticket", "viewport"] : req.url === "/api/login" ? ["requestId", "initData", "step", "values", "saved"] : req.url === "/api/login-cancel" ? ["requestId", "initData"] : ["requestId", "initData", "ticket", "mode"];
       if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => !keys.includes(key))) { reply(res, 400, { error: "invalid_request" }); return; }
-      if (input.requestId !== requestId || typeof input.initData !== "string" || !validateMiniAppIdentity(input.initData, options.botToken, options.userId, Date.now())) { reply(res, 403, { error: "unauthorized" }); return; }
+      if (input.requestId !== requestId || typeof input.initData !== "string" || !await validateRuntimeMiniAppIdentity(input.initData, options.botToken, options.userId, Date.now())) { reply(res, 403, { error: "unauthorized" }); return; }
       if (ended()) { reply(res, 410, { error: "ended" }); return; }
       if (req.url === "/api/login-cancel") {
         if (!loginActive) { reply(res, 409, { error: "unavailable" }); return; }
@@ -190,7 +191,7 @@ export async function startTakeoverServer(options: {
       });
     });
   });
-  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", () => { server.removeListener("error", reject); resolve(); }); });
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(options.listen?.port ?? 0, options.listen?.host ?? "127.0.0.1", () => { server.removeListener("error", reject); resolve(); }); });
   options.signal.addEventListener("abort", abort, { once: true });
   const expiry = setTimeout(() => finish({ status: "expired", mode: "private" }), Math.max(1, expiresAt - Date.now()));
   if (options.signal.aborted) abort();

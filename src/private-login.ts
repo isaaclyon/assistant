@@ -3,12 +3,14 @@ import { LOGIN_FORM } from "./private-login-form.js";
 
 export type LoginKind = "username" | "password" | "code";
 export type LoginStep = { state: "fields"; fields: LoginKind[] } | { state: "manual" | "complete" };
-export interface PrivateLoginRequest { session: string; pageUrl: string; resumeUrl: string; credentialItem?: string }
+export interface PrivateLoginRequest { session: string; pageUrl: string; resumeUrl: string; credentialItem?: string; purpose?: string }
 export function validatePrivateLoginRequest(request: PrivateLoginRequest) {
   const page = new URL(request.pageUrl), resume = new URL(request.resumeUrl);
   if (!/^[a-z0-9][a-z0-9._-]{0,62}$/.test(request.session) || request.pageUrl.length > 2000 || request.resumeUrl.length > 2000 ||
       page.protocol !== "https:" || page.username || page.password || resume.origin !== page.origin || resume.username || resume.password || resume.search || resume.hash ||
-      (request.credentialItem !== undefined && (!request.credentialItem || request.credentialItem.length > 200 || /^-|[\0\r\n]/.test(request.credentialItem)))) throw new Error("Invalid private sign-in request");
+      (request.credentialItem !== undefined && (!request.credentialItem || request.credentialItem.length > 200 || /^-|[\0\r\n]/.test(request.credentialItem))) ||
+      (request.purpose !== undefined && (!request.purpose || request.purpose.length > 300 || /[\0\r\n]/.test(request.purpose))) ||
+      (request.credentialItem?.startsWith("source:") && (!/^source:[a-z0-9]{26}$/.test(request.credentialItem) || !request.purpose))) throw new Error("Invalid private sign-in request");
 }
 export function validLoginValues(fields: LoginKind[], values: unknown): values is string[] {
   return Array.isArray(values) && values.length === fields.length && values.every((value, i) => typeof value === "string" && value.length > 0 && value.length <= 1024 &&

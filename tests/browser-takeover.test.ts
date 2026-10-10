@@ -7,7 +7,7 @@ import type { BridgeInstanceConfig } from "../src/config.js";
 import type { TakeoverResult } from "../src/browser-takeover-server.js";
 const h = vi.hoisted(() => ({ root: "", removed: false, checks: 0, activeHandoff: false,
   exec: vi.fn(), spawn: vi.fn(), finish: vi.fn(), closeCdp: vi.fn(), serverClose: vi.fn(), send: vi.fn(), assert: vi.fn(),
-  prepare: vi.fn(), stop: vi.fn(), done: Promise.resolve({ status: "handed_back", mode: "share" } as TakeoverResult) }));
+  prepare: vi.fn(), stop: vi.fn(), privatePage: vi.fn(), approve: vi.fn(), done: Promise.resolve({ status: "handed_back", mode: "share" } as TakeoverResult) }));
 vi.mock("node:util", () => ({ promisify: () => h.exec }));
 vi.mock("node:child_process", () => ({ execFile: vi.fn(), spawn: h.spawn }));
 vi.mock("../.pi/skills/agent-browser/scripts/stock-chrome.mjs", () => ({
@@ -22,6 +22,8 @@ vi.mock("../.pi/skills/agent-browser/scripts/browser-handoff.mjs", () => ({
   stopPrivateHandoff: h.stop,
 }));
 vi.mock("../src/browser-takeover-protection.js", () => ({ validateTakeoverRequest: () => {}, protectBrowserTakeover: h.prepare }));
+vi.mock("../src/private-login.js", async original => ({ ...await original<object>(), protectPrivateLogin: h.privatePage }));
+vi.mock("../src/private-approved-credential.js", () => ({ privateApprovedCredential: h.approve }));
 vi.mock("../src/browser-takeover-server.js", () => ({ startTakeoverServer: async () => ({ port: 9999, requestId: "opaque", done: h.done, close: h.serverClose }) }));
 vi.mock("../src/secure-input-demo-launch.js", async (original) => ({ ...await original<object>(),
   readDemoTelegramProfile: async () => ({ botToken: "synthetic", userId: 123 }), demoTelegramRequest: h.send }));
@@ -81,5 +83,51 @@ describe("takeover ownership and teardown", () => {
   it("reports an existing crash gate as browser_blocked so stop-only recovery remains explicit", async () => {
     h.assert.mockRejectedValue(new Error("blocked"));
     expect(await run()).toEqual({ status: "browser_blocked" }); expect(h.spawn).not.toHaveBeenCalled();
+  });
+  const runApproved = () => runBrowserTakeover({ config: { instanceId: "test", telegramSurface: { type: "private" }, resourceRoot: process.cwd() } as BridgeInstanceConfig,
+    request: { session: "default", resumeUrl: "https://example.com/" }, chatId: 123, signal: new AbortController().signal, notifyWaiting() {},
+    login: { session: "default", pageUrl: "https://example.com/login", resumeUrl: "https://example.com/", credentialItem: `source:${"a".repeat(26)}`, purpose: "Read account" } });
+  it("uses a provisioned endpoint without invoking Tailscale or sudo and closes it before releasing the page", async () => {
+    vi.stubEnv("PI_TELEGRAM_TRUSTED_SOCKET", "/run/synthetic/socket");
+    vi.stubEnv("PI_PRIVATE_BROWSER_BIND_ADDRESS", "10.253.250.2");
+    vi.stubEnv("PI_PRIVATE_INPUT_ORIGIN", "https://test.tail123.ts.net:8446");
+    vi.stubEnv("PI_PRIVATE_TAKEOVER_ORIGIN", "https://test.tail123.ts.net:8447");
+    expect(await run()).toEqual({ status: "handed_back", mode: "share" });
+    expect(h.spawn).not.toHaveBeenCalled();
+    expect(h.exec.mock.calls.every(call => call[0] === "agent-browser")).toBe(true);
+    expect(h.serverClose.mock.invocationCallOrder[0]).toBeLessThan(h.finish.mock.invocationCallOrder[0]!);
+  });
+  it("retains one approved credential across username and password screens, then clears it", async () => {
+    let step = 0;
+    const submitted: string[][] = [], credential = { username: "synthetic-user", password: "synthetic-secret" };
+    const close = vi.fn();
+    h.privatePage.mockResolvedValue({ state: () => step < 2 ? { state: "fields", fields: [step ? "password" : "username"] } : { state: "complete" },
+      submit: async (values: string[]) => { submitted.push([...values]); values.fill(""); step++; }, hasUsername: () => step > 0,
+      matchesUsername: (value: string) => value === "synthetic-user", close });
+    h.approve.mockImplementation(async () => {
+      expect(await readFile(join(h.root, "protected-input.json"), "utf8")).toContain("owned-browser");
+      return { status: "approved", credential, copiedItem: "b".repeat(26) };
+    });
+    expect(await runApproved()).toEqual({ status: "submitted", mode: "private", copiedCredentialItem: "b".repeat(26) });
+    expect(submitted).toEqual([["synthetic-user"], ["synthetic-secret"]]);
+    expect(credential).toEqual({ username: "", password: "" });
+    expect(h.approve).toHaveBeenCalledOnce(); expect(h.spawn).not.toHaveBeenCalled(); expect(close).toHaveBeenCalled();
+    expect(h.finish).toHaveBeenCalledWith("private");
+  });
+  it("does not submit after denial and privately releases the protected page", async () => {
+    const submit = vi.fn();
+    h.privatePage.mockResolvedValue({ state: () => ({ state: "fields", fields: ["username", "password"] }), submit, close: vi.fn() });
+    h.approve.mockResolvedValue({ status: "denied" });
+    expect(await runApproved()).toEqual({ status: "cancelled", mode: "private" });
+    expect(submit).not.toHaveBeenCalled(); expect(h.spawn).not.toHaveBeenCalled();
+    expect(h.finish).toHaveBeenCalledWith("private");
+  });
+  it("reports a successful copy independently when browser submission fails", async () => {
+    const credential = { username: "synthetic-user", password: "synthetic-secret" };
+    h.privatePage.mockResolvedValue({ state: () => ({ state: "fields", fields: ["username", "password"] }),
+      submit: vi.fn().mockRejectedValue(new Error("synthetic failure")), close: vi.fn() });
+    h.approve.mockResolvedValue({ status: "approved", credential, copiedItem: "b".repeat(26) });
+    expect(await runApproved()).toEqual({ status: "unavailable", copiedCredentialItem: "b".repeat(26) });
+    expect(credential).toEqual({ username: "", password: "" });
   });
 });

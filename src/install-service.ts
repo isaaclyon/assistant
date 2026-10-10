@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { lstat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +19,11 @@ function resolveFromHome(value: string | undefined, fallback: string): string {
 }
 
 async function installInstanceFleet(): Promise<void> {
+  const isolated = await lstat("/etc/pi-telegram-bridge/isolated-deployment.json").then(() => true, error => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  });
+  if (isolated) throw new Error("This fleet uses isolated deployment; use the coordinated activation command instead of installing user units");
   const releaseSha = process.env.PI_TELEGRAM_BRIDGE_RELEASE_SHA?.trim() ?? "";
   const configRoot = resolveFromHome(
     process.env.PI_TELEGRAM_BRIDGE_CONFIG_ROOT,

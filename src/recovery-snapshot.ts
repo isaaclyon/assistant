@@ -28,8 +28,8 @@ async function syncDirectory(path: string): Promise<void> {
   try { await handle.sync(); } finally { await handle.close(); }
 }
 
-async function digestTree(root: string, allowLinks: boolean, sync = false,
-  includeRootEntry: (name: string) => boolean = () => true): Promise<string> {
+export async function digestTree(root: string, allowLinks: boolean, sync = false,
+  includeRootEntry: (name: string) => boolean = () => true, expectedUid = process.getuid?.()): Promise<string> {
   const hash = createHash("sha256");
   const canonicalRoot = await realpath(root);
   // npm packages such as esbuild hard-link binaries inside node_modules.
@@ -38,7 +38,8 @@ async function digestTree(root: string, allowLinks: boolean, sync = false,
   async function walk(path: string): Promise<void> {
     if (++count > 250_000) throw new Error("Recovery snapshot file limit exceeded");
     const info = await lstat(path);
-    if (info.uid !== process.getuid?.()) throw new Error("Recovery source is not owned by the service user");
+    if (info.uid !== expectedUid) throw new Error("Recovery source is not owned by the expected identity");
+    if (allowLinks && !info.isSymbolicLink() && (info.mode & 0o6022) !== 0) throw new Error("Release entry permits untrusted modification or privilege escalation");
     const name = relative(root, path);
     hash.update(JSON.stringify([name, name === "" ? 0 : info.mode & 0o777]));
     if (info.isSymbolicLink() && allowLinks) {

@@ -8,8 +8,25 @@ import type { ProtectedInputRequest } from "../../src/protected-browser.ts";
 import { runBrowserTakeover } from "../../src/browser-takeover.ts";
 import type { TakeoverRequest } from "../../src/browser-takeover-protection.ts";
 import type { PrivateLoginRequest } from "../../src/private-login.ts";
+import { runtimeTelegramFetch } from "../../src/runtime-telegram-transport.ts";
 
 export default function privateBrowserInput(pi: ExtensionAPI) {
+  if (process.env.PI_TELEGRAM_TRUSTED_SOCKET) pi.registerTool(defineTool({
+    name: "find_login_candidates", label: "Find saved logins",
+    description: "List nonsecret Login titles and references for an exact HTTPS origin in the configured approval source vault. Resolve ambiguity with the user before requesting a sign-in. This does not approve, copy, or disclose credentials.",
+    parameters: Type.Object({ origin: Type.String({ minLength: 1, maxLength: 1000 }) }, { additionalProperties: false }),
+    async execute(_id, request, signal) {
+      try {
+        const response = await runtimeTelegramFetch("https://api.telegram.org/bot0:surrogate/credentialCandidates", {
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request),
+          signal: AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(30_000)]),
+        });
+        const details = await response.json();
+        if (!response.ok || details?.ok !== true) throw new Error();
+        return { content: [{ type: "text", text: JSON.stringify(details) }], details };
+      } catch { return { content: [{ type: "text", text: "Login candidates unavailable." }], details: { status: "unavailable" } }; }
+    },
+  }));
   let active: AbortController | undefined;
   let settling: Promise<unknown> | undefined;
   pi.on("session_shutdown", async () => { active?.abort(); await settling?.catch(() => {}); });
@@ -39,13 +56,14 @@ export default function privateBrowserInput(pi: ExtensionAPI) {
     description: "Private multi-step existing-account sign-in in stock Chrome. Recognizes common same-origin POST email/username, password and verification-code screens, retaining the protected browser across steps. The Mini App can switch directly to human takeover for unfamiliar screens. Returns only a fixed terminal status and reopens the clean resume URL unless the user explicitly shares a page.",
     promptGuidelines: [
       "Use private_browser_login for authorized existing-account sign-in across multiple screens. Inspect the initial page first; pass its exact pageUrl and a clean same-origin HTTPS resumeUrl. Tell the user to keep Tailscale connected and open Sign in privately.",
-      "Never ask for credentials in chat or tool arguments. Optional credentialItem names a user-approved Login item in the current instance's dedicated 1Password vault; the user may select Use saved sign-in privately. No general email-code lookup is enabled; codes remain private manual input.",
+      "Never ask for credentials in chat or tool arguments. Optional credentialItem names a user-approved Login item in the current instance's dedicated 1Password vault; the user may select Use saved sign-in privately. When find_login_candidates is available, a source: reference plus purpose requests Allow Once, Always Allow or Deny through trusted Telegram buttons before protected sign-in. Resolve ambiguous candidates before requesting approval. No general email-code lookup is enabled; codes remain private manual input.",
+      "copiedCredentialItem reports an independent saved copy even if browser sign-in fails. Report the copy and sign-in outcomes separately. Removing that copy stops future password use but does not end existing website sessions.",
       "Stay paused for the whole operation. Do not inspect browser/runtime/profile files, use raw CDP, or run other browser tools while waiting. Unknown, repeated, embedded, cross-origin, recovery, registration or CAPTCHA screens need the Take over choice inside the Mini App; it preserves the same protected session.",
       "submitted is not proof of authentication. Verify the clean resume page afterward. Continue from this page explicitly shares the current website/form contents. On browser_blocked stop the stock session before reopening; never delete the gate.",
     ],
-    parameters: Type.Object({ session: Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,62}$" }), pageUrl: Type.String({ maxLength: 2000 }), resumeUrl: Type.String({ maxLength: 2000 }), credentialItem: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })) }, { additionalProperties: false }),
+    parameters: Type.Object({ session: Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,62}$" }), pageUrl: Type.String({ maxLength: 2000 }), resumeUrl: Type.String({ maxLength: 2000 }), credentialItem: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })), purpose: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) }, { additionalProperties: false }),
     async execute(_id, request, signal, update) {
-      return execute(request, signal, () => update?.({ content: [{ type: "text", text: "Private sign-in opened. Waiting for sign-in or handback." }], details: undefined }));
+      return execute(request, signal, () => update?.({ content: [{ type: "text", text: "Waiting for private sign-in or credential approval." }], details: undefined }));
     },
   }));
   pi.registerTool(defineTool({

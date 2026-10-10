@@ -4,7 +4,8 @@
 
 - **Host:** owns instance selection, process lifetime, Pi runtime creation, persistent session selection, signal handling, and service installation.
 - **Pi:** owns agent execution, model/tool state, extension lifecycle, and conversation persistence.
-- **pi-telegram:** owns Telegram polling, pairing, routing, rendering, controls, and update-offset persistence.
+- **pi-telegram:** owns Telegram pairing, routing, rendering and controls; in the ordinary user fleet it also owns upstream polling and offsets.
+- **Trusted broker (opt-in isolated deployment):** owns the personal bot token, upstream polling, durable updates, credential approvals and scoped 1Password access; Pi receives ordinary traffic through a restricted Unix socket.
 - **systemd:** owns one unit per instance, boot activation, restart policy, and logs.
 - **GitHub Actions:** owns post-merge validation and serialized production deployment through the server's repository-scoped runner.
 - **Tailscale Serve:** owns tailnet-only HTTPS and static delivery for editable Messages links.
@@ -12,6 +13,17 @@
 The host loads a full-commit-pinned `isaaclyon/pi-telegram` fork through Pi's `DefaultResourceLoader` and binds extensions in RPC mode. A version- and source-checked postinstall patch replaces raw tool-call status labels with deterministic, privacy-safe activity descriptions; see [ADR-0007](docs/adr/0007-patch-telegram-tool-activity-labels.md). The RPC binding includes Pi's official command-context session actions (`waitForIdle`, `newSession`, `fork`, tree navigation, session switching, and reload). The fork's narrow process-local host capability delegates Telegram `/new` to `AgentSessionRuntime.newSession()` without exposing the runtime or retaining stale extension contexts. The host separates each instance's mutable `workspaceCwd` from the immutable `resourceRoot`, disables hierarchical discovery, and supplies only the selected profile from `.pi/capabilities.json`; see [ADR-0009](docs/adr/0009-isolate-telegram-agent-instructions.md) and [ADR-0020](docs/adr/0020-run-a-household-bot-fleet-from-one-release.md). Canonicalized resources must remain inside the release, and symlink escapes are rejected. Global Pi/Agents directories and workspace-local capabilities never execute in the bridge. Filesystem tool access itself is not restricted to the cwd.
 
 The host explicitly loads the pinned, repo-installed Codex conversion, Codex web, and retry dependencies; ordinary Pi sessions opened in this repo do not auto-discover them. The retry extension classifies transient Codex websocket/backend failures and stalled streams for Pi's built-in retry policy. A version-checked install patch makes `pi-telegram` finalize the active turn on Pi's `agent_settled` event so retries keep their Telegram destination. Another patch gives the Codex extension a bridge-only settings path while preserving the shared Pi agent directory required by credentials and Telegram ownership. See ADR-0002, ADR-0004, and ADR-0013.
+
+The isolated deployment adds an OS boundary around the personal runtime. Root
+owns its release and policy; a dedicated system identity owns its private home,
+and a separate identity owns the trusted broker. A network namespace blocks
+host/private-network administrative paths while separately managed Tailscale
+proxies expose authenticated browser input. The mixed-manager coordinator
+checkpoints stopped runtime and broker writers together, refreshes only selected
+migration assets, and refuses checkpoint rewind after a candidate starts. The
+personal manifest permits only self-targeted jobs. This mode requires explicit
+provisioning and acceptance; see [ADR-0051](docs/adr/0051-isolate-personal-runtime-and-credential-approvals.md)
+and [fleet operations](docs/household-fleet.md#isolated-personal-deployment).
 
 ## State
 
@@ -34,6 +46,8 @@ Telegram. See [ADR-0046](docs/adr/0046-telegram-model-usage-and-pace.md).
 | Telegram Codex settings | `<stateDir>/pi-codex-conversion.json` | Codex conversion extension |
 | Telegram token/pairing/offset | `~/.pi/agent/telegram.json` | pi-telegram |
 | Telegram polling ownership | `~/.pi/agent/locks.json` | pi-telegram |
+| Isolated upstream updates, message ownership and credential decisions | `<brokerStateDir>/telegram.db` | Trusted broker |
+| Isolated bot token and source/destination vault policy | External broker-owned mode-`0600` configuration | Administrator / trusted broker |
 | Bridge environment overrides | `<configRoot>/instances/<id>.env` | User/systemd |
 | 1Password agent vault token/config | `<configRoot>/onepassword/<credential-scope>.{token,json}` | User / credential provider |
 | Temporary browser handoff | `<browserRuntime>/handoff.{json,log}` and `handoff-password` | Browser handoff supervisor |
@@ -60,8 +74,12 @@ Each instance's `<stateDir>` is `<stateRoot>/instances/<id>`; it holds the
 sessions, SQLite inbox, Codex settings, restart marker, checkers, job handoffs,
 and `runtime.json`. Telegram bot tokens,
 pairing, offsets, and locks remain in named profiles in the private Pi agent
-directory. The strict mode-`0600` instance manifest is
+directory in the ordinary user fleet. In isolated mode the runtime profile
+contains a surrogate token; the broker retains the real token and upstream
+offset. The instance manifest is
 `<configRoot>/instances.json` by default.
+It requires mode `0600` under the ordinary service identity, or mode `0440`
+under canonical administrator-owned ancestry for an isolated service.
 
 The stock-Chrome helper registers a repo-owned 1Password credential provider.
 Its service-account token is deliberately not placed in the instance

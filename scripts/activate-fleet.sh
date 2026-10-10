@@ -6,6 +6,13 @@ EXPECTED_SHA="${1:?expected release SHA}"
 RELEASE_PATH="${2:?release path}"
 NODE_BINARY="${3:?node executable}"
 
+# An administrator-owned routing file transfers this fleet to coordinated
+# system/user management. The root coordinator checkpoints both identities.
+if [[ -e /etc/pi-telegram-bridge/isolated-deployment.json ]]; then
+  exec sudo -n "$NODE_BINARY" "$RELEASE_PATH/dist/src/isolated-deploy-cli.js" \
+    "$EXPECTED_SHA" "$RELEASE_PATH"
+fi
+
 CONFIG_ROOT="${PI_TELEGRAM_BRIDGE_CONFIG_ROOT:-$HOME/.config/pi-telegram-bridge}"
 STATE_ROOT="${PI_TELEGRAM_BRIDGE_STATE_ROOT:-$HOME/.local/state/pi-telegram-bridge}"
 AGENT_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"

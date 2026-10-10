@@ -74,7 +74,18 @@ exec "$@"
 
     await mkdir(env.XDG_RUNTIME_DIR, { recursive: true });
     try {
-      const starts = await Promise.all([1, 2].map(() => execFileAsync(process.execPath, [helper, "start", "default"], { env })));
+      // Startup may exceed the mutation lock's five-second wait on a loaded
+      // machine. Await both callers before retrying only the explicit busy
+      // result; otherwise cleanup races the still-starting winner.
+      const concurrent = await Promise.allSettled([1, 2].map(() => execFileAsync(process.execPath, [helper, "start", "default"], { env, timeout: 20_000 })));
+      const starts = [];
+      for (const result of concurrent) {
+        if (result.status === "fulfilled") starts.push(result.value);
+        else {
+          expect(result.reason.stderr).toContain("Another mutation is in progress");
+          starts.push(await execFileAsync(process.execPath, [helper, "start", "default"], { env, timeout: 20_000 }));
+        }
+      }
       const states = starts.map((result) => JSON.parse(result.stdout));
       expect(new Set(states.map((state) => state.port)).size).toBe(1);
       expect(states.filter((state) => state.created === true)).toHaveLength(1);
@@ -143,7 +154,7 @@ exec "$@"
       }
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it("refuses to signal an unrelated live process named by stale state", async () => {
     const root = await mkdtemp(join(tmpdir(), "stock-chrome-stale-"));

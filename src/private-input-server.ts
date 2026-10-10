@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
-import { validateMiniAppIdentity } from "./secure-input-demo.js";
+import { validateRuntimeMiniAppIdentity } from "./runtime-telegram-transport.js";
 import { validProtectedValues, type ProtectedInputRequest } from "./protected-browser.js";
 
 export type PrivateInputStatus = "submitted" | "cancelled" | "expired" | "failed";
@@ -10,6 +10,7 @@ export async function startPrivateInputServer(options: {
   origin: string; botToken: string; userId: number; request: ProtectedInputRequest;
   assetsDir: string; signal: AbortSignal; submit(values: string[]): Promise<void | Array<"password" | "code">>;
   durationMs?: number;
+  listen?: { host: string; port: number };
 }) {
   const duration = options.durationMs ?? 10 * 60_000;
   const expiresAt = Date.now() + duration;
@@ -60,7 +61,7 @@ export async function startPrivateInputServer(options: {
       if (!input || typeof input !== "object" || Array.isArray(input) ||
           Object.keys(input).some((key) => !["requestId", "initData", ...(req.url === "/api/submit" ? ["values", "step"] : [])].includes(key))) { reply(res, 400, { error: "invalid_request" }); return; }
       if (input.requestId !== requestId || typeof input.initData !== "string" ||
-          !validateMiniAppIdentity(input.initData, options.botToken, options.userId, Date.now())) { reply(res, 403, { error: "unauthorized" }); return; }
+          !await validateRuntimeMiniAppIdentity(input.initData, options.botToken, options.userId, Date.now())) { reply(res, 403, { error: "unauthorized" }); return; }
       if (Date.now() >= expiresAt || options.signal.aborted) { reply(res, 410, { error: "expired" }); return; }
       if (req.url === "/api/auth") {
         reply(res, 200, metadata()); return;
@@ -96,7 +97,7 @@ export async function startPrivateInputServer(options: {
   server.requestTimeout = 10_000; server.headersTimeout = 10_000; server.maxConnections = 16;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => { server.removeListener("error", reject); resolve(); });
+    server.listen(options.listen?.port ?? 0, options.listen?.host ?? "127.0.0.1", () => { server.removeListener("error", reject); resolve(); });
   });
   options.signal.addEventListener("abort", abort, { once: true });
   if (options.signal.aborted) abort();
