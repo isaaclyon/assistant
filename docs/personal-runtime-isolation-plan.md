@@ -1,6 +1,6 @@
 # Personal runtime isolation and approved credentials
 
-Status: approved direction; implementation and migration pending.
+Status: implemented; initial isolated deployment verified.
 
 ## Outcome
 
@@ -10,25 +10,28 @@ trusted service verifies the user's credential approvals and reads eligible
 vault token, manufacture an approval, or administer the trusted service.
 
 The user approved migrating the personal runtime to an unprivileged account.
-This document records the migration requirements and the remaining engineering
-work. It does not describe an already-deployed boundary.
+This document records the approved boundaries, migration requirements and
+acceptance gates. Private deployment records hold the selected identities,
+credentials, checkpoints and operational results.
 
 ## Evidence and constraints
 
-Current fleet isolation is semantic under one Unix account (ADR-0020). The
-personal runtime's current account has unrestricted passwordless sudo and
-container-administration group membership. Adding a second credential-service
-user under that arrangement does not isolate its secrets.
+At design time, fleet isolation was semantic under one Unix account (ADR-0020).
+The personal runtime shared an account with passwordless sudo and container
+administration. Adding a second credential-service user under that arrangement
+would not isolate its secrets.
 
-Synthetic tests separately established scoped 1Password copy behavior and an
-actual Telegram-button-to-browser flow. The latter used in-memory credentials.
-Neither proves the combined production path or OS isolation.
+Live synthetic acceptance now covers real Telegram decisions, scoped 1Password
+access, protected-browser delivery, restart/replay protection and independent
+copies that survive source password changes. Dedicated-identity probes and the
+initial migration verified the OS boundary and relocated capabilities. These
+checks complement the repeatable deployment and recovery tests below.
 
-`src/service-unit.ts` and `src/install-service.ts` currently install user units.
-Fleet preparation assumes shared agent/config/state roots. Job delivery writes
-directly into recipient state directories (`src/job-handoff.ts`). Deployment and
-recovery expect a coordinated fleet transition. Changing only a service's user
-would break these contracts.
+Ordinary fleet installation retains user units. Isolated deployment coordinates
+system and user managers with separate roots. Job delivery writes directly into
+recipient state directories (`src/job-handoff.ts`), so the isolated personal
+manifest permits only self-targeted jobs. Deployment and recovery transition
+the runtime and trusted broker together.
 
 Retain pinned Pi packages and `@llblab/pi-telegram`; any required fork transport
 change must be source-reviewed and pinned. Preserve capability filtering,
@@ -79,9 +82,9 @@ with the untrusted runtime or let it edit trusted approval messages. In
 particular, Telegram Mini App signatures do not create isolation if the
 assistant can read the token used to verify them.
 
-This transport split needs a compatibility probe against the pinned fork before
-selecting its implementation. It is not permission to replace the fork or add
-a general-purpose arbitrary Bot API proxy. Preserve ordinary conversations,
+Source-checked patches and compatibility tests maintain this transport split
+against the pinned fork. Preserve the narrow API rather than introducing
+a general-purpose Bot API proxy. Preserve ordinary conversations,
 pairing, debug controls, incoming files and existing private-input operations.
 
 ### Privileged builder and jobs
@@ -173,16 +176,16 @@ Run tests from the actual personal-runtime UID and service context:
    Test only configured capabilities and use reversible synthetic operations.
 6. Reboot/deploy preserves the isolation and exactly one personal poller.
    Recovery rehearsals preserve inbox and scheduled-work evidence.
-7. Required changed-file checks and build pass. Resolve the pre-existing pinned
-   Telegram `ThinkingLevel` typecheck failure before a production rollout.
+7. Required changed-file checks, pinned Telegram compatibility checks and build
+   pass before a production rollout.
 
 ## Owning code and documentation
 
-Likely owners: `src/service-unit.ts`, `src/install-service.ts`, fleet config and
+Owners: `src/service-unit.ts`, `src/install-service.ts`, fleet config and
 installer modules, `src/config.ts`, `src/instances.ts`, Telegram host interfaces,
 job delivery, deployment/activation/recovery scripts, credential provider and
 protected browser modules. Add behavior tests at each changed boundary.
 
-Update ARCHITECTURE, household fleet operations, browser login documentation and
-ADRs when implementation establishes the new behavior. This plan does not
-supersede the currently accepted runtime or recovery decisions.
+ARCHITECTURE, household fleet operations, browser login documentation and
+ADR-0051 describe the implemented behavior. This plan does not supersede the
+accepted runtime or recovery decisions.
