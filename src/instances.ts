@@ -1,5 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
+import { assertAdministratorPath } from "./isolation-admin-path.js";
 
 export type BridgePrincipal = "isaac" | "emma" | "household" | "engineering";
 export type BridgeMemoryView = "owner-and-household" | "household" | "none";
@@ -327,8 +328,11 @@ export function parseBridgeInstanceManifest(raw: string): BridgeInstanceManifest
 export async function loadBridgeInstanceManifest(
   path: string,
 ): Promise<BridgeInstanceManifest> {
-  const mode = (await stat(path)).mode & 0o777;
-  if ((mode & 0o077) !== 0) {
+  const metadata = await stat(path);
+  const mode = metadata.mode & 0o777;
+  const administratorOwned = metadata.uid === 0 && mode === 0o440;
+  if (administratorOwned) await assertAdministratorPath(path);
+  if (!administratorOwned && (mode & 0o077) !== 0) {
     throw new Error(
       "Bridge instance manifest must not be accessible by group or other users",
     );

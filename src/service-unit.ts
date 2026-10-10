@@ -1,6 +1,7 @@
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, normalize, sep } from "node:path";
 
 import type { BridgeInstanceConfig } from "./config.js";
+import { privateBrowserEndpoint } from "./private-browser-endpoint.js";
 
 function quote(value: string): string {
   return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
@@ -51,6 +52,76 @@ export function renderInstanceServiceUnit({
 export interface InstanceServiceUnitsOptions
   extends Omit<InstanceServiceUnitOptions, "config"> {
   configs: readonly BridgeInstanceConfig[];
+}
+
+export interface IsolatedInstanceServiceUnitOptions extends InstanceServiceUnitOptions {
+  user: string;
+  group: string;
+  privateHome: string;
+  networkNamespace: string;
+  resolverPath: string;
+  trustedSocket: string;
+  browserAddress: string;
+  privateInputOrigin: string;
+  privateTakeoverOrigin: string;
+}
+
+/** Render only: account membership, canonical ownership and transport preflight
+ * must succeed before an administrator installs this system unit. */
+export function renderIsolatedInstanceServiceUnit(
+  options: IsolatedInstanceServiceUnitOptions,
+): RenderedInstanceServiceUnit {
+  for (const account of [options.user, options.group]) {
+    if (!/^[a-z_][a-z0-9_-]{0,30}$/.test(account) ||
+        ["root", "sudo", "wheel", "docker", "lxd", "adm"].includes(account)) {
+      throw new Error("Isolated service requires an unprivileged named account");
+    }
+  }
+  const { privateHome, config } = options;
+  if (!/^pi-[a-z0-9-]{1,24}$/.test(options.networkNamespace) ||
+      !/^\/run\/[a-z0-9/-]+\.sock$/.test(options.trustedSocket)) throw new Error("Invalid isolated service transport");
+  const endpointEnv = { PI_TELEGRAM_TRUSTED_SOCKET: options.trustedSocket,
+    PI_PRIVATE_BROWSER_BIND_ADDRESS: options.browserAddress, PI_PRIVATE_INPUT_ORIGIN: options.privateInputOrigin,
+    PI_PRIVATE_TAKEOVER_ORIGIN: options.privateTakeoverOrigin };
+  privateBrowserEndpoint("input", endpointEnv);
+  if (!/^\/var\/lib\/[a-z][a-z0-9_-]*$/.test(privateHome)) {
+    throw new Error("Isolated service requires a dedicated private home under /var/lib");
+  }
+  const insideHome = (path: string) => path === privateHome || path.startsWith(`${privateHome}${sep}`);
+  const mutable = [config.agentDir, config.stateRoot, config.stateDir, config.sessionDir, config.workspaceCwd];
+  const immutable = [options.manifestPath, options.nodePath, options.projectDir, config.resourceRoot,
+    config.configRoot, config.environmentFilePath, options.resolverPath];
+  for (const path of [...mutable, ...immutable]) {
+    if (!isAbsolute(path) || normalize(path) !== path || /[\r\n\0%]/.test(path)) {
+      throw new Error("Isolated service paths must be normalized absolute paths without unit specifiers");
+    }
+  }
+  if (mutable.some(path => !insideHome(path))) {
+    throw new Error("Personal mutable paths must be inside the private home");
+  }
+  if (immutable.some(path => insideHome(path) || privateHome.startsWith(`${path}${sep}`) ||
+      path === "/" || path.startsWith("/home/") || path.startsWith("/root/"))) {
+    throw new Error("Service code and configuration must be outside writable or hidden homes");
+  }
+  const rendered = renderInstanceServiceUnit(options);
+  const restrictions = [
+    `User=${options.user}`, `Group=${options.group}`, "SupplementaryGroups=",
+    "NoNewPrivileges=yes", "CapabilityBoundingSet=", "AmbientCapabilities=",
+    "ProtectSystem=strict", "ProtectHome=yes", "PrivateTmp=yes",
+    "RestrictSUIDSGID=yes", "ProtectKernelTunables=yes", "ProtectKernelModules=yes",
+    "ProtectControlGroups=yes", "RestrictRealtime=yes", "LockPersonality=yes",
+    "ProtectProc=invisible",
+    `NetworkNamespacePath=/run/netns/${options.networkNamespace}`,
+    `BindReadOnlyPaths=${quote(`${options.resolverPath}:/etc/resolv.conf`)}`,
+    ...Object.entries(endpointEnv).map(([key, value]) => `Environment=${quote(`${key}=${value}`)}`),
+    `ReadWritePaths=${quote(privateHome)}`, `Environment=${quote(`HOME=${privateHome}`)}`,
+  ].join("\n");
+  return {
+    ...rendered,
+    contents: rendered.contents.replace("[Unit]\n", `[Unit]\nRequires=pi-isolated-network-${options.networkNamespace}.service pi-trusted-broker-${config.instanceId}.service\nAfter=pi-isolated-network-${options.networkNamespace}.service pi-trusted-broker-${config.instanceId}.service\n`)
+      .replace("[Service]\n", `[Service]\n${restrictions}\n`)
+      .replace("WantedBy=default.target", "WantedBy=multi-user.target"),
+  };
 }
 
 function assertUniqueConfigField(

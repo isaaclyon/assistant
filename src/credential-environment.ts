@@ -1,5 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { FEATURE_FLAGS, isFeatureEnabled, isFeatureFlag } from "./feature-flags.js";
+import { assertAdministratorPath } from "./isolation-admin-path.js";
 
 export type CredentialScope =
   | "isaac-personal"
@@ -55,11 +56,13 @@ export async function validateCredentialEnvironmentFile(
     throw new Error(`Unknown credential scope: ${expectedScope}`);
   }
   const metadata = await stat(path);
-  if ((metadata.mode & 0o777) !== 0o600) {
+  const administratorOwned = metadata.uid === 0 && (metadata.mode & 0o777) === 0o440;
+  if (administratorOwned) await assertAdministratorPath(path);
+  if (!administratorOwned && (metadata.mode & 0o777) !== 0o600) {
     throw new Error(`Credential environment file must have mode 0600: ${path}`);
   }
   const currentUid = process.getuid?.();
-  if (currentUid !== undefined && metadata.uid !== currentUid) {
+  if (!administratorOwned && currentUid !== undefined && metadata.uid !== currentUid) {
     throw new Error(`Credential environment file must be owned by the service user: ${path}`);
   }
 

@@ -13,13 +13,15 @@ import { startTakeoverServer, type TakeoverResult } from "./browser-takeover-ser
 import type { BridgeInstanceConfig } from "./config.js";
 import { protectPrivateLogin, validatePrivateLoginRequest, type PrivateLoginRequest } from "./private-login.js";
 import { privateLoginCredential } from "./private-login-credential.js";
+import { privateApprovedCredential } from "./private-approved-credential.js";
 import type { PrivateLoginOperations } from "./browser-takeover-server.js";
+import { privateBrowserEndpoint } from "./private-browser-endpoint.js";
 
 const exec = promisify(execFile);
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const serveStatus = async () => JSON.parse((await exec("tailscale", ["serve", "status", "--json"], { timeout: 5_000, maxBuffer: 2_000_000 })).stdout);
 const httpsPort = 8447;
-type Result = TakeoverResult | { status: "unavailable" | "browser_blocked" };
+type Result = (TakeoverResult | { status: "unavailable" | "browser_blocked" }) & { copiedCredentialItem?: string; credentialCopyStatus?: "unknown" };
 
 export async function runBrowserTakeover(options: {
   config: BridgeInstanceConfig; request: TakeoverRequest; chatId: number; threadId?: number;
@@ -49,11 +51,13 @@ export async function runBrowserTakeover(options: {
     let proxy: ChildProcess | undefined, messageId: number | undefined;
     let handoffStarted = false, gateOwned = false, cleanupFailed = false;
     let result: Result = { status: "unavailable" };
+    let copiedCredentialItem: string | undefined, credentialCopyStatus: "unknown" | undefined, finishWithoutHandoff = false;
     const controller = new AbortController();
     const abort = () => controller.abort();
     options.signal.addEventListener("abort", abort, { once: true });
     try {
-      assertDemoPortUnused(await serveStatus(), httpsPort);
+      const fixed = privateBrowserEndpoint("takeover");
+      if (!fixed) assertDemoPortUnused(await serveStatus(), httpsPort);
       await writeFile(location.protectedPath, JSON.stringify({ version: 1, launchId: browser.launchId, requestId: randomUUID(), purpose: "takeover" }), { mode: 0o600, flag: "wx" });
       gateOwned = true;
       const binary = await executable("agent-browser", process.env.STOCK_BROWSER_AGENT_BROWSER);
@@ -63,18 +67,53 @@ export async function runBrowserTakeover(options: {
         const loginRequest = options.login, loginAbort = new AbortController();
         const loginSignal = AbortSignal.any([controller.signal, loginAbort.signal]);
         const page = await protectPrivateLogin(browser.port, loginRequest, loginSignal);
-        const canUseSaved = () => { const state = page.state(); return state.state === "fields" && !state.fields.includes("code") && (state.fields.includes("username") || page.hasUsername()); };
-        login = { state: page.state, submit: page.submit, canUseSaved, close: () => { loginAbort.abort(); page.close(); },
+        let retainedCredential: { username: string; password: string } | undefined;
+        let credentialAttempted = false;
+        const clearCredential = () => {
+          if (retainedCredential) { retainedCredential.username = ""; retainedCredential.password = ""; retainedCredential = undefined; }
+        };
+        const canUseSaved = () => { const state = page.state(); return !(credentialAttempted && !retainedCredential) && state.state === "fields" && !state.fields.includes("code") && (state.fields.includes("username") || page.hasUsername()); };
+        login = { state: page.state, submit: page.submit, canUseSaved, close: () => { loginAbort.abort(); clearCredential(); page.close(); },
           ...(loginRequest.credentialItem ? { saved: async () => {
             const state = page.state();
             if (state.state !== "fields" || !canUseSaved()) return;
-            const credential = await privateLoginCredential(config, loginRequest.credentialItem!, loginRequest.pageUrl, loginSignal);
-            if (!credential) return;
-            try { if (state.fields.includes("username") || page.matchesUsername(credential.username)) return state.fields.map(kind => kind === "username" ? credential.username : credential.password); }
-            finally { credential.username = ""; credential.password = ""; }
+            if (!credentialAttempted) {
+              credentialAttempted = true;
+              retainedCredential = await privateLoginCredential(config, loginRequest.credentialItem!, loginRequest.pageUrl, loginSignal);
+            }
+            if (!retainedCredential || loginSignal.aborted) { clearCredential(); return; }
+            if (state.fields.includes("username") || page.matchesUsername(retainedCredential.username)) {
+              return state.fields.map(kind => kind === "username" ? retainedCredential!.username : retainedCredential!.password);
+            }
           } } : {}),
         };
+        if (loginRequest.credentialItem?.startsWith("source:")) {
+          credentialAttempted = true;
+          options.notifyWaiting();
+          const approved = await privateApprovedCredential(loginRequest.credentialItem.slice(7), new URL(loginRequest.pageUrl).origin,
+            loginRequest.purpose!, loginSignal);
+          copiedCredentialItem = approved.copiedItem;
+          if (approved.status !== "approved") {
+            credentialCopyStatus = approved.copyStatus;
+            result = approved.status === "unavailable" ? { status: "unavailable" } : { status: "cancelled", mode: "private" };
+            finishWithoutHandoff = true;
+          } else {
+            retainedCredential = approved.credential;
+            // The protected page permits each field kind only once and rechecks
+            // the exact origin and bound form immediately before submission.
+            for (let step = 0; step < 2 && canUseSaved(); step++) {
+              const values = await login.saved!();
+              if (!values) break;
+              await page.submit(values);
+            }
+            clearCredential();
+            if (page.state().state === "complete") {
+              result = { status: "submitted", mode: "private" }; finishWithoutHandoff = true;
+            }
+          }
+        }
       }
+      if (!finishWithoutHandoff) {
       if (options.signal.aborted) throw new Error();
       handoffStarted = true;
       const handoff = await startPrivateHandoff(request.session);
@@ -83,11 +122,15 @@ export async function runBrowserTakeover(options: {
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.uid !== process.getuid?.() || (metadata.mode & 0o077)) throw new Error();
       const password = (await readFile(handoff.passwordPath, "utf8")).trim();
       if (!/^[A-Za-z0-9_-]{8}$/.test(password)) throw new Error();
-      const dns = JSON.parse((await exec("tailscale", ["status", "--json"], { timeout: 5_000, maxBuffer: 2_000_000 })).stdout).Self?.DNSName;
-      if (typeof dns !== "string" || !/^[a-z0-9.-]+\.ts\.net\.$/.test(dns)) throw new Error();
-      const hostPort = `${dns.slice(0, -1)}:${httpsPort}`, origin = `https://${hostPort}`;
+      let origin = fixed?.origin;
+      if (!origin) {
+        const dns = JSON.parse((await exec("tailscale", ["status", "--json"], { timeout: 5_000, maxBuffer: 2_000_000 })).stdout).Self?.DNSName;
+        if (typeof dns !== "string" || !/^[a-z0-9.-]+\.ts\.net\.$/.test(dns)) throw new Error();
+        origin = `https://${dns.slice(0, -1)}:${httpsPort}`;
+      }
       if (controller.signal.aborted) throw new Error();
       server = await startTakeoverServer({ ...profile, origin, resourceRoot: config.resourceRoot, upstreamPort: handoff.webPort,
+        ...(fixed ? { listen: fixed.listen } : {}),
         password, resumeUrl: request.resumeUrl, signal: controller.signal,
         ...(login ? { login } : {}),
         resize: async viewport => {
@@ -97,15 +140,18 @@ export async function runBrowserTakeover(options: {
           await resizePrivateHandoff(request.session, size.width, size.height);
         },
         durationMs: Math.max(1, Date.parse(handoff.expiresAt) - Date.now()) });
-      const target = `http://127.0.0.1:${server.port}`;
+      const target = `http://${fixed?.listen.host ?? "127.0.0.1"}:${server.port}`;
+      if (!fixed) {
       proxy = spawn("sudo", ["-n", "tailscale", "serve", "--yes", "--bg=false", `--https=${httpsPort}`, target], { stdio: "ignore" });
       proxy.once("error", abort); proxy.once("exit", abort);
       let ready = false;
       for (let i = 0; i < 30 && !controller.signal.aborted; i++) {
-        if (isPrivateDemoProxy(await serveStatus(), hostPort, target)) { ready = true; break; }
+        if (isPrivateDemoProxy(await serveStatus(), new URL(origin).host, target)) { ready = true; break; }
         await sleep(200);
       }
-      if (!ready || controller.signal.aborted || !(await fetch(`${origin}/healthz`, { signal: AbortSignal.timeout(5_000) })).ok) throw new Error();
+      if (!ready || controller.signal.aborted) throw new Error();
+      }
+      if (!(await fetch(`${fixed ? target : origin}/healthz`, { signal: AbortSignal.timeout(5_000) })).ok) throw new Error();
       if (controller.signal.aborted) throw new Error();
       messageId = await demoTelegramRequest(profile.botToken, "sendMessage", {
         chat_id: profile.userId, ...(options.threadId ? { message_thread_id: options.threadId } : {}),
@@ -114,6 +160,7 @@ export async function runBrowserTakeover(options: {
       });
       options.notifyWaiting();
       result = await server.done;
+      }
     } catch { result = controller.signal.aborted ? { status: "cancelled", mode: "private" } : { status: "unavailable" }; }
     finally {
       options.signal.removeEventListener("abort", abort); controller.abort();
@@ -161,6 +208,6 @@ export async function runBrowserTakeover(options: {
         text: result.status === "submitted" ? "Sign-in details submitted. The assistant will check the result." : result.status === "handed_back" ? "Browser handed back. The assistant will continue." : result.status === "expired" ? "Browser takeover expired. The private view is closed." : "Browser takeover ended. The assistant will explain the next step.",
       }).catch(() => {});
     }
-    return result;
+    return { ...result, ...(copiedCredentialItem ? { copiedCredentialItem } : {}), ...(credentialCopyStatus ? { credentialCopyStatus } : {}) };
   }));
 }

@@ -1,5 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { runtimeTelegramFetch } from "./runtime-telegram-transport.js";
 
 interface ServeConfig {
   TCP?: Record<string, unknown>;
@@ -50,7 +51,7 @@ export async function demoTelegramRequest(
   token: string,
   method: "sendMessage" | "editMessageText",
   body: object,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = runtimeTelegramFetch,
 ): Promise<number> {
   try {
     const response = await fetchImpl(`https://api.telegram.org/bot${token}/${method}`, {

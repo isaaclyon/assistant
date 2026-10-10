@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { runtimeTelegramFetch } from "./runtime-telegram-transport.js";
 
 import type { BridgeTelegramSurface } from "./instances.js";
 
@@ -24,7 +25,7 @@ export async function sendTelegramNotification({
   telegramSurface = { type: "private" },
   text,
   failureLabel,
-  fetchImpl = fetch,
+  fetchImpl = runtimeTelegramFetch,
 }: TelegramNotificationOptions): Promise<void> {
   const configPath = join(agentDir, "telegram.json");
   let config: TelegramConfigFile;

@@ -1,5 +1,6 @@
 import { loadBridgeInstanceConfig } from "./config.js";
 import { startBridgeHost } from "./host.js";
+import { installTrustedTelegramFetch } from "./trusted-telegram-ipc.js";
 import {
   awaitShutdownDisposal,
   bindProcessShutdownSignals,
@@ -17,6 +18,7 @@ import {
 } from "./runtime-metadata.js";
 
 const config = await loadBridgeInstanceConfig();
+if (process.env.PI_TELEGRAM_TRUSTED_SOCKET) installTrustedTelegramFetch(process.env.PI_TELEGRAM_TRUSTED_SOCKET);
 
 const latch = createShutdownLatch((reason) => {
   console.log(`Shutdown requested (${reason}).`);

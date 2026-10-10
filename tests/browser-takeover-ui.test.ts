@@ -26,7 +26,12 @@ async function fixture(initData = "signed-synthetic", login = false) {
     ResizeObserver: class { constructor(callback: Function) { resize = callback; } observe() {} },
     fetch, WebSocket: Socket, URLSearchParams, AbortSignal, setTimeout: (callback: Function, ms: number) => { if (ms === 300) timer = callback; return 1; }, clearTimeout() {},
   });
-  await new Promise(r => setTimeout(r, 10)); handlers.get("connect")?.();
+  if (initData && !login) {
+    await vi.waitFor(() => expect(handlers.has("connect")).toBe(true));
+    handlers.get("connect")!();
+  } else if (initData) {
+    await vi.waitFor(() => expect(el("login-fields").children.length).toBeGreaterThan(0));
+  }
   return { el, fetch, sendKey, disconnect, close, disableClosingConfirmation, resize: (next: number) => { height = next; resize(); timer(); }, flush: () => timer() };
 }
 describe("takeover Mini App", () => {

@@ -60,6 +60,17 @@ describe("protected operation lifecycle", () => {
     expect(await run()).toEqual({ status: "browser_blocked" });
     expect(await readFile(join(h.root, "protected-input.json"), "utf8")).not.toContain("synthetic-secret-123");
   });
+  it("binds the provisioned endpoint without acquiring host proxy authority", async () => {
+    vi.stubEnv("PI_TELEGRAM_TRUSTED_SOCKET", "/run/synthetic/socket");
+    vi.stubEnv("PI_PRIVATE_BROWSER_BIND_ADDRESS", "10.253.250.2");
+    vi.stubEnv("PI_PRIVATE_INPUT_ORIGIN", "https://test.tail123.ts.net:8446");
+    vi.stubEnv("PI_PRIVATE_TAKEOVER_ORIGIN", "https://test.tail123.ts.net:8447");
+    expect(await run()).toEqual({ status: "submitted" });
+    expect(h.serverOptions.listen).toEqual({ host: "10.253.250.2", port: 8446 });
+    expect(h.spawn).not.toHaveBeenCalled();
+    expect(h.exec.mock.calls.every(call => call[0] === "agent-browser")).toBe(true);
+    expect(h.serverClose).toHaveBeenCalledOnce();
+  });
   it("rejects other chats before creating a listener or touching Chrome", async () => {
     expect(await run(456)).toEqual({ status: "unavailable" }); expect(h.spawn).not.toHaveBeenCalled(); expect(h.prepare).not.toHaveBeenCalled();
   });
