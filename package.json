@@ -27,10 +27,10 @@
     "typecheck:telegram": "tsc -p node_modules/@llblab/pi-telegram/tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.87.1",
-    "@earendil-works/pi-ai": "0.87.1",
-    "@earendil-works/pi-coding-agent": "0.87.1",
-    "@earendil-works/pi-tui": "0.87.1",
+    "@earendil-works/pi-agent-core": "1.0.0",
+    "@earendil-works/pi-ai": "1.0.0",
+    "@earendil-works/pi-coding-agent": "1.0.0",
+    "@earendil-works/pi-tui": "1.0.0",
     "@howaboua/pi-codex-conversion": "3.0.39",
     "@howaboua/pi-codex-web-run": "0.0.4",
     "@llblab/pi-telegram": "https://codeload.github.com/isaaclyon/pi-telegram/tar.gz/dc84d2038ce80d83406f1ea767df2fd99906cc3c",
