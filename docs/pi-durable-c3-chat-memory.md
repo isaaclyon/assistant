@@ -164,11 +164,14 @@ That check exposed OpenAI's prohibition on top-level union function schemas. The
 memory wire schema now has a flat object root, with exact action validation before
 any domain call; malformed branch arguments are regression-tested without effects.
 
-The configured Jev service returned HTTP 401. Enabled recall acceptance is blocked
-until valid private authorization is supplied; the successful provider diagnostic
-used recall off and makes no automatic-recall acceptance claim. No interactive C3
-poller started. The bounded dedicated fixture and restart supervisor are prepared
-outside the repository; private credential copies are retired while awaiting input.
+The initial configured Jev credential returned HTTP 401. On 2026-10-17, an
+authorized replacement passed the enabled-recall smoke: Jev returned HTTP 200,
+recall recorded an injected note, OpenAI returned HTTP 200 and the seeded fact,
+and both embedding requests returned HTTP 200 with semantic-ready hybrid retrieval.
+This used the actual compiled native application with a fake Telegram transport;
+the dedicated live user checkpoint remains pending. No interactive C3 poller
+started. The bounded dedicated fixture and restart supervisor are prepared outside
+the repository; private credential copies were retired after the smoke.
 
 The pending dedicated checkpoint must use Jev recall and semantic search enabled,
 exercise chat/save/recall/edit and direct confirmation across restart, and record
