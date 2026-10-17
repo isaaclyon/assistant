@@ -95,7 +95,7 @@ Each checkpoint records deliverables, passing evidence, unresolved failures, and
 - Inventory all 14 selected extension resources, their tools/commands, skills and instructions, external dependencies, and 11 install patches.
 - Map each existing behavior/test and owning ADR to its native owner and checkpoint, using full ADR filenames where numbers are reused. Distinguish implemented capabilities from prototypes and only preserve configured/supported behavior.
 - Inventory state by owner, durability meaning, retention rule, writer, migration need, and recovery procedure.
-- Resolve the transition contracts above: code/runtime coexistence, exact dependency pins and upgrade gates, weekly update handling, staged activation, mixed-fleet jobs, and the named MVP profile. Inspect release APIs, provider/auth changes, schema compatibility, and Telegram fork changes.
+- Resolve each [transition contract](#transition-contracts-to-settle-at-c0). Inspect release APIs, provider/auth changes, schema compatibility, and Telegram fork changes.
 - Define the Telegram adapter surface: admission, steering/follow-up, final settlement, abort/new/compact, model/thinking, commands/sections, media, and target-scoped output. Cover ordinary polling/config/offset/lock ownership and isolated broker transport separately. Specify the existing five-second ownership monitor, valid external Pi owner handling, stale-heartbeat recovery and reconnect behavior.
 - Define source IDs, conversation rotation, delivery outcomes, approval/operation records, and tool replay policy. Identify required atomic transactions versus explicitly reconciled cross-store boundaries. Specify the inbox-to-Harness receipt and retry protocol, including a crash after admission but before inbox removal, and the proof required before retiring the front buffer.
 - Define the failure model: process kill, storage failure, host/power loss, and external delivery have different guarantees. Release 1.3.0's default SQLite WAL/NORMAL protects process-crash recovery but can lose newest acknowledged commits on host/power failure. Preserve stronger existing ledger guarantees; prove a supported stronger storage configuration if acceptance requires it.
@@ -103,7 +103,7 @@ Each checkpoint records deliverables, passing evidence, unresolved failures, and
 - Decide the storage retention approach before moving existing seven-day subagent cleanup into append-only Harness history.
 - Establish synthetic fixtures, failure-injection points, and current performance baselines using disposable state.
 
-**Pass gate:** every current capability, durable record, and patch has an owner and disposition; no unspecified authority, input identity, or storage-retention boundary remains hidden in the implementation estimate. The transition contracts name the release/dependency strategy, upgrade policy, canary activation work, mixed-runtime handoff policy and MVP profile. Both Telegram transport modes and inbox handoff/retirement have explicit owners and acceptance cases.
+**Pass gate:** every current capability, durable record, and patch has an owner and disposition; no unspecified authority, input identity, or storage-retention boundary remains hidden in the implementation estimate. Each [transition contract](#transition-contracts-to-settle-at-c0) has a recorded decision, implementation owner and acceptance cases. Both Telegram transport modes and inbox handoff/retirement have explicit owners and acceptance cases.
 
 **Decision:** approve the detailed contracts and release pins for the pilot. Accepted ADRs remain in force until an explicit successor is approved.
 
@@ -151,7 +151,7 @@ This is the first usable assistant checkpoint, on a dedicated test instance usin
 
 **Deliverables**
 
-- Telegram text conversation, streaming/final rendering, buttons/sections, model/thinking selection, new/abort/compact, reload/restart, skills listing and essential diagnostics.
+- Telegram text conversation, streaming/final rendering, buttons/sections, model/thinking selection, new/abort/compact, reload/restart, skills listing and `/debug` for MVP tool activity, lifecycle, core/date context and recall. Preserve target scoping, redaction and bounded output; extend diagnostics as later integrations arrive.
 - Native `assistant_memory` with existing CRUD, draft duplicate review, revisions, append/list behavior, user approval rules, and safe recovery for mutations and confirmation delivery.
 - Native core memory, date context, automatic recall/proposals and memory usage/decay behavior. Maintain current feature flags and per-principal filtering.
 - Native memory/session search, bounded session-context reads, and index maintenance. Preserve legacy citations; index new durable conversations with a stable source locator understood by search, context expansion, and provenance lint. A small backend discriminator/resolver is sufficient; do not convert the old transcript archive.
@@ -172,7 +172,7 @@ Implement in this order, reusing domain code:
 2. **Direct Telegram applications:** places ranking/menu flows, durable comparison progress, callback routing and model-to-section handoff.
 3. **Guarded mutations:** Calendar create/update/delete and places destructive actions. Carry stable operation identity, current revision checks, explicit confirmation policy and ambiguous-outcome reconciliation through restart.
 4. **Protected browser operations:** private input, multistep login, OpenTable adapter, email verification, takeover, and approved credential delivery. Preserve the current browser gate and private data boundary.
-5. **Provider and operator parity:** web tool behavior, fast-mode control, subscription usage reporting, debug, deployment controls, and profile-specific command visibility.
+5. **Provider and operator parity:** web tool behavior, fast-mode control, subscription usage reporting, diagnostics for newly ported integrations, deployment controls, and profile-specific command visibility. The `/debug` command and MVP diagnostics already belong to C3.
 
 Classify each tool operation separately: a mixed read/write tool must not be declared replay-safe just because its read operations are harmless. Existing external idempotency/revision limits remain documented.
 
@@ -234,7 +234,7 @@ Browser recovery is a separate acceptance boundary. A surviving browser process 
 | `core-memory` | Native prompt section using current scoped compiler | C3 |
 | `search` | Native search tools and explicit durable turn-preparation/context handling | C3 |
 | `memory` | Native CRUD wrapper; durable draft/confirmation/operation state around existing executor | C3 |
-| `reload`, `restart`, `skills`, `debug` | Host/Telegram commands and diagnostics with explicit lifecycle ownership | C2–C3 |
+| `reload`, `restart`, `skills`, `debug` | Host/Telegram commands and MVP diagnostics with explicit lifecycle ownership; extend diagnostics with later integrations | C2–C3; integration coverage C4 |
 | `places` | Native tool plus direct sections/callbacks; retain ranking/application store | C4 |
 | `google-workspace` | Native typed operations; retain transport/cache and operation-specific write recovery | C4 |
 | `private-browser-input` | Native wrappers and host guard around existing protected operations; broker stays authoritative | C4 |
@@ -257,7 +257,7 @@ Required cross-cutting assertions:
 - Authority: profile filters before imports, actor/chat/thread binding, broker ownership, stale/replayed confirmations, child guard selection, and current authorization on recovery.
 - Context/history: legacy anchors, stable new anchors, hidden recall, compaction/reset semantics, original timestamps, per-principal indexing, and feature flags.
 - Operations: single writer/poller, ordinary and broker transport ownership, inbox admission receipts and retirement, blocked task definitions, version migrations, bounded close, storage failure, queued-input failure behavior, disk growth, retention and deployment holds.
-- Transition: isolated dependency trees or approved aligned upgrades, legacy runtime compatibility, explicit MVP profile selection, mixed-runtime handoff contracts, and observed per-instance activation through the approved deployment path.
+- Transition: run the acceptance cases recorded for each approved [transition contract](#transition-contracts-to-settle-at-c0) across its supported runtime combinations.
 
 Run `npm run check:changed` and `npm run build` after code changes. Use `npm run check` for full checkpoint/release gates and ensure browser integration suites follow repository naming/selection rules. Live provider, Telegram, browser and Linux/systemd evidence is distinct from offline tests; mark any unverified path explicitly. No checkpoint passes solely because types compile.
 
@@ -272,11 +272,11 @@ Before production rollout, choose the canary, observation interval, live validat
 ## Evidence and owning references
 
 - [Architecture](../ARCHITECTURE.md), [capability profiles](../.pi/capabilities.json), [package pins](../package.json), [Pi upgrade gates](pi-upgrades.md), and [household fleet runbook](household-fleet.md).
-- Runtime and transport: [ADR-0002: pinned Telegram fork](adr/0002-pin-pi-telegram-fork-for-host-session-actions.md), [ADR-0003: inbound inbox](adr/0003-durable-inbound-inbox.md), [ADR-0013: settled replies](adr/0013-finalize-telegram-turns-after-pi-retries.md).
-- Deployment and isolation: [ADR-0005: deployment runner](adr/0005-deploy-from-a-self-hosted-runner.md), [ADR-0020: household fleet](adr/0020-run-a-household-bot-fleet-from-one-release.md), [ADR-0051: isolated runtime and credential approvals](adr/0051-isolate-personal-runtime-and-credential-approvals.md).
+- Runtime and transport: [ADR-0002: pinned Telegram fork](adr/0002-pin-pi-telegram-fork-for-host-session-actions.md), [ADR-0003: inbound inbox](adr/0003-durable-inbound-inbox.md), [ADR-0009: isolated instruction source](adr/0009-isolate-telegram-agent-instructions.md), [ADR-0013: settled replies](adr/0013-finalize-telegram-turns-after-pi-retries.md).
+- Deployment and isolation: [ADR-0005: deployment runner](adr/0005-deploy-from-a-self-hosted-runner.md), [ADR-0020: household fleet](adr/0020-run-a-household-bot-fleet-from-one-release.md), [ADR-0031: remove the compatibility singleton](adr/0031-remove-the-compatibility-singleton.md), [ADR-0051: isolated runtime and credential approvals](adr/0051-isolate-personal-runtime-and-credential-approvals.md).
 - Jobs and background work: [ADR-0010: scheduled jobs](adr/0010-scheduled-jobs-and-triggers.md), [ADR-0019: heartbeat observations](adr/0019-stateful-heartbeat-observations.md), [ADR-0021: bounded subagents](adr/0021-bounded-read-only-background-subagents.md), [ADR-0030: occurrences and acceptance](adr/0030-record-scheduled-occurrences-and-recipient-acceptance.md), [ADR-0031: heartbeat judgments](adr/0031-judge-heartbeat-items-with-jev.md), [ADR-0032: checker arguments](adr/0032-pass-bounded-arguments-to-heartbeat-checkers.md), [ADR-0050: incremental inbox heartbeats](adr/0050-incremental-inbox-heartbeats.md).
 - History and routing: [ADR-0017: provenance](adr/0017-validate-personal-memory-session-provenance.md), [ADR-0026: derived search indexes](adr/0026-use-derived-fts-indexes-for-memory-and-session-search.md), [ADR-0022: idle rotation](adr/0022-rotate-sessions-after-human-inactivity.md), [ADR-0033: Jev routing](adr/0033-route-conversations-with-jev.md).
-- Memory and guarded writes: [ADR-0035: memory operations](adr/0035-typed-memory-operations.md), [ADR-0036: Calendar writes](adr/0036-guarded-calendar-writes.md), [ADR-0037: automatic recall](adr/0037-recall-memory-with-jev-before-each-turn.md), [ADR-0038: date context](adr/0038-resolve-date-context-before-memory-recall.md), [ADR-0045: usage and decay](adr/0045-rank-memory-by-usage-and-decay.md), [ADR-0046: recall filtering](adr/0046-filter-automatic-recall-candidates.md), [ADR-0047: memory proposals](adr/0047-propose-memories-in-batched-jev-recall.md).
+- Memory and guarded writes: [ADR-0015: bridge-only core memory](adr/0015-inject-core-memory-only-in-the-bridge-runtime.md), [ADR-0035: memory operations](adr/0035-typed-memory-operations.md), [ADR-0036: Calendar writes](adr/0036-guarded-calendar-writes.md), [ADR-0037: automatic recall](adr/0037-recall-memory-with-jev-before-each-turn.md), [ADR-0038: date context](adr/0038-resolve-date-context-before-memory-recall.md), [ADR-0045: usage and decay](adr/0045-rank-memory-by-usage-and-decay.md), [ADR-0046: recall filtering](adr/0046-filter-automatic-recall-candidates.md), [ADR-0047: memory proposals](adr/0047-propose-memories-in-batched-jev-recall.md).
 - Protected browser: [ADR-0040: private input](adr/0040-protected-telegram-browser-input.md), [ADR-0041: OpenTable](adr/0041-protected-opentable-sign-in.md), [ADR-0042: email codes](adr/0042-private-email-verification-codes.md), [ADR-0044: takeover](adr/0044-telegram-browser-takeover.md), [ADR-0045: multistep login](adr/0045-private-multistep-browser-login.md).
 - Features and diagnostics: [ADR-0043: feature flags](adr/0043-per-instance-feature-flags.md), [ADR-0046: debug messages](adr/0046-telegram-debug-messages.md), [ADR-0046: model usage and pace](adr/0046-telegram-model-usage-and-pace.md).
 

@@ -409,3 +409,9 @@ Daemon shutdown gives that graceful disposal a bounded ten-second window. If an 
 ## Known limitation
 
 Inbound turns are crash-durable through the bridge inbox, but outbound Telegram replies are not queued durably. A failed send leaves the generated answer in Pi's persistent session for recovery or re-asking.
+
+## Planned runtime migration
+
+The [pi-durable migration plan](docs/pi-durable-migration-plan.md) records the
+approved target architecture and C0–C7 checkpoints. Implementation has not
+started; the runtime and accepted ADRs described above remain authoritative.
