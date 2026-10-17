@@ -1,0 +1,122 @@
+import { watchEvents, type AgentEvent, type AgentEventStream, type ConversationId, type MessageChange } from '@earendil-works/pi-durable';
+import type { NativeConfig } from './config.js';
+import type { DurableHost } from './host.js';
+import { Bindings, context, type Target } from './ingress.js';
+
+type Block = { type?: string; text?: unknown };
+export interface VisibleEventsOptions {
+  host: () => DurableHost;
+  config: NativeConfig;
+  stream: { update(target: Target, turn: string, text: string): void; finish(target: Target, turn: string): Promise<void> };
+  /** Receives fixed lifecycle labels only; the caller gates it to the originating target. */
+  debug: (title: string, value: unknown) => void;
+}
+
+const toolLabel = (name: unknown) => typeof name === 'string' && /^[A-Za-z0-9_.-]{1,64}$/.test(name) ? name : 'tool';
+/** Only assistant text blocks count; thinking, tool calls and everything else stay hidden. */
+const textOf = (blocks: unknown): Map<number, string> => {
+  const out = new Map<number, string>();
+  if (Array.isArray(blocks)) blocks.forEach((b: Block, i) => { if (b?.type === 'text' && typeof b.text === 'string') out.set(i, b.text); });
+  return out;
+};
+
+/** Best-effort observer: errors never reach the caller and never affect durable state. */
+export function createVisibleEvents(options: VisibleEventsOptions) {
+  const target: Target = { chatId: options.config.transport.allowedUserId };
+  let chain: Promise<unknown> = Promise.resolve();
+  let observer: { id: number; cid: ConversationId; watch: AgentEventStream; turns: Set<string>; settle: () => Promise<void> } | undefined;
+  let nextObserver = 0, closed = false;
+  const safeDebug = (title: string, value: unknown) => { try { options.debug(title, value); } catch { /* diagnostics are optional */ } };
+  const queue = <T>(work: () => Promise<T>): Promise<T> => { const run = chain.then(work, work); chain = run.catch(() => undefined); return run; };
+
+  async function isCurrent(cid: ConversationId): Promise<boolean> {
+    const host = options.host();
+    const state = await host.runtime.harness.snapshot(Bindings, host.runtime.root.id, context);
+    return !!state && state.epochs[String(state.epoch)] === cid;
+  }
+
+  async function stop(current: NonNullable<typeof observer>) {
+    if (observer === current) observer = undefined;
+    await current.watch.stop().catch(() => undefined);
+  }
+
+  function start(cid: ConversationId, watch: AgentEventStream) {
+    const me = { id: ++nextObserver, cid, watch, turns: new Set<string>(), settle: async () => {} };
+    observer = me;
+    let seq = 0, turn = '', finished = false, texts = new Map<number, string>(), last = '';
+    const newTurn = () => { turn = `${me.id}:${++seq}`; finished = false; texts = new Map(); last = ''; };
+    const publish = () => {
+      if (observer !== me || finished) return;
+      const text = [...texts.entries()].sort((a, b) => a[0] - b[0]).map(e => e[1]).join('');
+      if (!text.trim() || text === last) return;
+      last = text; me.turns.add(turn);
+      try { options.stream.update(target, turn, text); } catch { /* preview only */ }
+    };
+    const ensureTurn = () => { if (!turn) newTurn(); };
+    const change = (c: MessageChange) => {
+      if (c.type === 'text_start') texts.set(c.contentIndex, (c.block as Block).type === 'text' ? String((c.block as Block).text ?? '') : '');
+      else if (c.type === 'text_delta') texts.set(c.contentIndex, (texts.get(c.contentIndex) ?? '') + c.delta);
+      else if (c.type === 'block') { if ((c.block as Block).type === 'text') texts.set(c.contentIndex, String((c.block as Block).text ?? '')); else texts.delete(c.contentIndex); }
+      else if (c.type === 'message') texts = textOf(c.message.content);
+    };
+    const handle = (event: AgentEvent) => {
+      switch (event.type) {
+        case 'run_start': safeDebug('durable run', { event: 'run_start', inputs: event.inputs.length }); break;
+        case 'run_end': safeDebug('durable run', { event: 'run_end', inputs: event.inputs.length }); break;
+        case 'turn_start': newTurn(); safeDebug('durable turn', { event: 'turn_start' }); break;
+        case 'turn_end': safeDebug('durable turn', { event: 'turn_end' }); break;
+        case 'message_start': {
+          const m = event.message as { role?: string; content?: unknown };
+          if (m.role === 'assistant') { if (!turn || finished) newTurn(); texts = textOf(m.content); last = ''; publish(); }
+          break;
+        }
+        case 'message_update': ensureTurn(); for (const c of event.changes) change(c); publish(); break;
+        case 'tool_execution_start': safeDebug('durable tool', { event: 'start', tool: toolLabel(event.toolName) }); break;
+        case 'tool_execution_end': safeDebug('durable tool', { event: 'end', tool: toolLabel(event.toolName) }); break;
+        case 'auto_retry_start': safeDebug('durable retry', { event: 'retry', attempt: event.attempt }); break;
+        case 'compaction_start': safeDebug('durable compaction', { event: 'start' }); break;
+        case 'compaction_end': safeDebug('durable compaction', { event: 'end', failed: event.error !== undefined }); break;
+        case 'task_failed': safeDebug('durable task', { event: 'failed' }); break;
+        default: break;
+      }
+    };
+    // The snapshot may already hold a partial assistant message for a running turn.
+    const partial = watch.snapshot.generation?.message;
+    if (partial) { newTurn(); texts = textOf(partial.content); publish(); }
+    me.settle = async () => {
+      finished = true; // Late events of this turn are dropped until the next turn or message starts.
+      const turns = [...me.turns]; me.turns.clear();
+      for (const t of turns) await options.stream.finish(target, t).catch(() => undefined);
+    };
+    watch.start(async events => { if (observer !== me) return; for (const e of events) { try { handle(e); } catch { /* ignore malformed event */ } } });
+    void watch.closed.then(() => { if (observer === me) observer = undefined; }, () => { if (observer === me) observer = undefined; });
+  }
+
+  return {
+    attach(cid: ConversationId): Promise<void> {
+      return queue(async () => {
+        if (closed) return;
+        try {
+          if (observer?.cid === cid) return;
+          if (!await isCurrent(cid)) return;
+          const previous = observer;
+          if (previous) await stop(previous);
+          const host = options.host();
+          const watch = await watchEvents(host.runtime.harness, cid, context);
+          if (closed) { await watch.stop().catch(() => undefined); return; }
+          start(cid, watch);
+        } catch (error) { safeDebug('durable observer', { event: 'attach_failed', error: error instanceof Error ? error.name : 'error' }); }
+      });
+    },
+    /** Drops pending previews for seen turns; call before the authoritative final send. */
+    finish(): Promise<void> {
+      return queue(async () => {
+        await observer?.settle();
+      });
+    },
+    close(): Promise<void> {
+      closed = true;
+      return queue(async () => { if (observer) await stop(observer); });
+    },
+  };
+}

@@ -3,6 +3,41 @@
   "resources": {
     "extensions": [
       {
+        "id": "native-core-memory",
+        "path": ".pi/native/core-memory.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-reload",
+        "path": ".pi/native/reload.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-restart",
+        "path": ".pi/native/restart.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-skills",
+        "path": ".pi/native/skills.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-debug",
+        "path": ".pi/native/debug.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-search",
+        "path": ".pi/native/search.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-memory",
+        "path": ".pi/native/memory.mjs",
+        "enabled": true
+      },
+      {
         "id": "debug",
         "path": ".pi/extensions/debug.ts",
         "enabled": true
@@ -152,6 +187,11 @@
     ],
     "instructions": [
       {
+        "id": "telegram-chat-memory-test",
+        "path": ".pi/telegram/chat-memory-test.md",
+        "enabled": true
+      },
+      {
         "id": "durable-foundation-test",
         "path": ".pi/telegram/durable-foundation-test.md",
         "enabled": true
@@ -164,6 +204,12 @@
     ]
   },
   "profiles": [
+    {
+      "id": "durable-chat-memory-test",
+      "extensions": ["native-core-memory", "native-search", "native-memory", "native-reload", "native-restart", "native-skills", "native-debug"],
+      "skills": ["personal-memory"],
+      "instructions": "telegram-chat-memory-test"
+    },
     {
       "id": "durable-foundation-test",
       "extensions": [],

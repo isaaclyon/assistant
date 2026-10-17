@@ -28,6 +28,8 @@ export interface HostConfig {
   controlPolicy:(control:HostControl)=>void|Promise<void>;
   onEpochChange?:(tx:Tx,previousConversationIds:ConversationId[],nextEpoch:number)=>Promise<void>;
   recoveryPreflight?:(harness:Harness)=>Promise<void>;
+  /** Attach best-effort UI observers before any admitted input starts execution. */
+  onConversation?:(conversationId:ConversationId)=>Promise<void>;
   onFatal?:(error:unknown)=>void;
   closeTimeoutMs?:number;
   reconcileIntervalMs?:number;
@@ -79,6 +81,8 @@ export class DurableHost {
     }
     for(const record of Object.values((await harness.snapshot(HostState,root.id,context))?.controls??{}))if(record.status==='pending'||record.status==='executing')await this.config.controlPolicy(record.control);
     await this.config.recoveryPreflight?.(harness);
+    const active = state?.epochs[String(state.epoch)];
+    if (active !== undefined) await this.config.onConversation?.(active);
   }
   private signalReconcile(){
     if(this.closing||this.failed||!this.started)return;
@@ -100,7 +104,7 @@ export class DurableHost {
   /** Resolves after binding AND inbox persistence. Admission runs after acceptance. */
   async receive(input:SourceEnvelope){
     this.assertOpen();const envelope=normalize(input);await this.config.policy(envelope);
-    try{await this.serialize(async()=>{this.assertOpen();await accept(this.runtime,envelope,this.config.idleMs);});}
+    try{await this.serialize(async()=>{this.assertOpen();const accepted=await accept(this.runtime,envelope,this.config.idleMs);await this.config.onConversation?.(accepted.binding.conversationId);});}
     catch(error){if(error instanceof InboxStorageError)this.fatal(error);throw error;}
     void this.reconcile().catch(error=>this.fatal(error));
   }
@@ -182,6 +186,12 @@ export class DurableHost {
       const timeout=setTimeout(()=>{const error=new Error('Control cancellation deadline exceeded');this.fatal(error);reject(error);},this.config.closeTimeoutMs??10_000);
       work.then(()=>{clearTimeout(timeout);resolve();},error=>{clearTimeout(timeout);reject(error);});
     });
+  }
+  /** Run trusted administrative changes on the same line as acceptance/rotation.
+   * The caller validates its authenticated command binding and records identity. */
+  administration<T>(operation:()=>Promise<T>):Promise<T> {
+    this.assertOpen();
+    return this.serialize(async()=>{this.assertOpen();return operation();});
   }
   /** Explicit administrative controls still require authenticated source metadata. */
   rotate(requestId:string,principal:string,target:Target){return this.control({type:'new',requestId,principal,target});}

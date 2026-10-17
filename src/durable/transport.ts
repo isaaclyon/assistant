@@ -3,6 +3,7 @@ import { createTelegramLockRuntime, resolveTelegramLockKey, isProcessAlive, crea
   normalizeTelegramNativeMarkdown, createTelegramPreviewRuntimeState, flushTelegramPreview } from '@llblab/pi-telegram/durable';
 import { dirname } from 'node:path';
 import { trustedTelegramFetch } from '../trusted-telegram-ipc.js';
+import { assertPresentation, toReplyMarkup, type Presentation } from './telegram-ui.js';
 
 export type TelegramTarget = { chatId: number; threadId?: number };
 export type TelegramUpdate = Record<string, unknown> & { update_id: number };
@@ -10,6 +11,8 @@ export interface NativeTelegramHooks {
   /** Resolves only once durable inbox/source binding commits. Rejection never acknowledges. */
   accept(update: TelegramUpdate): Promise<void>;
   failed?(error: unknown): void;
+  /** Called after the update offset is durably advanced. Errors go to failed(). */
+  acknowledged?(updateId: number): void | Promise<void>;
 }
 export type NativeTelegramOptions = { botId: number; allowedUserId: number } & ({
   mode: 'ordinary'; configPath: string; locksPath: string; cwd: string; profile?: string;
@@ -94,6 +97,7 @@ export function createNativeTelegramTransport(options: NativeTelegramOptions) {
           await hooks.accept(structuredClone(update));
           if (!owns() || controller!.signal.aborted) return;
           await persistOffset(update.update_id);
+          try { await hooks.acknowledged?.(update.update_id); } catch (error) { hooks.failed?.(error); }
         }
       } catch (error) {
         if (stopped || controller!.signal.aborted) return;
@@ -177,6 +181,23 @@ export function createNativeTelegramTransport(options: NativeTelegramOptions) {
         sendDraft: (chatId, draft, markdown, params) => call('sendRichMessageDraft', {
           chat_id: chatId, draft_id: draft, rich_message: { markdown, skip_entity_detection: true }, ...params }),
       }, { target });
+    },
+    /** Plain-text message with optional inline buttons. Every call passes the per-effect ownership and pairing check. */
+    async present(target: TelegramTarget, value: Presentation, replyToMessageId?: number) {
+      target = { ...target };
+      const view = assertPresentation(value), markup = toReplyMarkup(view.buttons);
+      const receipt = await call('sendMessage', { chat_id: target.chatId,
+        ...(target.threadId === undefined ? {} : { message_thread_id: target.threadId }),
+        ...(replyToMessageId === undefined ? {} : { reply_parameters: { message_id: replyToMessageId } }),
+        text: view.text, ...(markup ? { reply_markup: markup } : {}) });
+      if (!Number.isSafeInteger(receipt?.message_id)) throw new TelegramDeliveryError('uncertain', 'Telegram receipt missing');
+      return receipt.message_id as number;
+    },
+    /** Replaces text and buttons of an earlier presentation. */
+    async edit(target: TelegramTarget, messageId: number, value: Presentation) {
+      if (!Number.isSafeInteger(messageId) || messageId <= 0) throw new TelegramDeliveryError('failed', 'Invalid message');
+      const view = assertPresentation(value), markup = toReplyMarkup(view.buttons);
+      await call('editMessageText', { chat_id: target.chatId, message_id: messageId, text: view.text, reply_markup: markup ?? { inline_keyboard: [] } });
     },
     /** Explicit callback/control output port; acceptance remains in the durable hook. */
     answerCallback(callbackId: string, text: string) { return call('answerCallbackQuery', { callback_query_id: callbackId, text }); },

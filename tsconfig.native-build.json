@@ -1,7 +1,9 @@
 {
   "extends": "./tsconfig.native.json",
   "include": [
-    "src/durable/**/*.ts"
+    "src/durable/**/*.ts",
+    ".pi/lib/mutation-lock.mjs",
+    ".pi/skills/personal-memory/scripts/*.mjs"
   ],
   "exclude": [
     "tests"

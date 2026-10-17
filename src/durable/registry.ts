@@ -16,13 +16,15 @@ export interface NativeBundle {
   contributions?: Pick<Extension, 'hooks' | 'sections' | 'tasks'>;
   close(): Promise<void>;
 }
-export interface NativeBundleModule { default(): Promise<NativeBundle> | NativeBundle }
+export interface NativeBundleModule { default(context?: unknown): Promise<NativeBundle> | NativeBundle }
 export interface NativeRegistryOptions {
   resourceRoot: string;
   profileId: string;
   /** Must resolve the current principal/target/epoch from host state for this invocation, including recovery. */
   authorize(toolName: string, api: ToolExecutionApi, context: Context): Promise<void>;
   importer?: (canonicalPath: string) => Promise<NativeBundleModule>;
+  /** Explicit host services. Factories cannot acquire ambient runtime identity. */
+  bundleContext?: unknown;
 }
 /** Explicit domain-result conversion. Native structured output requires a declared schema. */
 export function textToolResult(value: JsonValue, isError = false): ToolExecutionResult {
@@ -56,7 +58,7 @@ export async function loadNativeRegistry(options: NativeRegistryOptions) {
     for (const path of selection.extensionPaths) {
       const module = await (options.importer ? options.importer(path) : import(pathToFileURL(path).href) as Promise<NativeBundleModule>);
       if (typeof module.default !== 'function') throw new Error('Selected resource is not a native bundle');
-      const bundle = await module.default();
+      const bundle = await module.default(options.bundleContext);
       bundles.push(bundle);
       if (!bundle.name || extensionNames.includes(bundle.name) || typeof bundle.close !== 'function') throw new Error('Invalid or duplicate native bundle');
       if (bundle.contributions && (!Number.isSafeInteger(bundle.version) || (bundle.version ?? 0) < 1)) throw new Error('Native contributions require a bundle version');

@@ -5,6 +5,8 @@
     "moduleResolution": "NodeNext",
     "strict": true,
     "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": false,
     "rootDir": ".",
     "outDir": "dist",
     "types": [
@@ -16,6 +18,8 @@
   },
   "include": [
     "src/durable/**/*.ts",
-    "tests/durable/**/*.ts"
+    "tests/durable/**/*.ts",
+    ".pi/lib/mutation-lock.mjs",
+    ".pi/skills/personal-memory/scripts/*.mjs"
   ]
 }

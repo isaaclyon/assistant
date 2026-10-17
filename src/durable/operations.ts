@@ -50,8 +50,9 @@ export type MemoryReconciliation =
 type Settled = MemoryReconciliation | { status: 'interrupted'; reason: string };
 /** C3 must hold the canonical mutation lock through authority/revision checks and
  * Markdown replacement. Persist an operation receipt alongside the domain effect.
- * Reconcile is read-only: an absent receipt is NOT permission to repeat an append.
- * Git completion is a distinct result; uncertain Git must never repeat Markdown. */
+ * Reconcile never repeats Markdown: an absent receipt is NOT permission to repeat
+ * an append. A matching receipt may finish its separately identified local Git
+ * commit. Git completion is a distinct result; uncertain Git never repeats Markdown. */
 export interface MemoryOperationExecutor {
   readonly name: string;
   readonly version: number;
@@ -149,9 +150,12 @@ export function createMemoryOperations(options: { authority: MemoryOperationAuth
           try { await assertAuthority(); invoked = true; } catch { result = { status: 'interrupted', reason: 'Memory authority changed before effect' }; }
           if (invoked) result = { status: 'succeeded', result: await executor.execute(selected, { signal: runtime.signal, assertAuthority }) };
         }
-      } catch {
-        // A thrown executor may have replaced Markdown. Never infer failure/no effect.
-        result = { status: 'unknown', reason: 'Executor interrupted; domain outcome requires inspection' };
+      } catch (error) {
+        // Only the executor's proven pre-effect boundary can establish no effect.
+        // All other exceptions may follow a successful Markdown replacement.
+        result = !recover && (error as { definitelyNotApplied?: unknown } | null)?.definitelyNotApplied === true
+          ? { status: 'interrupted', reason: 'Memory request rejected before its effect' }
+          : { status: 'unknown', reason: 'Executor interrupted; domain outcome requires inspection' };
       }
       await runtime.commit(async tx => {
         const op = find(await tx.doc(MemoryOperations, runtime.conversationId), selected.id);
@@ -231,7 +235,7 @@ export function createMemoryOperations(options: { authority: MemoryOperationAuth
      * consumed effects retain their receipt identity and can only reconcile. */
     async invalidate(tx: Tx, conversationId: ConversationId, nextEpoch: string, reason: 'new' | 'reload' | 'reset'): Promise<void> {
       const state = await tx.doc(MemoryOperations, conversationId);
-      if (!nextEpoch || nextEpoch === state.epoch) throw new Error('Invalidation requires a fresh epoch');
+      if (!nextEpoch || (reason === 'new' && nextEpoch === state.epoch)) throw new Error('New-conversation invalidation requires a fresh epoch');
       state.epoch = nextEpoch;
       for (const op of state.operations) if (op.status === 'prepared') { op.approval.invalidated = reason; op.status = 'interrupted'; op.reason = reason; }
     },

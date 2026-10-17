@@ -82,7 +82,7 @@ const SECRET_ASSIGNMENT =
 const BASE64_PAYLOAD = /^(?:[A-Za-z0-9+/]{4}){8,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const PRIVATE_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
 
-function safeText(value: string): boolean {
+export function safeText(value: string): boolean {
   const trimmed = value.trim();
   return (
     trimmed.length > 0 &&
@@ -93,13 +93,13 @@ function safeText(value: string): boolean {
   );
 }
 
-function truncateUtf8(value: string, maxBytes: number): { text: string; truncated: boolean } {
+export function truncateUtf8(value: string, maxBytes: number): { text: string; truncated: boolean } {
   const bytes = Buffer.from(value);
   if (bytes.length <= maxBytes) return { text: value, truncated: false };
   return { text: bytes.subarray(0, maxBytes).toString("utf8").replace(/\uFFFD$/u, ""), truncated: true };
 }
 
-function extractText(content: unknown, maxBlockBytes: number): Array<{ text: string; truncated: boolean }> {
+export function extractText(content: unknown, maxBlockBytes: number): Array<{ text: string; truncated: boolean }> {
   if (typeof content === "string") {
     return safeText(content) ? [truncateUtf8(content, maxBlockBytes)] : [];
   }

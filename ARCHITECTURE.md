@@ -9,8 +9,12 @@ WAL/FULL Harness database and retained front-buffer inbox. Source bindings,
 admission receipts, controls, final delivery and ordinary approvals persist
 across restart. The dedicated foundation profile has no domain tools or jobs.
 
-See [ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md) and the
-[C2 guide](docs/pi-durable-c2-foundation.md) for native boundaries and recovery.
+C3 adds the selected chat-and-memory profile: canonical Markdown/Git operation
+receipts, durable user confirmations, scoped native/archive history, request-only
+core/date/recall context and direct Telegram controls. Its dedicated live user
+checkpoint remains pending. See [ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md),
+[ADR-0053](docs/adr/0053-native-chat-memory-and-evidence.md), and the
+[C3 guide](docs/pi-durable-c3-chat-memory.md) for native boundaries and recovery.
 The sections below describe the deployed legacy architecture. Its package,
 source patches and service path remain in the legacy release tree until the
 C6/C7 activation gates pass.
@@ -428,5 +432,7 @@ Inbound turns are crash-durable through the bridge inbox, but outbound Telegram 
 ## Planned runtime migration
 
 The [pi-durable migration plan](docs/pi-durable-migration-plan.md) records the
-approved target architecture and C0–C7 checkpoints. Implementation has not
-started; the runtime and accepted ADRs described above remain authoritative.
+approved target architecture and C0–C7 checkpoints. C0–C2 passed; C3 is
+implemented in a separate native release tree with its live user checkpoint
+pending. The sections above the migration note describe legacy production,
+except for the explicit native branch overview. Production activation remains C7.

@@ -2,7 +2,9 @@
 
 Status: **C2 passed; go to C3.** Native implementation, local integration
 validation and independent review are complete. Production remains on the legacy
-release. C3 chat-and-memory behavior has not been implemented.
+release. This guide records the completed C2 checkpoint; the
+[C3 guide](pi-durable-c3-chat-memory.md) describes the subsequent implementation
+and its pending dedicated live user checkpoint.
 
 Code paths below belong to the isolated `feat/durable-c2` release tree. The legacy
 checkout retains this guide as checkpoint evidence.
@@ -37,9 +39,9 @@ native-safe primitives.
 
 The new `durable-foundation-test` profile intentionally selects no domain tools,
 skills, schedules, browser or general shell/file/web capabilities. Its explicit
-instructions describe that limited surface. C3 will add the already-approved
-`durable-chat-memory-test` profile and its seven bundles; it is not substituted
-with this foundation profile.
+instructions describe that limited surface. C3 adds the already-approved
+`durable-chat-memory-test` profile and its seven bundles; the foundation profile
+is retained separately.
 
 ## Private instance configuration
 
@@ -226,9 +228,10 @@ request has begun cannot recall that external effect; the check protects the
 pre-send boundary. Foundation controls use exact command text; bot-qualified
 forms such as `/new@botname` remain part of C6 Telegram parity.
 
-C3 is the next checkpoint: install the approved chat-and-memory profile, wire
-canonical Markdown/Git execution and direct confirmations, and add scoped
-history/recall. The foundation profile alone is not the chat-and-memory MVP.
+C3 subsequently implemented the approved chat-and-memory profile, canonical
+Markdown/Git execution, direct confirmations and scoped history/recall. Its
+[guide](pi-durable-c3-chat-memory.md) records validation and remaining acceptance.
+The foundation profile alone is not the chat-and-memory MVP.
 
 See [ADR-0052](adr/0052-native-durable-runtime-foundation.md),
 [the roadmap](pi-durable-migration-plan.md), and

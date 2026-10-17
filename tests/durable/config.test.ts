@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { loadNativeConfig } from '../../src/durable/config.js';
+import { nativeMemoryEnvironment } from '../../src/durable/environment.js';
 const dirs: string[] = [];
 afterEach(async () => { await Promise.all(dirs.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 async function fixture() {
@@ -29,6 +30,21 @@ test('rejects unknown fields, scheduling and accidental legacy resource profiles
 test('rejects public configuration and state within the release',async()=>{
  const f=await fixture(); await chmod(f.path,0o644); await expect(loadNativeConfig(f.path)).rejects.toThrow(/private/);
  await chmod(f.path,0o600); f.config.stateDir=f.config.resourceRoot; await f.save(); await expect(loadNativeConfig(f.path)).rejects.toThrow(/overlap/);
+});
+test('chat-memory selection requires explicit scoped paths and provider authorization for enabled features', async () => {
+ const f = await fixture(); f.config.capabilityProfile = 'durable-chat-memory-test';
+ await f.save(); await expect(loadNativeConfig(f.path)).rejects.toThrow(/memory/);
+ const memory = { vaultRoot: join(f.root, 'vault'), gitAutocommit: false, legacySessionRoots: [], timeZone: 'America/New_York', recall: 'off', semantic: 'off' };
+ (f.config as any).memory = memory; await f.save();
+ const selected = await loadNativeConfig(f.path);
+ expect(nativeMemoryEnvironment(selected)).toMatchObject({ PI_TELEGRAM_PRINCIPAL: 'isaac', PI_TELEGRAM_MEMORY_RECALL: 'off', PI_TELEGRAM_MEMORY_VIEW: 'owner-and-household', PI_TELEGRAM_MEMORY_DIR: join(await realpath(f.root), 'vault') });
+ memory.recall = 'jev'; await f.save(); await expect(loadNativeConfig(f.path)).rejects.toThrow(/authorization/);
+ (memory as any).judgeKeyFile = join(f.root, 'judge-key'); await f.save(); await expect(loadNativeConfig(f.path)).resolves.toMatchObject({ memory: { recall: 'jev' } });
+ memory.vaultRoot = join(f.config.resourceRoot, 'private-memory'); await f.save(); await expect(loadNativeConfig(f.path)).rejects.toThrow(/outside/);
+ const alias=join(f.root,'alias');await symlink(f.root,alias);
+ memory.vaultRoot=alias;await f.save();await expect(loadNativeConfig(f.path)).rejects.toThrow(/outside/);
+ memory.vaultRoot=join(alias,'new-vault');await f.save();await expect(loadNativeConfig(f.path)).resolves.toMatchObject({memory:{vaultRoot:join(await realpath(f.root),'new-vault')}});
+ memory.vaultRoot = join(f.root, 'vault'); memory.timeZone = 'Invalid/Timezone'; await f.save(); await expect(loadNativeConfig(f.path)).rejects.toThrow(/timeZone/);
 });
 test('rejects symlinked configuration and broker options that allow direct fallback',async()=>{
  const f=await fixture(); const link=join(f.root,'link.json'); await symlink(f.path,link); await expect(loadNativeConfig(link)).rejects.toThrow(/regular/);

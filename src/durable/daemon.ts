@@ -24,6 +24,7 @@ export async function runNativeDaemon(config:NativeConfig):Promise<void> {
   await status('starting');
   application=await createNativeApplication(config,{
    onFatal:()=>{latch.request('fatal');void status('failed').catch(()=>{});},
+   requestRestart:()=>{latch.request('restart');},
    // Only fixed diagnostics: network errors may contain token-bearing request URLs.
    onTransportFailure:()=>console.error('Native Telegram transport unavailable; ownership recovery remains active.'),
   });

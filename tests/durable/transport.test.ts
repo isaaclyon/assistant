@@ -109,3 +109,17 @@ test('ordinary outbound effects recheck pairing and never send after revocation'
  await expect(transport.deliver({chatId:7},'held answer')).rejects.toMatchObject({definitelyNotSent:true});
  await expect(transport.answerCallback('synthetic','reply')).rejects.toMatchObject({definitelyNotSent:true});expect(sends).toBe(0);
 });
+test('rich presentations and edits pass the per-effect pairing check and validate markup',async()=>{
+ const f=await fixture();const sends:any[]=[];
+ const transport=createNativeTelegramTransport({mode:'ordinary',...f,cwd:f.dir,botId:1,allowedUserId:7,
+ fetch:async(input,init)=>{const method=String(input).split('/').at(-1);const body=JSON.parse(String(init?.body));
+ if(method==='getMe')return ok({id:1});if(method==='getUpdates')return pending(init?.signal);sends.push({method,body});return ok({message_id:5});}});
+ cleanups.push(()=>transport.stop());await transport.start({accept:async()=>{}});
+ expect(await transport.present({chatId:7},{text:'Pick',buttons:[[{text:'Max',callback:'tl:max'}]]})).toBe(5);
+ expect(sends.at(-1)).toMatchObject({method:'sendMessage',body:{chat_id:7,text:'Pick',reply_markup:{inline_keyboard:[[{text:'Max',callback_data:'tl:max'}]]}}});
+ await transport.edit({chatId:7},5,{text:'Done'});expect(sends.at(-1)).toMatchObject({method:'editMessageText',body:{message_id:5,reply_markup:{inline_keyboard:[]}}});
+ await expect(transport.present({chatId:7},{text:'x',buttons:[[{text:'bad',callback:'free-form'}]]})).rejects.toThrow();
+ // Revoked pairing blocks the next UI effect.
+ await writeFile(f.configPath,JSON.stringify({...f.data,allowedUserId:8,profiles:undefined}));
+ const before=sends.length;await expect(transport.present({chatId:7},{text:'y'})).rejects.toMatchObject({definitelyNotSent:true});expect(sends).toHaveLength(before);
+});
