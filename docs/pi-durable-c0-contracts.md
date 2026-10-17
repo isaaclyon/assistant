@@ -1,6 +1,6 @@
 # Pi-durable C0 discovery and contracts
 
-Status: contracts approved; C0 passed for the recorded synthetic local baseline. C1 offline probes and the dedicated live provider/inbound/preview/callback pilot pass. Feasibility evidence is complete; C2 has not started. No production migration has run.
+Status: contracts approved; C0 and C1 passed. C2 native foundation is complete on the isolated `feat/durable-c2` branch with local validation and independent review; go to C3. No production migration has run.
 
 This supplements the [approved migration roadmap](pi-durable-migration-plan.md). It preserves its native-extension strategy, chat-and-memory MVP, Node/systemd hosting, Telegram experience, domain stores and historical evidence. The user approved these contracts for publication and subsequently authorized baseline validation and the C1 pilot. C0 baseline validation is recorded below; live rollout remains C7. Existing ADRs remain authoritative until implementation-specific successors are accepted.
 
@@ -38,7 +38,25 @@ The user subsequently supplied a dedicated test-bot credential and confirmed its
 
 This closes the dedicated inbound/preview/callback evidence gap. The live restart was orderly; hard-kill crash windows remain established by the offline probes. The test used a private bounded polling script, a single section registered in the same order after restart, a fixture domain receipt and API-key authentication. It does not establish general section-token persistence, arbitrary remote exactly-once effects, automatic production polling recovery, broker/native acknowledgement ordering, real OAuth refresh, or client-side visual quality. No production service or deployment changed. Private source references, scripts, timestamps and receipts remain outside the repository.
 
-Checkpoint recommendation: **go to C2**. The recorded C1 feasibility evidence passes; C2 implementation has not started. Keep the prototype non-deployable. C2 must assign production lifecycle ownership and tests to any reused mechanisms, package the fork candidate, and revisit the remaining checkpoint estimates before expanding implementation.
+C1 checkpoint recommendation was **go to C2**. That work is now complete in a
+separate native release tree; the prototype remains non-deployable evidence.
+
+## C2 foundation evidence
+
+The native `feat/durable-c2` branch owns strict `src/durable/` modules, a separate
+exact 1.3.0 package tree and the compiled Telegram fork pin
+`56f0fe38d2260db8dede028aca62d47cbb49bb20`. Clean install, 75 native tests and build
+passed. The fork passed 1,188 tests with one platform skip; the legacy changed-file
+suite passed 1,162 tests with 39 skips and its build passed. Independent review
+closed the material findings. Ten exploratory samples remained below the C0
+investigation budgets; short repeated-batch retained state growth was bounded.
+
+See the [C2 foundation guide](pi-durable-c2-foundation.md) for lifecycle owners,
+crash boundaries, measured limits and operator behavior. The foundation test
+profile has no domain tools or jobs; its workflow validates without deploying.
+The recommendation is **go to C3**. Real memory/history behavior, full provider
+and Telegram parity, schedules/children, and target-system activation remain the
+recorded C3–C7 gates. No live C2 service or canonical-state migration was run.
 
 ## Approved decisions
 

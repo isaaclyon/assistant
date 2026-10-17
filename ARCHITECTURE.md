@@ -1,5 +1,20 @@
 # Architecture
 
+## Native migration branch
+
+This branch builds `src/durable/` with a separate exact 1.3.0 dependency tree.
+`application.ts` composes the registry, explicit provider account, host and pinned
+fork transport; `daemon.ts` owns process lifetime. One OS writer owns the native
+WAL/FULL Harness database and retained front-buffer inbox. Source bindings,
+admission receipts, controls, final delivery and ordinary approvals persist
+across restart. The dedicated foundation profile has no domain tools or jobs.
+
+See [ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md) and the
+[C2 guide](docs/pi-durable-c2-foundation.md) for native boundaries and recovery.
+The sections below describe the deployed legacy architecture. Its package,
+source patches and service path remain in the legacy release tree until the
+C6/C7 activation gates pass.
+
 ## Boundaries
 
 - **Host:** owns instance selection, process lifetime, Pi runtime creation, persistent session selection, signal handling, and service installation.

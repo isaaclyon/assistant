@@ -152,6 +152,11 @@
     ],
     "instructions": [
       {
+        "id": "durable-foundation-test",
+        "path": ".pi/telegram/durable-foundation-test.md",
+        "enabled": true
+      },
+      {
         "id": "telegram-default",
         "path": ".pi/telegram/AGENTS.md",
         "enabled": true
@@ -159,6 +164,12 @@
     ]
   },
   "profiles": [
+    {
+      "id": "durable-foundation-test",
+      "extensions": [],
+      "skills": [],
+      "instructions": "durable-foundation-test"
+    },
     {
       "id": "personal-isaac",
       "extensions": ["core-memory", "reload", "restart", "fast", "usage", "debug", "skills", "search", "memory", "places", "google-workspace", "subagents", "private-browser-input"],

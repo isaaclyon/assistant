@@ -12,14 +12,15 @@ updates:
     cooldown:
       default-days: 3
     allow:
-      - dependency-name: "@earendil-works/pi-agent-core"
+      - dependency-name: "@earendil-works/pi-durable"
       - dependency-name: "@earendil-works/pi-ai"
-      - dependency-name: "@earendil-works/pi-coding-agent"
-      - dependency-name: "@earendil-works/pi-tui"
+      - dependency-name: "@earendil-works/chord"
+      - dependency-name: "@earendil-works/pi-codemode"
     groups:
       pi-runtime:
         patterns:
           - "@earendil-works/pi-*"
+          - "@earendil-works/chord"
     assignees:
       - isaaclyon
     commit-message:

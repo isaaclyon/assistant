@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.native.json",
+  "include": [
+    "src/durable/**/*.ts"
+  ],
+  "exclude": [
+    "tests"
+  ],
+  "compilerOptions": {
+    "declaration": true
+  }
+}

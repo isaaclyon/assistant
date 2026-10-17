@@ -1,27 +1,33 @@
 {
-  "name": "assistant-durable-c1-prototype",
+  "name": "pi-telegram-bridge-native",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Prototype-only C1 evidence; not a deployable assistant release",
+  "description": "Native pi-durable host foundation; dedicated test instances only until C7",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
     "check": "npm run typecheck && npm test",
     "check:changed": "npm run check",
-    "typecheck": "tsc -p prototypes/durable-c1/tsconfig.json --noEmit",
-    "build": "tsc -p prototypes/durable-c1/tsconfig.json",
-    "test": "vitest run --config prototypes/durable-c1/vitest.config.ts"
+    "typecheck": "tsc -p tsconfig.native.json --noEmit",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.native-build.json && node --input-type=module -e \"await import('./dist/src/durable/application.js')\"",
+    "test": "vitest run --config vitest.native.config.ts",
+    "test:pilot": "vitest run --config prototypes/durable-c1/vitest.config.ts",
+    "start": "node dist/src/durable/daemon.js",
+    "inspect": "node dist/src/durable/inspect.js"
   },
   "dependencies": {
-    "@earendil-works/pi-durable": "1.3.0",
-    "@earendil-works/pi-ai": "1.3.0",
     "@earendil-works/chord": "1.3.0",
-    "@earendil-works/pi-codemode": "1.3.0"
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-codemode": "1.3.0",
+    "@earendil-works/pi-durable": "1.3.0",
+    "@llblab/pi-telegram": "https://codeload.github.com/isaaclyon/pi-telegram/tar.gz/56f0fe38d2260db8dede028aca62d47cbb49bb20",
+    "proper-lockfile": "4.1.2"
   },
   "devDependencies": {
     "@types/node": "24.19.0",
+    "@types/proper-lockfile": "4.1.4",
     "typescript": "5.9.3",
     "vitest": "3.2.7"
   }

@@ -1,20 +1,22 @@
-name: Test and deploy
+name: Native foundation checks
 
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [feat/durable-c2]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# C2 is an isolated native release tree. C6 supplies and rehearses activation;
+# the inherited legacy whole-fleet deployment job must not run on this branch.
 jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Check out the merged revision
+      - name: Check out the native revision
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           persist-credentials: false
@@ -25,41 +27,6 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - name: Select browser tests from changed files
-        id: tests
-        env:
-          PI_TEST_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: node scripts/test-selected.mjs --plan
-      - name: Install browser takeover test dependencies
-        if: steps.tests.outputs.browser == 'true'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb x11vnc websockify novnc
-      - name: Check host, extensions, Telegram SDK compatibility, and behavior
-        env:
-          PI_TEST_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      - name: Check native types, compatibility, recovery, and behavior
         run: npm run check:changed
-      - name: Preserve failed synthetic viewer diagnostics
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: synthetic-browser-takeover
-          path: /tmp/pi-takeover-test-diagnostics/
-          if-no-files-found: ignore
-          retention-days: 1
       - run: npm run build
-
-  deploy:
-    if: github.event_name != 'pull_request'
-    needs: test
-    runs-on: [self-hosted, assistant-production]
-    environment: production
-    timeout-minutes: 30
-    steps:
-      - name: Check out the merged revision
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          persist-credentials: false
-      - name: Deploy and verify the user service
-        env:
-          DEPLOY_PATH: /home/isaaclyon/projects/assistant
-          PI_TELEGRAM_BRIDGE_DISCARD_TRACKED_EDITS: "1"
-        run: bash scripts/deploy-local.sh "$GITHUB_SHA"
