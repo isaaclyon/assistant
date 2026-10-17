@@ -1,6 +1,6 @@
 # Pi-durable C0 discovery and contracts
 
-Status: contracts approved; C0 and C1 passed. C2 native foundation is complete on the isolated `feat/durable-c2` branch with local validation and independent review; go to C3. No production migration has run.
+Status: contracts approved; C0–C2 passed. C3 chat and memory are implemented on isolated `feat/durable-c3` with local validation and independent review; its dedicated live user checkpoint remains pending. No production migration has run.
 
 This supplements the [approved migration roadmap](pi-durable-migration-plan.md). It preserves its native-extension strategy, chat-and-memory MVP, Node/systemd hosting, Telegram experience, domain stores and historical evidence. The user approved these contracts for publication and subsequently authorized baseline validation and the C1 pilot. C0 baseline validation is recorded below; live rollout remains C7. Existing ADRs remain authoritative until implementation-specific successors are accepted.
 
@@ -18,7 +18,7 @@ The [prototype-only baseline probe](../prototypes/durable-baseline/README.md) ra
 
 ## C1 offline evidence
 
-The isolated `prototype/durable-c1` branch at `3f2b94a71202af6959616b638b0a2299687e95a1` owns `prototypes/durable-c1/README.md`, its probe helpers/tests, and a separate native 1.3.0 root manifest/lockfile. Retain it as prototype-only evidence. It is not a deployable native host, and passing C1 feasibility evidence does not make it production-ready.
+The isolated `prototype/durable-c1` branch owns `prototypes/durable-c1/README.md`, its probe helpers/tests, and a separate native 1.3.0 root manifest/lockfile. Retain it as prototype-only evidence. It is not a deployable native host, and passing C1 feasibility evidence does not make it production-ready.
 
 The combined native `npm run check:changed` gate passed strict test typechecking and 60 tests in seven files; `npm run build` passed. JavaScript runtime helpers use `checkJs: false`. The suite includes the 24-case upstream public SQLite conformance suite with WAL/FULL checks, real SIGKILL admission/result barriers, durable source and grouped-attachment replay, concurrent failed-run queue wakes, abort/stop semantics, blocked-task registration, fatal-storage fail-closed behavior with bounded supervisor exit, completed-answer discovery and uncertain-send policy, scoped old/new history locators, profile filtering, and child-store close/removal. Separate native ToolTask probes reconcile an externally committed synthetic mutation without repeating it and exercise durable approval rejection cases. Provider tests use actual native serialization/streaming with injected transport and synthetic OAuth coordination.
 
@@ -57,6 +57,17 @@ profile has no domain tools or jobs; its workflow validates without deploying.
 The recommendation is **go to C3**. Real memory/history behavior, full provider
 and Telegram parity, schedules/children, and target-system activation remain the
 recorded C3–C7 gates. No live C2 service or canonical-state migration was run.
+
+## C3 implementation evidence
+
+The isolated native tree implements the seven-bundle, five-tool profile approved
+in D3, canonical Markdown/Git receipt recovery, scoped native/archive provenance,
+request-only core/date/recall context and direct Telegram controls. Local tests
+and independent reviews are complete. The [C3 guide](pi-durable-c3-chat-memory.md)
+records validation and limits. Real OpenAI tool-assisted chat and semantic
+retrieval passed in a disposable programmatic smoke. Jev returned HTTP 401, so
+enabled-recall authorization and dedicated live user acceptance remain blocked;
+offline fixtures do not satisfy that checkpoint.
 
 ## Approved decisions
 

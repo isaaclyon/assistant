@@ -1,6 +1,6 @@
 # Pi-durable migration plan
 
-Status: approved architecture and checkpoint sequence; C0 and C1 passed. C2 native runtime foundation now passes local integration, compatibility, crash/recovery and independent review gates on `feat/durable-c2`. The recommendation is go to C3. Production remains on the legacy release; no C2 deployment or private-state migration ran.
+Status: approved architecture and checkpoint sequence; C0–C2 passed. C3 chat and memory are implemented on isolated `feat/durable-c3`, with local validation and independent review complete. Its dedicated live user checkpoint remains pending; see the [C3 guide](pi-durable-c3-chat-memory.md). Production remains on the legacy release; no production deployment or private-state migration ran.
 
 The user approved the durable-only extension strategy, chat-and-memory MVP, retained hosting and Telegram experience, target architecture, and C0–C7 sequence. This plan records intended work; it does not describe implemented behavior or supersede existing ADRs until their replacements are accepted.
 
@@ -153,6 +153,10 @@ Use an isolated dependency tree, private disposable state, and a dedicated test 
 
 ### C3 — Chat-and-memory MVP
 
+**Checkpoint:** implementation and offline review complete; dedicated live user
+acceptance pending. The [C3 guide](pi-durable-c3-chat-memory.md) records the selected
+surface, canonical effect recovery, evidence resolver and validation limits.
+
 This is the first usable assistant checkpoint, on a dedicated test instance using the capability profile and explicit skill/tool selection approved at C0. Run it through C0's release/dependency strategy while production retains its approved runtime. Production cutover remains C7.
 
 **Deliverables**
@@ -271,10 +275,11 @@ Run `npm run check:changed` and `npm run build` after code changes. Use `npm run
 
 ## Estimates and decisions
 
-C0–C2 are complete. The remaining planning range is roughly 6–9 engineer-weeks,
-plus the C7 observation window. These are provisional effort ranges, not delivery
-dates or measured completion times. C2 establishes native lifecycle and recovery;
-it does not remove the provider, domain-integration or deployment parity work.
+C0–C2 are complete. C3 implementation is complete and awaits enabled-recall
+authorization and its dedicated live user checkpoint. The original C2 planning
+ranges below predate that work; re-estimate after C3 acceptance. These are
+provisional effort ranges, not delivery dates or measured completion times.
+Provider, domain-integration and deployment parity remain later work.
 
 | Remaining checkpoint | Provisional engineer-days | Main uncertainty |
 | --- | --- | --- |
