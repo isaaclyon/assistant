@@ -1,5 +1,10 @@
 # Pi Telegram Bridge Host
 
+> This `prototype/durable-c1` branch is an isolated, non-deployable native
+> experiment. Start with [the C1 prototype README](prototypes/durable-c1/README.md)
+> for its commands, evidence and limits. The production description below is
+> retained from the legacy baseline; this branch's root scripts run the prototype.
+
 A systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](https://github.com/isaaclyon/pi-telegram/commit/dc84d2038ce80d83406f1ea767df2fd99906cc3c). It runs a manifest-defined household fleet whose bots share one immutable capability release while keeping conversations, workspaces, credentials, and memory views distinct.
 
 ## Runtime shape

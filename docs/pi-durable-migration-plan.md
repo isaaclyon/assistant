@@ -1,10 +1,10 @@
 # Pi-durable migration plan
 
-Status: approved architecture and checkpoint sequence; implementation has not started.
+Status: approved architecture and checkpoint sequence; C0 baseline passed and the isolated C1 offline prototype is implemented. C1 acceptance remains held for live provider and test-bot evidence.
 
 The user approved the durable-only extension strategy, chat-and-memory MVP, retained hosting and Telegram experience, target architecture, and C0–C7 sequence. This plan records intended work; it does not describe implemented behavior or supersede existing ADRs until their replacements are accepted.
 
-The [C0 contracts and discovery inventory](pi-durable-c0-contracts.md) are also approved. They settle release coexistence, the MVP profile, state/recovery contracts and child retention. C0 passed its synthetic local baseline; C1 feasibility work follows. Platform-conditional browser/Linux checks and live integrations remain explicitly unverified.
+The [C0 contracts and discovery inventory](pi-durable-c0-contracts.md) are also approved. They settle release coexistence, the MVP profile, state/recovery contracts and child retention. C0 passed its synthetic local baseline. C1 offline probes pass; see the [recorded evidence and limits](pi-durable-c0-contracts.md#c1-offline-evidence). Platform-conditional browser/Linux checks and live integrations remain explicitly unverified.
 
 ## Outcome and agreed scope
 
