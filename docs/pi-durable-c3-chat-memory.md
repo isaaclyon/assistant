@@ -26,9 +26,12 @@ acknowledgement. A replay cannot request a second shutdown on reopening.
 
 Debug is opt-in and process-local. Its bounded, redacted messages report visible
 tool activity, lifecycle and core/date/recall diagnostics into the private target.
-Thinking and raw tool payloads are excluded. Previews are best effort; rapid
-queued turns can lose a preview when an earlier final flushes. Committed final
-answers and their delivery receipts remain authoritative.
+Thinking and raw tool payloads are excluded. Before final delivery, the observer
+refreshes its committed snapshot/watch to drop delayed old-generation events;
+the transport waits for an in-flight draft and explicitly clears it in Telegram.
+Draft cleanup is bounded and best effort. Rapid queued turns can still lose a
+preview when an earlier final flushes. Committed final answers and their delivery
+receipts remain authoritative.
 
 General shell/file/web tools, external integrations, media/group routing,
 schedules and children retain their later C4–C6 gates.
@@ -138,9 +141,14 @@ embedding. Actual native compaction/new/reopen tests verify hidden-context and
 recall deduplication behavior.
 
 A clean `npm ci --ignore-scripts --no-audit --no-fund`, `npm run check:changed`
-and `npm run build` passed; the final schema fix also passed `check:changed` and build: 251 tests in 29 files, including 81 shared canonical
-memory/CLI/provenance tests now included in the normal native gate. The build
-imports the compiled application and includes its selected Markdown assets.
+and `npm run build` passed. After the live-pilot preview and model-selection fixes,
+`check:changed` and build passed again: 258 tests in 29 files, including 81 shared
+canonical memory/CLI/provenance tests in the normal native gate. Regression tests
+cover delayed old-generation events, queued partial preservation, closed-watch
+recovery, in-flight draft clearing and clear failure. They also verify the real
+harness snapshot after final commit, configured model order, invalid selections
+and rejection of a persisted choice removed from the catalog. The build imports
+the compiled application and includes its selected Markdown assets.
 Independent memory and context/UI reviews found no critical or high findings.
 The medium memory findings and restart/reload lifecycle findings were fixed.
 
@@ -167,11 +175,25 @@ any domain call; malformed branch arguments are regression-tested without effect
 The initial configured Jev credential returned HTTP 401. On 2026-10-17, an
 authorized replacement passed the enabled-recall smoke: Jev returned HTTP 200,
 recall recorded an injected note, OpenAI returned HTTP 200 and the seeded fact,
-and both embedding requests returned HTTP 200 with semantic-ready hybrid retrieval.
-This used the actual compiled native application with a fake Telegram transport;
-the dedicated live user checkpoint remains pending. No interactive C3 poller
-started. The bounded dedicated fixture and restart supervisor are prepared outside
-the repository; private credential copies were retired after the smoke.
+and embedding requests returned HTTP 200 with semantic-ready hybrid retrieval.
+A follow-up using `gpt-6-luna` at high thinking passed the same enabled-service
+check after the live-pilot fixes.
+These checks used the actual compiled native application with a fake Telegram
+transport and no poller. The bounded dedicated fixture and restart supervisor are
+prepared outside the repository; private credential copies were retired after
+each check.
+
+The first four-minute dedicated user pilot completed without transport failures
+and successfully saved a fictional note. It did not pass acceptance: user feedback
+identified a stale animated draft after final answers and an unsuitable old-model
+default/catalog page. Draft clearing and observer fencing were added, and private
+provider settings can now select an ordered model list. A dedicated wire probe
+verified that Telegram accepts a rich draft followed by `sendMessageDraft` with
+the same ID and omitted text (both HTTP 200). This matches the pinned fork's
+clear adapter; [the current API](https://core.telegram.org/bots/api#sendmessagedraft)
+makes text optional. HTTP acceptance does not prove client animation behavior.
+A repeat user checkpoint is required; successful service calls and a clean
+process exit do not close it.
 
 The pending dedicated checkpoint must use Jev recall and semantic search enabled,
 exercise chat/save/recall/edit and direct confirmation across restart, and record

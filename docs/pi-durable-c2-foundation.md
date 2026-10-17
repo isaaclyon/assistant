@@ -100,8 +100,14 @@ Provider settings are a separate private file:
 ```
 
 Supported factories are `openai`, `openai-codex` and `anthropic`; the selected
-model and thinking level must exist in that provider's catalog. The `account`
-label binds settings to the configured credential scope; in `pi-auth` format,
+model and thinking level must exist in that provider's catalog. Provider settings
+may include an ordered `modelIds` array to register only the chosen chat models
+and show only those choices in the model picker. It must be nonempty, contain
+unique known IDs and include `modelId`. Omit it to keep the provider's full
+catalog. A persisted model choice removed from the selected catalog blocks
+startup; it is preserved for explicit reconciliation and never silently falls
+back to the default. Model choices belong in private instance settings.
+The `account` label binds settings to the configured credential scope; in `pi-auth` format,
 the explicit path and OS access are the account boundary. It does not prove a
 remote account identity. Credentials use the existing Pi file shape and are not
 copied at startup. The native adapter requires an owned, private, regular file;

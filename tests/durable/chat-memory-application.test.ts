@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, expect, test, vi } from 'vitest';
 import { createModels } from '@earendil-works/pi-ai/models';
+import { watchEvents } from '@earendil-works/pi-durable';
 import { fauxProvider, fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai/providers/faux';
 import { createNativeApplication } from '../../src/durable/application.js';
 import { Bindings, context } from '../../src/durable/ingress.js';
@@ -20,7 +21,8 @@ async function setup(){
  let hooks!:NativeTelegramHooks;
  const finals:string[]=[],presentations:Array<{text:string;buttons?:Array<Array<{callback?:string}>>}>=[];
  const preview=vi.fn(async()=>{}),restart=vi.fn(),fatal=vi.fn();
- const raw={start:async(value:NativeTelegramHooks)=>{hooks=value;return 'ready' as const;},stop:async()=>{},deliver:async(_target:unknown,text:string)=>{finals.push(text);return 100+finals.length;},present:async(_target:unknown,presentation:any)=>{presentations.push(presentation);return 200+presentations.length;},edit:async(_target:unknown,_id:number,presentation:any)=>{presentations.push(presentation);},preview,answerCallback:async()=>true};
+ let beforeFinal:(()=>Promise<void>)|undefined;
+ const raw={start:async(value:NativeTelegramHooks)=>{hooks=value;return 'ready' as const;},stop:async()=>{},deliver:async(_target:unknown,text:string)=>{await beforeFinal?.();finals.push(text);return 100+finals.length;},present:async(_target:unknown,presentation:any)=>{presentations.push(presentation);return 200+presentations.length;},edit:async(_target:unknown,_id:number,presentation:any)=>{presentations.push(presentation);},preview,answerCallback:async()=>true};
  const requests:any[]=[];
  function provider(responses:any[]){
   const faux=fauxProvider({tokensPerSecond:1e9,tokenSize:{min:1024,max:1024}});
@@ -34,7 +36,7 @@ async function setup(){
  async function open(responses:any[]=[]){app=await createNativeApplication(config,{provider:provider(responses),transport:raw,requestRestart:restart,onFatal:fatal,onTransportFailure:()=>{}});await app.start();return app;}
  async function close(){await app?.close();app=undefined;}
  cleanup.push(close);
- return {directory,config,finals,presentations,preview,restart,fatal,requests,event,callback,open,close,hooks:()=>hooks,app:()=>app!};
+ return {directory,config,finals,presentations,preview,restart,fatal,requests,event,callback,open,close,onFinal:(fn:()=>Promise<void>)=>{beforeFinal=fn;},hooks:()=>hooks,app:()=>app!};
 }
 const tool=(args:unknown)=>fauxAssistantMessage(fauxToolCall('assistant_memory',args as never),{stopReason:'toolUse'});
 const lastDetails=(request:any)=>{const result=request.messages.filter((message:any)=>message.role==='toolResult').at(-1);return JSON.parse(result.content.find((block:any)=>block.type==='text').text);};
@@ -120,4 +122,25 @@ const lastDetails=(request:any)=>{const result=request.messages.filter((message:
  await s.hooks().accept(s.callback(5,messageId,key));
  expect((await vault.read({id:note.id})).revision).toBe(saved.revision);
  expect(s.fatal).not.toHaveBeenCalled();
+});
+
+test('real harness final snapshots contain the committed message and no completed generation partial', async()=>{
+ const s=await setup();const app=await s.open([fauxAssistantMessage('SAME_FINAL'),fauxAssistantMessage('SAME_FINAL')]);
+ let checked=0;
+ s.onFinal(async()=>{
+  const state=(await app.host.runtime.harness.snapshot(Bindings,app.host.runtime.root.id,context))!;
+  const cid=state.epochs[String(state.epoch)]!;
+  const watch=await watchEvents(app.host.runtime.harness,cid,context);
+  try{
+   expect(watch.snapshot.generation).toBeUndefined();
+   const committed=watch.snapshot.entries.flatMap(entry=>entry.model??[]).filter(message=>message.role==='assistant'&&message.content.some(block=>block.type==='text'&&block.text==='SAME_FINAL'));
+   expect(committed).toHaveLength(++checked);
+  }finally{await watch.stop();}
+ });
+ for(const id of [1,2]){
+  await s.hooks().accept(s.event(id,'Synthetic repeated-answer request.'));
+  await vi.waitFor(()=>expect(s.finals).toHaveLength(id),{timeout:4000});
+  await app.host.reconcile();
+ }
+ expect(checked).toBe(2);expect(s.fatal).not.toHaveBeenCalled();
 });

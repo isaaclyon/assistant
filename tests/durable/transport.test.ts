@@ -37,6 +37,11 @@ test('ordinary acceptance commits before named-profile offset advances; native p
  await transport.preview({chatId:7,threadId:3},'hello');expect(await transport.deliver({chatId:7,threadId:3},'**hello**',9)).toBe(22);
  expect(sends.at(-1)).toMatchObject({method:'sendRichMessage',body:{chat_id:7,message_thread_id:3,reply_parameters:{message_id:9}}});
  expect(sends.filter(s=>s.method==='sendRichMessage')).toHaveLength(1);
+ expect(sends.slice(-2)).toMatchObject([
+  {method:'sendMessageDraft',body:{chat_id:7,message_thread_id:3,draft_id:1}},
+  {method:'sendRichMessage'},
+ ]);
+ expect(sends.at(-2).body.text).toBeUndefined();
 });
 test('valid external owner waits, dead owner recovers, delivery before ownership is definitely unsent',async()=>{
  const f=await fixture();await writeFile(f.locksPath,JSON.stringify({'@llblab/pi-telegram':{pid:process.ppid,cwd:'/external',heartbeatMs:0}}));
@@ -122,4 +127,24 @@ test('rich presentations and edits pass the per-effect pairing check and validat
  // Revoked pairing blocks the next UI effect.
  await writeFile(f.configPath,JSON.stringify({...f.data,allowedUserId:8,profiles:undefined}));
  const before=sends.length;await expect(transport.present({chatId:7},{text:'y'})).rejects.toMatchObject({definitelyNotSent:true});expect(sends).toHaveLength(before);
+});
+
+test('final waits for an in-flight draft, clears it, and survives a failed clear', async()=>{
+ const f=await fixture();const methods:string[]=[];let release!:(value:Response)=>void;
+ const transport=createNativeTelegramTransport({mode:'ordinary',...f,cwd:f.dir,botId:1,allowedUserId:7,
+ fetch:async(input,init)=>{const method=String(input).split('/').at(-1)!;
+ if(method==='getMe')return ok({id:1});if(method==='getUpdates')return pending(init?.signal);
+ methods.push(method);
+ if(method==='sendRichMessageDraft')return new Promise<Response>(resolve=>release=resolve);
+ if(method==='sendMessageDraft')return new Response(JSON.stringify({ok:false}),{status:503});
+ return ok({message_id:22});}});
+ cleanups.push(()=>transport.stop());await transport.start({accept:async()=>{}});
+ const preview=transport.preview({chatId:7},'partial');
+ try{
+  await vi.waitFor(()=>expect(methods).toEqual(['sendRichMessageDraft']));
+  const final=transport.deliver({chatId:7},'complete');
+  await Promise.resolve();expect(methods).toEqual(['sendRichMessageDraft']);
+  release(ok(true));await preview;expect(await final).toBe(22);
+  expect(methods).toEqual(['sendRichMessageDraft','sendMessageDraft','sendRichMessage']);
+ }finally{release?.(ok(true));await preview;}
 });

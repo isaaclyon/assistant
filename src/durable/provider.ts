@@ -150,13 +150,25 @@ export class ScopedCredentialStore implements CredentialStore {
   }
 }
 
-export interface NativeProviderSettings { version: 1; account: string; provider: string; modelId: string; thinkingLevel: ModelThinkingLevel }
+export interface NativeProviderSettings { version: 1; account: string; provider: string; modelId: string; thinkingLevel: ModelThinkingLevel; modelIds?: string[] }
 export async function createNativeProvider(options: { credentialPath: string; settingsPath: string; account: string; provider?: Provider; credentialFormat?: "pi-auth" | "native" }) {
   const settings = await privateJson(await canonicalFile(options.settingsPath));
-  if (!record(settings) || settings.version !== 1 || settings.account !== options.account || typeof settings.provider !== 'string' || typeof settings.modelId !== 'string' || typeof settings.thinkingLevel !== 'string' || Object.keys(settings).some(k => !['version', 'account', 'provider', 'modelId', 'thinkingLevel'].includes(k))) throw new Error('Invalid per-instance provider settings');
-  const provider = options.provider ?? (settings.provider === 'openai' ? openaiProvider() : settings.provider === 'anthropic' ? anthropicProvider() : settings.provider === 'openai-codex' ? openaiCodexProvider() : undefined);
+  if (!record(settings) || settings.version !== 1 || settings.account !== options.account || typeof settings.provider !== 'string' || typeof settings.modelId !== 'string' || typeof settings.thinkingLevel !== 'string' || Object.keys(settings).some(k => !['version', 'account', 'provider', 'modelId', 'thinkingLevel', 'modelIds'].includes(k))) throw new Error('Invalid per-instance provider settings');
+  let provider = options.provider ?? (settings.provider === 'openai' ? openaiProvider() : settings.provider === 'anthropic' ? anthropicProvider() : settings.provider === 'openai-codex' ? openaiCodexProvider() : undefined);
   if (!provider) throw new Error('Unsupported native provider');
   if (settings.provider !== provider.id) throw new Error('Provider is not explicitly registered');
+  if (settings.modelIds !== undefined) {
+    const ids = settings.modelIds;
+    if (!Array.isArray(ids) || ids.length === 0 || ids.length > 100 || ids.some(id => typeof id !== 'string' || !id.trim()) || new Set(ids).size !== ids.length) throw new Error('Invalid selected model list');
+    const catalog = provider.getModels();
+    const selected = ids.map(id => {
+      const model = catalog.find(model => model.id === id);
+      if (!model) throw new Error('Unknown selected provider model');
+      return model;
+    });
+    if (!ids.includes(settings.modelId)) throw new Error('Active model is outside the selected model list');
+    provider = { ...provider, getModels: () => selected, getAllModels: () => selected };
+  }
   const credentials = await ScopedCredentialStore.open(options.credentialPath, options.account, 30_000, options.credentialFormat);
   try {
     if (!await credentials.read(provider.id)) throw new Error('Selected account has no stored provider credential');

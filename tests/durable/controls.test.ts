@@ -21,7 +21,7 @@ async function setup(path?: string) {
  cleanup.push(() => host.close());
  const reload = vi.fn(async () => {}), invalidate = vi.fn(async () => {}), requestRestart = vi.fn();
  const controls = createNativeControls({ config: { transport: { botId: 123 } } as NativeConfig, host: () => host, models, reload, invalidate, requestRestart });
- return { directory, host, controls, reload, invalidate, requestRestart };
+ return { directory, host, controls, models, reload, invalidate, requestRestart };
 }
 const request = (suffix: string) => `telegram-control:123:${suffix}`;
 test('native model and thinking selection survives restart and supplies the next epoch template', async () => {
@@ -76,4 +76,17 @@ test('a busy rejected administrative command stays rejected when later replayed 
  first.host.runtime.store.inbox.remove((await import('../../src/durable/ingress.js')).sourceKey(envelope));
  await expect(first.controls.reload(request('busy'))).rejects.toThrow(/interrupted/);
  expect(first.reload).not.toHaveBeenCalled();
+});
+
+test('restart rejects a persisted model removed from the selected catalog without fallback', async () => {
+ const first = await setup();
+ await first.controls.setModel(request('removed-model'), first.controls.models()[1]!.id);
+ await first.host.close();
+ const next = await setup(first.directory);
+ const provider = next.models.getProviders()[0]!;
+ const only = provider.getModels().filter(model => model.id === 'one');
+ next.models.setProvider({ ...provider, getModels: () => only, getAllModels: () => only });
+ await expect(next.controls.restore()).rejects.toThrow('Stored model selection is unavailable');
+ expect((await next.host.runtime.harness.snapshot(NativePreferences, next.host.runtime.root.id, context))!.choice?.modelId).toBe('two');
+ expect(next.host.runtime.agent.model?.modelId).toBe('one');
 });

@@ -54,7 +54,7 @@ describe('native provider boundary', () => {
     const { path, dir } = await fixture();
     const catalog = openaiProvider(); const model = catalog.getModels()[0]!;
     const settingsPath = join(dir, 'settings.json');
-    const settings = { version: 1, account: 'test', provider: 'openai', modelId: model.id, thinkingLevel: getSupportedThinkingLevels(model)[0] };
+    const settings = { version: 1, account: 'test', provider: 'openai', modelId: model.id, thinkingLevel: getSupportedThinkingLevels(model)[0], modelIds: [model.id] };
     await writeFile(settingsPath, JSON.stringify(settings), { mode: 0o600 });
     const native = await createNativeProvider({ credentialPath: path, settingsPath, account: 'test' });
     expect((await native.models.getAuth('openai'))?.auth.apiKey).toBe('synthetic');
@@ -62,7 +62,7 @@ describe('native provider boundary', () => {
     await expect(native.models.getAuth('openai')).rejects.toThrow();
     native.close();
     await writeFile(path, JSON.stringify({ openai: { type: 'api_key', key: 'synthetic' } }));
-    await writeFile(settingsPath, JSON.stringify({ ...settings, modelId: 'unknown' }));
+    await writeFile(settingsPath, JSON.stringify({ ...settings, modelId: 'unknown', modelIds: undefined }));
     await expect(createNativeProvider({ credentialPath: path, settingsPath, account: 'test' })).rejects.toThrow('Unknown');
   });
   it('preserves failed OAuth refresh without falling back', async () => {
@@ -133,3 +133,21 @@ it('keeps a long native refresh owned against a legacy synchronous ten-second st
     await promisify(execFile)(process.execPath, ['-e', script, path], { timeout: 3000 });
   } finally { release.resolve(); await refresh; store.close(); }
 }, 15_000);
+
+it('registers only explicitly selected chat models in configured order', async () => {
+  const { path, dir } = await fixture();
+  const base = openaiProvider().getModels()[0]!;
+  const provider = createProvider({ id: 'openai', auth: openaiProvider().auth, api: openAIResponsesApi(), models: ['older', 'standard', 'fast'].map(id => ({ ...base, id, name: id })) });
+  const settingsPath = join(dir, 'settings.json');
+  const settings = { version: 1, account: 'test', provider: 'openai', modelId: 'fast', thinkingLevel: 'off', modelIds: ['fast', 'standard'] };
+  await writeFile(settingsPath, JSON.stringify(settings), { mode: 0o600 });
+  const native = await createNativeProvider({ credentialPath: path, settingsPath, account: 'test', provider });
+  expect(native.models.getModels().map(model => model.id)).toEqual(['fast', 'standard']);
+  expect(native.models.getAllModels().map(model => model.id)).toEqual(['fast', 'standard']);
+  expect(native.models.getModel('openai', 'older')).toBeUndefined();
+  native.close();
+  for (const modelIds of [[], ['fast', 'fast'], ['missing'], ['standard'], 'fast']) {
+    await writeFile(settingsPath, JSON.stringify({ ...settings, modelIds }));
+    await expect(createNativeProvider({ credentialPath: path, settingsPath, account: 'test', provider })).rejects.toThrow(/model/i);
+  }
+});

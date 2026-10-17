@@ -71,9 +71,12 @@ scheduler or Telegram poller.
 
 ### Telegram lifecycle
 
-Best-effort previews consume visible assistant text only. Durable final delivery
-continues using C2's ledger and ambiguity policy. Menu commands run outside the
-model loop. Model/thinking choices and administrative command receipts persist;
+Best-effort previews consume visible assistant text only. Before a committed
+final is sent, the observer refreshes its snapshot/watch to discard delayed
+old-generation events, and the transport waits for the in-flight draft and
+explicitly clears it in Telegram. Draft cleanup has a bounded, best-effort
+attempt. Durable final delivery continues using C2's ledger and ambiguity policy.
+Menu commands run outside the model loop. Model/thinking choices and administrative command receipts persist;
 the restored choice also configures future conversation epochs. Idle reload
 replaces a compatible selected registry and closes its old resources. Restart
 requests shutdown only after the upstream offset acknowledgement; a pending

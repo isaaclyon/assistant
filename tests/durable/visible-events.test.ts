@@ -1,14 +1,15 @@
 import { expect, test, vi } from 'vitest';
 
 type Listener = (events: any[], context: unknown) => Promise<void>;
-const watches: Array<{ cid: string; snapshot: any; listener?: Listener; stopped: boolean }> = [];
+const watches: Array<{ cid: string; snapshot: any; listener?: Listener; stopped: boolean; end: () => void }> = [];
 let snapshots: Record<string, any> = {};
 vi.mock('@earendil-works/pi-durable', async importOriginal => ({
   ...(await importOriginal<object>()),
   watchEvents: async (_h: unknown, cid: string) => {
-    const w: any = { cid, snapshot: snapshots[cid] ?? { type: 'snapshot', entries: [], tools: [] }, stopped: false };
+    const closed = Promise.withResolvers<any>();
+    const w: any = { cid, snapshot: snapshots[cid] ?? { type: 'snapshot', entries: [], tools: [] }, stopped: false, end: () => closed.resolve({ reason: 'listener_error' }) };
     watches.push(w);
-    return { snapshot: w.snapshot, start: (l: Listener) => { w.listener = l; }, stop: async () => { w.stopped = true; return { reason: 'stopped' }; }, closed: new Promise(() => {}) };
+    return { snapshot: w.snapshot, start: (l: Listener) => { w.listener = l; }, stop: async () => { w.stopped = true; closed.resolve({ reason: 'stopped' }); return { reason: 'stopped' }; }, closed: closed.promise };
   },
 }));
 const { createVisibleEvents } = await import('../../src/durable/visible-events.js');
@@ -93,8 +94,47 @@ test('finish settles the preview before the final and later events of that turn 
   calls.push('final');
   await emit(0, { type: 'message_update', usage: {}, changes: [{ type: 'text_delta', contentIndex: 0, delta: ' late' }] });
   expect(calls).toEqual(['update:1:1:one', 'finish:1:1', 'final']);
-  await emit(0, { type: 'turn_start' }, { type: 'message_start', message: asst([{ type: 'text', text: 'two' }]) });
-  expect(calls.at(-1)).toBe('update:1:2:two');
+  // Queued publications from the completed generation must not rearm previews.
+  await emit(0, { type: 'turn_start' }, { type: 'message_start', message: asst([{ type: 'text', text: 'stale' }]) });
+  expect(calls.at(-1)).toBe('final');
+  await emit(1, { type: 'turn_start' }, { type: 'message_start', message: asst([{ type: 'text', text: 'two' }]) });
+  expect(calls.at(-1)).toBe('update:2:1:two');
   await visible.finish();
   expect(stream.finish).toHaveBeenCalledTimes(2);
+});
+
+test('a final before the first event drops the entire delayed turn and observes the next generation', async () => {
+  reset();
+  const { visible, emit, stream } = setup();
+  await visible.attach('c1');
+  await visible.finish();
+  await emit(0, { type: 'turn_start' }, { type: 'message_start', message: asst([{ type: 'text', text: 'already delivered' }]) });
+  expect(stream.update).not.toHaveBeenCalled();
+  await emit(1, { type: 'turn_start' }, { type: 'message_start', message: asst([{ type: 'text', text: 'next response' }]) });
+  expect(stream.update.mock.calls.map(call => call[2])).toEqual(['next response']);
+  await visible.close();
+});
+
+test('refresh after final keeps a queued generation current partial', async () => {
+  reset();
+  const { visible, stream } = setup();
+  await visible.attach('c1');
+  snapshots.c1 = { generation: { message: asst([{ type: 'text', text: 'next partial' }]) } };
+  await visible.finish();
+  expect(watches[0]!.stopped).toBe(true);
+  expect(stream.update.mock.calls.map(call => call[2])).toEqual(['next partial']);
+  await visible.close();
+});
+
+test('a closed watch settles its preview and final refresh restores observation', async () => {
+ reset();const {visible,emit,stream}=setup();
+ await visible.attach('c1');
+ await emit(0,{type:'turn_start'},{type:'message_start',message:asst([{type:'text',text:'partial'}])});
+ watches[0]!.end();await Promise.resolve();
+ await visible.finish();
+ expect(stream.finish).toHaveBeenCalledTimes(1);
+ expect(watches).toHaveLength(2);
+ await emit(1,{type:'turn_start'},{type:'message_start',message:asst([{type:'text',text:'next'}])});
+ expect(stream.update.mock.calls.map(call=>call[2])).toEqual(['partial','next']);
+ await visible.close();
 });

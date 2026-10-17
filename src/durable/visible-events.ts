@@ -26,6 +26,7 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
   let chain: Promise<unknown> = Promise.resolve();
   let observer: { id: number; cid: ConversationId; watch: AgentEventStream; turns: Set<string>; settle: () => Promise<void> } | undefined;
   let nextObserver = 0, closed = false;
+  let lastConversation: ConversationId | undefined;
   const safeDebug = (title: string, value: unknown) => { try { options.debug(title, value); } catch { /* diagnostics are optional */ } };
   const queue = <T>(work: () => Promise<T>): Promise<T> => { const run = chain.then(work, work); chain = run.catch(() => undefined); return run; };
 
@@ -42,7 +43,7 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
 
   function start(cid: ConversationId, watch: AgentEventStream) {
     const me = { id: ++nextObserver, cid, watch, turns: new Set<string>(), settle: async () => {} };
-    observer = me;
+    observer = me; lastConversation = cid;
     let seq = 0, turn = '', finished = false, texts = new Map<number, string>(), last = '';
     const newTurn = () => { turn = `${me.id}:${++seq}`; finished = false; texts = new Map(); last = ''; };
     const publish = () => {
@@ -89,7 +90,15 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
       for (const t of turns) await options.stream.finish(target, t).catch(() => undefined);
     };
     watch.start(async events => { if (observer !== me) return; for (const e of events) { try { handle(e); } catch { /* ignore malformed event */ } } });
-    void watch.closed.then(() => { if (observer === me) observer = undefined; }, () => { if (observer === me) observer = undefined; });
+    const ended = () => {
+      if (observer !== me) return;
+      void queue(async () => {
+        if (observer !== me) return;
+        observer = undefined;
+        await me.settle();
+      }).catch(() => undefined);
+    };
+    void watch.closed.then(ended, ended);
   }
 
   return {
@@ -108,10 +117,21 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
         } catch (error) { safeDebug('durable observer', { event: 'attach_failed', error: error instanceof Error ? error.name : 'error' }); }
       });
     },
-    /** Drops pending previews for seen turns; call before the authoritative final send. */
+    /** A committed final fences all old publications, including unseen queued turns. */
     finish(): Promise<void> {
       return queue(async () => {
-        await observer?.settle();
+        const current = observer, cid = current?.cid ?? lastConversation;
+        if (!cid || closed) return;
+        if (current) { await stop(current); await current.settle(); }
+        // The answer is already committed. A fresh atomic snapshot/watch cannot
+        // replay its delayed turn_start/message_start frames after final delivery.
+        // If queued work already started, its current partial remains previewable.
+        try {
+          if (closed || !await isCurrent(cid)) return;
+          const watch = await watchEvents(options.host().runtime.harness, cid, context);
+          if (closed) { await watch.stop().catch(() => undefined); return; }
+          start(cid, watch);
+        } catch (error) { safeDebug('durable observer', { event: 'attach_failed', error: error instanceof Error ? error.name : 'error' }); }
       });
     },
     close(): Promise<void> {
