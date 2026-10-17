@@ -92,5 +92,12 @@ committed in native Harness, the verified fork adapter rendered its exact labele
 text, and Bot API acknowledged one final message to the selected paired private
 chat. Identity/destination checks preceded the send. The input was synthetic;
 no Telegram update was consumed and no service/poller was changed. Private
-scripts and receipts are external evidence. Dedicated live inbound, streamed
-preview, callback and Telegram client behavior remain unverified.
+scripts and receipts are external evidence.
+
+The subsequent dedicated live pilot passed real inbound admission, two
+acknowledged streamed previews, final reply and direct callback after an orderly
+Node process restart. The same conversation/answer and persisted approval
+survived; callback replay was rejected and a fixture counter incremented once.
+The single section was registered in the same order in both processes, so this
+adds no general section-token persistence guarantee. Telegram client visual
+quality remains unverified. See the [live evidence and limits](../../../docs/pi-durable-c0-contracts.md#live-feasibility-evidence).

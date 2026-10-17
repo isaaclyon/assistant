@@ -1,6 +1,6 @@
 # C1 native feasibility pilot — prototype only
 
-**Status: offline probes and limited live provider/outbound checks pass; C1 remains held for the dedicated inbound pilot.**
+**Status: offline probes and dedicated live provider/inbound/preview/callback evidence pass. C2 has not started; this remains a non-deployable prototype.**
 
 Claim: pi-durable 1.3.0 can support the approved input, recovery, approval,
 provider and Telegram boundaries through public APIs and a focused fork adapter.
@@ -82,9 +82,16 @@ proxy being passed to `structuredClone`; the helper now projects its plain recor
   The user authorized one outbound-only send through an existing paired bot.
   No update consumption, polling or service changes occurred. Private scripts,
   references and receipts stay outside the repository.
-- C1 still requires the dedicated live inbound/preview/callback pilot. The
-  outbound test used synthetic internal input, and real OAuth refresh is untested.
+- The subsequent dedicated live pilot accepted a real private-chat message,
+  sent two acknowledged previews and one final provider reply, then exited and
+  reopened the native stores in a new Node process before handling the real
+  confirmation callback. Approval replay was rejected and the fixture counter
+  remained at one after another reopen. The bounded runner passed in about
+  21 seconds and retired disposable state. See the
+  [live evidence and limits](../../docs/pi-durable-c0-contracts.md#live-feasibility-evidence).
+  This was an orderly restart with one section registered in stable order;
+  generic section-token persistence and real OAuth refresh remain unverified.
 - Full host integration, automatic poller recovery/backoff, current authorization
   on every recovery, complete callback/media/menu parity, Linux/systemd and the
-  C2–C7 gates remain future work. Offline results alone do not accept C1 or
+  C2–C7 gates remain future work. Passing C1 feasibility evidence does not
   authorize rollout.

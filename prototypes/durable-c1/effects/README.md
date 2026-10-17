@@ -2,7 +2,7 @@
 
 Prototype only. `runtime.mjs` owns a synthetic domain executor and approval adapter;
 `worker.mjs` provides the separate process; `effects.test.ts` supervises it.
-No production code, real provider, Telegram transport, credential, or live service is used.
+The automated suite uses no production code, real provider, Telegram transport, credential, or live service.
 
 ## Tested facts (Node 24.18.1, native packages 1.3.0)
 
@@ -60,3 +60,13 @@ node node_modules/typescript/bin/tsc --noEmit --strict --allowJs --checkJs false
 ```
 
 Nine focused tests pass. The parent owns whole-pilot checks and checkpoint acceptance.
+
+## Dedicated live integration evidence
+
+A separate private pilot connected this fixture to a real, actor/chat-scoped
+Telegram section callback. The approval was presented before an orderly process
+exit, consumed after reopening the native store in a new process, and rejected
+on replay. Its native task completed one external counter increment; another
+store reopen preserved that result. This validates the narrow fixture integration,
+not real domain preflight or general section-token persistence. See the
+[live evidence and limits](../../../docs/pi-durable-c0-contracts.md#live-feasibility-evidence).
