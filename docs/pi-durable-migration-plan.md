@@ -277,8 +277,8 @@ Run `npm run check:changed` and `npm run build` after code changes. Use `npm run
 
 ## Estimates and decisions
 
-C0–C2 are complete. C3 implementation is complete and awaits enabled-recall
-authorization and its dedicated live user checkpoint. The original C2 planning
+C0–C2 are complete. C3 implementation and the enabled-recall service smoke are
+complete; its dedicated live user checkpoint remains pending. The original C2 planning
 ranges below predate that work; re-estimate after C3 acceptance. These are
 provisional effort ranges, not delivery dates or measured completion times.
 Provider, domain-integration and deployment parity remain later work.
