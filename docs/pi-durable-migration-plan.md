@@ -4,6 +4,8 @@ Status: approved architecture and checkpoint sequence; implementation has not st
 
 The user approved the durable-only extension strategy, chat-and-memory MVP, retained hosting and Telegram experience, target architecture, and C0–C7 sequence. This plan records intended work; it does not describe implemented behavior or supersede existing ADRs until their replacements are accepted.
 
+The [C0 contracts and discovery inventory](pi-durable-c0-contracts.md) are also approved. They settle release coexistence, the MVP profile, state/recovery contracts and child retention. C0 still awaits clean baseline validation; the feasibility pilot has not started.
+
 ## Outcome and agreed scope
 
 Migrate the assistant from `pi-coding-agent`'s `AgentSessionRuntime` to native `pi-durable`. Use durable submissions, tasks, documents, and recovery where they replace fragile process-local coordination. Preserve existing assistant capabilities and private data.
@@ -27,7 +29,7 @@ Research baseline: assistant commit `bf7e4e8`; Pi packages pinned at `0.87.1`; p
 4. **Durable input identity and execution.** Bind each accepted source event to its authorized origin, original timestamp, conversation, and submission. Reuse stable request IDs on retry. Conversation rotation cannot remap an already accepted event. Keep transport acceptance, Harness admission, run completion, and external delivery as distinct facts.
 5. **Durable delivery tracking.** Record intended final replies and their destination, recover missing delivery work by scanning authoritative completed submissions/entries, and retain send receipts. Streaming watches improve responsiveness but are not the delivery ledger. A lost send acknowledgement produces an uncertain outcome governed by an explicit reconciliation policy.
 6. **Explicit operation and approval recovery.** Every tool has a documented replay policy. Reads may replay after review; mutations use operation-specific idempotency/reconciliation or stop as interrupted. Persist approval requests and authenticated decisions, then execute authorized operations through durable work. Keep credential approval authority in the trusted broker. Do not assume a built-in durable human-input pause API exists.
-7. **Native background ownership.** Use durable tasks and owned conversations for assistant execution, child completion reporting, cancellation, and progress where appropriate. Keep cron/calendar trigger calculation, checker adapters, and cross-instance delivery policy as application responsibilities. Remove redundant custom state only after an equivalent durable path passes its gates.
+7. **Native background ownership.** Use durable tasks and owned conversations for assistant execution, child completion reporting, cancellation, and progress where appropriate. Preserve child process confinement and seven-day temporary retention through separate process-owned child Harness stores, as defined in the [C0 retention contract](pi-durable-c0-contracts.md#d4-preserve-existing-state-guarantees-and-child-retention). Keep cron/calendar trigger calculation, checker adapters, and cross-instance delivery policy as application responsibilities. Remove redundant custom state only after an equivalent durable path passes its gates.
 8. **Versioned history and upgrades.** Preserve old JSONL archives and their exact citations. Add a new history source for durable entries, with stable anchors and principal filtering. Version task/document schemas, inspect blocked recovery, and define how pending work crosses releases. Reset/compaction are not storage deletion.
 
 ### Alternatives considered
@@ -57,11 +59,13 @@ Research baseline: assistant commit `bf7e4e8`; Pi packages pinned at `0.87.1`; p
 
 The same data need not be written to multiple competing execution journals. For every transitional duplicate record, document which one is authoritative and the condition for retiring the other.
 
-## Transition contracts to settle at C0
+## C0 transition requirements
+
+Decisions for these requirements are recorded in the [approved C0 contracts](pi-durable-c0-contracts.md#approved-decisions). Their implementation and acceptance evidence remain checkpoint work.
 
 The ordinary deployment currently builds one immutable release from `main`, stops the fleet, and activates all configured instances at that release. Sequential startup is not an observed canary rollout. C2–C6 development and the C7 observation window therefore require an explicit release and activation strategy before production host replacement begins.
 
-C0 must choose and record:
+C0 requires the following decisions, now recorded in the approved contracts:
 
 - **Code and runtime coexistence:** whether unfinished native work stays on an isolated branch/dependency tree or ships alongside the legacy runtime behind explicit per-instance selection. Specify how the dedicated C3 instance runs, how ordinary production receives fixes, and how only a selected canary changes runtime while other instances remain on their approved runtime. A long-lived branch alone does not provide staged production activation; either strategy must supply a tested C7 activation path. Temporary legacy support ends after C7.
 - **Dependency compatibility:** the current aligned set is `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` at 0.87.1. The 1.3.0 durable package requires `pi-ai`, `chord`, and `pi-codemode` at 1.3.0. Decide whether to upgrade the legacy set first under [the existing upgrade gates](pi-upgrades.md), or isolate dependency trees with explicit package/load boundaries. The current compatibility test also checks nested SDK versions. Any successor to that gate must preserve equivalent checks for each supported runtime; adding an incompatible nested SDK is not a passing transition. Depending on the codemode package does not select its optional user-facing capability.
@@ -95,7 +99,7 @@ Each checkpoint records deliverables, passing evidence, unresolved failures, and
 - Inventory all 14 selected extension resources, their tools/commands, skills and instructions, external dependencies, and 11 install patches.
 - Map each existing behavior/test and owning ADR to its native owner and checkpoint, using full ADR filenames where numbers are reused. Distinguish implemented capabilities from prototypes and only preserve configured/supported behavior.
 - Inventory state by owner, durability meaning, retention rule, writer, migration need, and recovery procedure.
-- Resolve each [transition contract](#transition-contracts-to-settle-at-c0). Inspect release APIs, provider/auth changes, schema compatibility, and Telegram fork changes.
+- Resolve each [transition contract](#c0-transition-requirements). Inspect release APIs, provider/auth changes, schema compatibility, and Telegram fork changes.
 - Define the Telegram adapter surface: admission, steering/follow-up, final settlement, abort/new/compact, model/thinking, commands/sections, media, and target-scoped output. Cover ordinary polling/config/offset/lock ownership and isolated broker transport separately. Specify the existing five-second ownership monitor, valid external Pi owner handling, stale-heartbeat recovery and reconnect behavior.
 - Define source IDs, conversation rotation, delivery outcomes, approval/operation records, and tool replay policy. Identify required atomic transactions versus explicitly reconciled cross-store boundaries. Specify the inbox-to-Harness receipt and retry protocol, including a crash after admission but before inbox removal, and the proof required before retiring the front buffer.
 - Define the failure model: process kill, storage failure, host/power loss, and external delivery have different guarantees. Release 1.3.0's default SQLite WAL/NORMAL protects process-crash recovery but can lose newest acknowledged commits on host/power failure. Preserve stronger existing ledger guarantees; prove a supported stronger storage configuration if acceptance requires it.
@@ -103,9 +107,9 @@ Each checkpoint records deliverables, passing evidence, unresolved failures, and
 - Decide the storage retention approach before moving existing seven-day subagent cleanup into append-only Harness history.
 - Establish synthetic fixtures, failure-injection points, and current performance baselines using disposable state.
 
-**Pass gate:** every current capability, durable record, and patch has an owner and disposition; no unspecified authority, input identity, or storage-retention boundary remains hidden in the implementation estimate. Each [transition contract](#transition-contracts-to-settle-at-c0) has a recorded decision, implementation owner and acceptance cases. Both Telegram transport modes and inbox handoff/retirement have explicit owners and acceptance cases.
+**Pass gate:** every current capability, durable record, and patch has an owner and disposition; no unspecified authority, input identity, or storage-retention boundary remains hidden in the implementation estimate. Each [transition contract](#c0-transition-requirements) has a recorded decision, implementation owner and acceptance cases. Both Telegram transport modes and inbox handoff/retirement have explicit owners and acceptance cases.
 
-**Decision:** approve the detailed contracts and release pins for the pilot. Accepted ADRs remain in force until an explicit successor is approved.
+**Decision:** the detailed contracts and candidate release pins are approved in the [C0 contract document](pi-durable-c0-contracts.md). Complete clean baseline validation before passing C0 and beginning the pilot. Accepted ADRs remain in force until an explicit successor is approved.
 
 ### C1 — Feasibility pilot
 
@@ -156,7 +160,7 @@ This is the first usable assistant checkpoint, on a dedicated test instance usin
 - Native core memory, date context, automatic recall/proposals and memory usage/decay behavior. Maintain current feature flags and per-principal filtering.
 - Native memory/session search, bounded session-context reads, and index maintenance. Preserve legacy citations; index new durable conversations with a stable source locator understood by search, context expansion, and provenance lint. A small backend discriminator/resolver is sufficient; do not convert the old transcript archive.
 - Compaction-aware recall deduplication, stable incoming timestamps, and hidden context that is neither sent to Telegram nor accidentally indexed as user history.
-- Preserve the configured shell/file/web capabilities selected in C0's MVP profile, with explicit replay policies. Keep unfinished integration skills/tools unselected until their supporting checkpoint passes.
+- Use the approved `durable-chat-memory-test` profile: seven native bundles, five typed memory/history tools and the `personal-memory` skill, with the exact flags and instructions in the [MVP contract](pi-durable-c0-contracts.md#d3-a-narrowly-selected-chat-and-memory-mvp). General shell/file/web tools return at C4; keep unfinished integrations unselected until their supporting checkpoint passes.
 - Ordinary memory confirmations follow C0's epoch, expiry and invalidation rules. Already consumed operations cannot rerun because reply rendering failed.
 - Cover real memory executor effects: creation/update can finish replacing Markdown before the durable tool result exists, and optional Git commit is a separate effect. Add narrow operation receipts and reconciliation without introducing another canonical memory database.
 
@@ -166,7 +170,9 @@ This is the first usable assistant checkpoint, on a dedicated test instance usin
 
 ### C4 — Remaining integrations and protected browser workflows
 
-Implement in this order, reusing domain code:
+Restore general file/shell/public-web tools with operation-specific replay policies as part of C4. The C3 profile deliberately selects only typed memory/history tools.
+
+Implement the integrations in this order, reusing domain code:
 
 1. **Read-oriented integrations:** Google Calendar/Gmail/Contacts/Places reads, cache/metering, CLI-backed skills, weather and public lookup. Port schemas, bounded transports, outputs, and feature selection.
 2. **Direct Telegram applications:** places ranking/menu flows, durable comparison progress, callback routing and model-to-section handoff.
@@ -191,7 +197,7 @@ Browser recovery is a separate acceptance boundary. A surviving browser process 
 - Port background agents to native task/conversation ownership, explicit read-only loadouts, limits, cancellation, progress and persisted completion reporting. Preserve execution confinement and process control where the current boundary requires it.
 - Model foreground and background ownership explicitly: human abort, batch cancel, process restart and parent rotation have different effects. Report into the recorded destination using stable completion identities and the delivery ambiguity policy. A late report must not enter a newly selected unrelated conversation. Native submission deduplication does not make a Telegram send exactly-once.
 - Evaluate native codemode as a separately gated follow-on if selected for assistant tool composition, with replay journal, nested-tool policies, deadline and upgrade compatibility tests. It is not a C5 or cutover requirement unless explicitly added to scope.
-- Implement the C0 retention decision for temporary child transcripts and completed task records; cache limits are not deletion. Verify cleanup before retiring the existing seven-day behavior.
+- Implement the [C0 retention contract](pi-durable-c0-contracts.md#d4-preserve-existing-state-guarantees-and-child-retention): process-owned temporary child Harness stores, creation-based seven-day expiry, exclusive recovery/cleanup ownership and verified termination/close before removal. Main-store correlation evidence and bounded parent reports remain durable. Verify cleanup before retiring the existing temporary-state implementation; cache limits are not deletion.
 - Remove old batch/acceptance recovery records only when their replacement is authoritative, migrated and tested. Keep legacy occurrence terminal identities.
 
 **Pass gate:** scheduled and child work recover across process restart; supported legacy/native handoff combinations pass and unsupported combinations hold work explicitly; no completed fan-out recipient or parent completion submission is repeated; external report delivery follows the stated ambiguity policy; cancellation and parent-idle behavior match the contract; late reports retain their intended conversation and target; no child gains unselected capabilities; unsupported historical uncertainty is quarantined for explicit resolution; temporary-state retention is effective.
@@ -257,7 +263,7 @@ Required cross-cutting assertions:
 - Authority: profile filters before imports, actor/chat/thread binding, broker ownership, stale/replayed confirmations, child guard selection, and current authorization on recovery.
 - Context/history: legacy anchors, stable new anchors, hidden recall, compaction/reset semantics, original timestamps, per-principal indexing, and feature flags.
 - Operations: single writer/poller, ordinary and broker transport ownership, inbox admission receipts and retirement, blocked task definitions, version migrations, bounded close, storage failure, queued-input failure behavior, disk growth, retention and deployment holds.
-- Transition: run the acceptance cases recorded for each approved [transition contract](#transition-contracts-to-settle-at-c0) across its supported runtime combinations.
+- Transition: run the acceptance cases recorded for each approved [transition contract](#c0-transition-requirements) across its supported runtime combinations.
 
 Run `npm run check:changed` and `npm run build` after code changes. Use `npm run check` for full checkpoint/release gates and ensure browser integration suites follow repository naming/selection rules. Live provider, Telegram, browser and Linux/systemd evidence is distinct from offline tests; mark any unverified path explicitly. No checkpoint passes solely because types compile.
 
