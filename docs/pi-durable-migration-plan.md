@@ -1,6 +1,6 @@
 # Pi-durable migration plan
 
-Status: approved architecture and checkpoint sequence; C0 baseline passed and isolated C1 feasibility evidence is complete, including the dedicated live provider/inbound/preview/callback pilot across process restart. The recommendation is go to C2; C2 has not started.
+Status: approved architecture and checkpoint sequence; C0 and C1 passed. C2 native runtime foundation now passes local integration, compatibility, crash/recovery and independent review gates on `feat/durable-c2`. The recommendation is go to C3. Production remains on the legacy release; no C2 deployment or private-state migration ran.
 
 The user approved the durable-only extension strategy, chat-and-memory MVP, retained hosting and Telegram experience, target architecture, and C0–C7 sequence. This plan records intended work; it does not describe implemented behavior or supersede existing ADRs until their replacements are accepted.
 
@@ -134,6 +134,8 @@ Use an isolated dependency tree, private disposable state, and a dedicated test 
 **Decision:** go, revise the adapter/provider approach, or stop before building C2 infrastructure. If provider credentials are unavailable, mark that proof blocked rather than calling the pilot complete. Re-estimate later checkpoints from measured work. Identify explicitly which pilot code is reusable and which is discarded; promotion requires tests and lifecycle ownership.
 
 ### C2 — Production runtime foundation
+
+**Checkpoint:** passed in the isolated native release tree. The native [C2 guide](pi-durable-c2-foundation.md) records ownership, validation and limits. C1 prototype helpers remain evidence; production code uses strict native modules and a compiled full-SHA-pinned fork API.
 
 **Deliverables**
 
@@ -269,7 +271,22 @@ Run `npm run check:changed` and `npm run build` after code changes. Use `npm run
 
 ## Estimates and decisions
 
-The research estimate was 6–10 engineer-weeks for full parity and cutover. Treat it as provisional. C1 is approximately 3–5 working days; estimate C2–C7 again after the pilot measures Telegram/provider adaptation and approval/recovery work. The MVP checkpoint includes correct memory and history behavior, not only a chat demonstration.
+C0–C2 are complete. The remaining planning range is roughly 6–9 engineer-weeks,
+plus the C7 observation window. These are provisional effort ranges, not delivery
+dates or measured completion times. C2 establishes native lifecycle and recovery;
+it does not remove the provider, domain-integration or deployment parity work.
+
+| Remaining checkpoint | Provisional engineer-days | Main uncertainty |
+| --- | --- | --- |
+| C3 chat-and-memory MVP | 5–8 | Canonical mutation receipts, scoped history and recall |
+| C4 integrations and provider parity | 10–15 | External side effects, OAuth/wire behavior and browser/operator flows |
+| C5 schedules and children | 5–8 | Handoff, concurrency and mixed-runtime recovery |
+| C6 integrated acceptance | 5–8 | Linux/systemd, full Telegram parity and staged activation |
+| C7 rollout and retirement | 2–4 plus observation | Canary evidence, held work and legacy removal |
+
+C4 and C5 may overlap after C3 with coordinated ownership. Re-estimate after C3
+and after target-platform rehearsal. The MVP includes correct memory and history
+behavior, not only a chat demonstration.
 
 Checkpoint decisions are go/rework/stop. A failed pilot does not authorize a universal compatibility framework or silently reduced product scope. Bring the specific blocker and smallest alternative back for a decision.
 

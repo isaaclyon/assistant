@@ -1,5 +1,14 @@
 # Architecture
 
+## Native migration status
+
+Production still uses the legacy boundaries below. The isolated
+`feat/durable-c2` release tree now implements the native runtime foundation with
+its own package, tests and explicit test-instance entrypoint. See
+[ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md) and the
+[C2 evidence](docs/pi-durable-c2-foundation.md). C3 chat-and-memory work and the
+C6/C7 activation gates remain before production replacement.
+
 ## Boundaries
 
 - **Host:** owns instance selection, process lifetime, Pi runtime creation, persistent session selection, signal handling, and service installation.
