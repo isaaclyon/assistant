@@ -1,6 +1,6 @@
 # Pi-durable C0 discovery and contracts
 
-Status: contracts approved; C0 passed for the recorded synthetic local baseline. C1 offline feasibility probes pass; live provider and test-bot evidence still block C1 acceptance. No live migration has run.
+Status: contracts approved; C0 passed for the recorded synthetic local baseline. C1 offline probes and limited live provider/outbound checks pass; the dedicated inbound pilot still blocks C1 acceptance. No live migration has run.
 
 This supplements the [approved migration roadmap](pi-durable-migration-plan.md). It preserves its native-extension strategy, chat-and-memory MVP, Node/systemd hosting, Telegram experience, domain stores and historical evidence. The user approved these contracts for publication and subsequently authorized baseline validation and the C1 pilot. C0 baseline validation is recorded below; live rollout remains C7. Existing ADRs remain authoritative until implementation-specific successors are accepted.
 
@@ -26,7 +26,15 @@ The local Telegram fork candidate is `b463aec0683969f8c9b6075bb2f258f6ca382c5c`,
 
 An independent review found missing discovery, attachment replay/reconnect, concurrent queue and history-resolver assertions. Focused fixes added those cases; a second read-only review confirmed their closure. The new replay assertion also caught and fixed cloning a native transaction-document proxy. The final combined check/build passed after that correction.
 
-Important limits: no authorized real provider request or dedicated live test-bot exchange has run. Native Responses preserves positional developer-message instructions and section patches, unlike the legacy Codex serializer's collapsed instructions. Service-tier/reasoning-summary parity and actual account refresh remain future provider work. Automatic fork-poller recovery and broker acknowledgement ordering with native admission are not integrated. Effect/delivery receipts and callback authentication are synthetic; attachment bytes, complete search/provenance, child lifecycle/confinement, Linux/systemd and C2–C7 parity remain unverified. No production service or deployment was changed. The next C1 action requires user-selected isolated provider credentials and a dedicated test bot/chat, kept in private configuration.
+Offline limits: these automated tests do not exercise a real provider or dedicated live test-bot exchange. Native Responses preserves positional developer-message instructions and section patches, unlike the legacy Codex serializer's collapsed instructions. Service-tier/reasoning-summary parity and actual account refresh remain future provider work. Automatic fork-poller recovery and broker acknowledgement ordering with native admission are not integrated. Effect/delivery receipts and callback authentication are synthetic; attachment bytes, complete search/provenance, child lifecycle/confinement, Linux/systemd and C2–C7 parity remain unverified. No production service or deployment was changed. The dedicated inbound pilot still requires its own test bot/chat in private configuration.
+
+## Limited live evidence
+
+After the user authorized discovery of existing local/VM configuration, a disposable native Harness using the public SQLite WAL/FULL adapter completed and committed a real OpenAI API-key response with the expected fixed marker. Credentials flowed directly into the probe process and were not logged or saved with its state.
+
+The user then selected an outbound-only test through an existing paired bot. A second native Harness provider turn committed the exact labeled test text; the SHA-verified Telegram fork adapter rendered it and the real Bot API acknowledged one final message. Bot identity and the private destination were checked first. No updates were consumed, no second poller was started, and no live service was changed. This was a synthetic internal input with a real provider and real outbound transport, not a live Telegram inbound turn.
+
+The provider smoke and authorized outbound test are complete. OAuth refresh remains synthetic; inbound acceptance, streamed preview and direct callback against a dedicated live test bot remain unverified. C1 stays held for that narrower live gap. Private source references, scripts, timestamps and receipts remain outside the repository.
 
 ## Approved decisions
 
@@ -251,7 +259,7 @@ C1 probes, each with a bounded test and an explicit failure outcome:
 5. A simulated external mutation succeeds before its result commits; reconcile by operation identity without repeating it. Persisted same-epoch approval and replay/wrong-actor rejection.
 6. Legacy citation resolver plus native identity shape; restricted profiles/children cannot import unselected resources. Temporary-child retention architecture gets a small public-API/process-lifecycle proof before C5 implementation, not a full child subsystem in C1.
 
-C2 expands boundary/crash tests, C3 proves actual Markdown and optional Git reconciliation, C4 proves each integration and browser boundary, C5 proves all supported mixed-runtime handoffs and retention, C6 rehearses exact-release deployment/holds/restore and target Linux/systemd acceptance. Do not call the live or native paths verified from this discovery report.
+C2 expands boundary/crash tests, C3 proves actual Markdown and optional Git reconciliation, C4 proves each integration and browser boundary, C5 proves all supported mixed-runtime handoffs and retention, C6 rehearses exact-release deployment/holds/restore and target Linux/systemd acceptance. Only explicitly recorded probe paths are verified; later integration gates remain open.
 
 ## Upstream sources
 

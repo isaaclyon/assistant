@@ -1,6 +1,6 @@
 # C1 native feasibility pilot — prototype only
 
-**Status: offline probes pass; C1 acceptance is held for live evidence.**
+**Status: offline probes and limited live provider/outbound checks pass; C1 remains held for the dedicated inbound pilot.**
 
 Claim: pi-durable 1.3.0 can support the approved input, recovery, approval,
 provider and Telegram boundaries through public APIs and a focused fork adapter.
@@ -36,7 +36,7 @@ artifacts, not a deployable service. Test state is synthetic and removed. Tests
 neither inspect ambient credentials nor contact a live provider/Bot API. Broker
 coverage opens an owned temporary Unix socket with synthetic upstream responses.
 
-## Evidence
+## Offline evidence
 
 Final combined gate: **60 tests in seven files**, strict TypeScript test checking,
 and build passed on Node 24/macOS. JavaScript helpers use `checkJs: false`; their
@@ -76,10 +76,14 @@ proxy being passed to `structuredClone`; the helper now projects its plain recor
 - The broker protocol authorizes access through its protected socket. Repeating
   `getMe` after reconnect is identity bootstrap, not an application-level
   reauthentication handshake.
-- C1 still requires one authorized real provider request and a dedicated test bot
-  and chat. Select isolated credential/configuration sources outside the repo;
-  record live evidence separately. This prototype never starts a production
-  service, polling loop or deployment.
+- Limited live evidence now passes: native Harness committed a real API-key
+  provider response; a second provider turn supplied the exact labeled message
+  acknowledged by the real Bot API through the verified fork's outbound adapter.
+  The user authorized one outbound-only send through an existing paired bot.
+  No update consumption, polling or service changes occurred. Private scripts,
+  references and receipts stay outside the repository.
+- C1 still requires the dedicated live inbound/preview/callback pilot. The
+  outbound test used synthetic internal input, and real OAuth refresh is untested.
 - Full host integration, automatic poller recovery/backoff, current authorization
   on every recovery, complete callback/media/menu parity, Linux/systemd and the
   C2–C7 gates remain future work. Offline results alone do not accept C1 or

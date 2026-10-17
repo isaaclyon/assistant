@@ -22,10 +22,10 @@ This probe selects the current `openai` provider/API approach. pi-ai describes `
 
 Harness stream settings expose transport, timeout, retry limits, headers, metadata, cache retention, and deferred options. They do not directly expose the OpenAI API-specific `serviceTier` or reasoning-summary controls. A supported ProviderStreams wrapper could supply such settings after a separate parity decision. Fast-mode, subscription usage/account headers, deployed Codex model aliases, and exact legacy request parity remain C4 work.
 
-## Acceptance blocker and decision
+## Live evidence and remaining decision
 
-**Real-provider proof is blocked:** the user has not selected dedicated pilot credentials or an authorized destination. No real provider call, login, secret-store access, personal root access, or live-service action was performed.
+**Real-provider API-key smoke passed.** After authorized discovery of existing private configuration, a disposable native Harness with SQLite WAL/FULL committed the requested fixed-marker response. A second provider turn generated the labeled text for the authorized outbound Telegram smoke. Credentials entered through private process input, without persistence or logging. Private scripts and receipts remain outside the repository. No live-service action occurred. Real OAuth login/refresh remains unverified.
 
-Recommended decision: use the native `openai` provider with its supported ChatGPT OAuth flow for the pilot once a dedicated account/destination is selected, and validate its request/account behavior separately before accepting it as replacement for legacy Codex conversion. If retaining `openai-codex` is required, add an equivalent isolated native-Codex transport probe; this suite does not claim that path is proven.
+Recommended decision: use the native `openai` provider with its supported ChatGPT OAuth flow for future subscription parity work, and validate its request/account behavior separately before accepting it as replacement for legacy Codex conversion. If retaining `openai-codex` is required, add an equivalent isolated native-Codex transport probe; this suite does not claim that path is proven.
 
 Validation: four provider tests pass. See the [combined pilot evidence](../README.md) for the final whole-prototype count, typecheck and build results. No SDK internals patched or imported.

@@ -87,5 +87,10 @@ exactly-once Telegram sends, section-token restart persistence, menus, tools,
 voice, household policy, or full extension parity. Native request IDs deduplicate
 input after the adapter fingerprint check; a replay can still send the same output twice. Native event projection is
 limited to the text-only pilot and does not claim tool/multiblock/resync parity.
-Live Bot API delivery and Telegram client behavior remain unproven; no live bot,
-credential file, or service was accessed.
+An additional authorized live outbound-only smoke passed: a real provider answer
+committed in native Harness, the verified fork adapter rendered its exact labeled
+text, and Bot API acknowledged one final message to the selected paired private
+chat. Identity/destination checks preceded the send. The input was synthetic;
+no Telegram update was consumed and no service/poller was changed. Private
+scripts and receipts are external evidence. Dedicated live inbound, streamed
+preview, callback and Telegram client behavior remain unverified.
