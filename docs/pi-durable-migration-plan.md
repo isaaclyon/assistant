@@ -4,7 +4,7 @@ Status: approved architecture and checkpoint sequence; implementation has not st
 
 The user approved the durable-only extension strategy, chat-and-memory MVP, retained hosting and Telegram experience, target architecture, and C0–C7 sequence. This plan records intended work; it does not describe implemented behavior or supersede existing ADRs until their replacements are accepted.
 
-The [C0 contracts and discovery inventory](pi-durable-c0-contracts.md) are also approved. They settle release coexistence, the MVP profile, state/recovery contracts and child retention. C0 still awaits clean baseline validation; the feasibility pilot has not started.
+The [C0 contracts and discovery inventory](pi-durable-c0-contracts.md) are also approved. They settle release coexistence, the MVP profile, state/recovery contracts and child retention. C0 passed its synthetic local baseline; C1 feasibility work follows. Platform-conditional browser/Linux checks and live integrations remain explicitly unverified.
 
 ## Outcome and agreed scope
 
@@ -109,7 +109,7 @@ Each checkpoint records deliverables, passing evidence, unresolved failures, and
 
 **Pass gate:** every current capability, durable record, and patch has an owner and disposition; no unspecified authority, input identity, or storage-retention boundary remains hidden in the implementation estimate. Each [transition contract](#c0-transition-requirements) has a recorded decision, implementation owner and acceptance cases. Both Telegram transport modes and inbox handoff/retirement have explicit owners and acceptance cases.
 
-**Decision:** the detailed contracts and candidate release pins are approved in the [C0 contract document](pi-durable-c0-contracts.md). Complete clean baseline validation before passing C0 and beginning the pilot. Accepted ADRs remain in force until an explicit successor is approved.
+**Decision:** the detailed contracts and candidate release pins are approved in the [C0 contract document](pi-durable-c0-contracts.md). Clean baseline validation has passed with the limits recorded there; proceed to the isolated C1 pilot. Accepted ADRs remain in force until an explicit successor is approved.
 
 ### C1 — Feasibility pilot
 

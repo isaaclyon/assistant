@@ -1,8 +1,8 @@
 # Pi-durable C0 discovery and contracts
 
-Status: contracts approved; discovery complete; clean baseline validation pending. C0 has not passed. No native implementation or live migration has run.
+Status: contracts approved; C0 passed for the recorded synthetic local baseline. Native feasibility and live integration remain C1 work; no live migration has run.
 
-This supplements the [approved migration roadmap](pi-durable-migration-plan.md). It preserves its native-extension strategy, chat-and-memory MVP, Node/systemd hosting, Telegram experience, domain stores and historical evidence. The user approved these contracts for publication. C0 baseline validation and the C1 pilot remain subsequent work; live rollout remains C7. Existing ADRs remain authoritative until implementation-specific successors are accepted.
+This supplements the [approved migration roadmap](pi-durable-migration-plan.md). It preserves its native-extension strategy, chat-and-memory MVP, Node/systemd hosting, Telegram experience, domain stores and historical evidence. The user approved these contracts for publication and subsequently authorized baseline validation and the C1 pilot. C0 baseline validation is recorded below; live rollout remains C7. Existing ADRs remain authoritative until implementation-specific successors are accepted.
 
 ## Evidence and limits
 
@@ -10,9 +10,11 @@ Repository baseline: `bf7e4e8`, roadmap commit `488a956`. The inventory was chec
 
 The published npm `latest` tag and the explicit candidate both resolved to pi-durable 1.3.0 during discovery. Its tagged source commit is `71023aec1546d6d677a65669c5665c0927ce0dd0`. Its manifest directly depends on `pi-ai`, `chord` and `pi-codemode` 1.3.0. The native codemode capability remains optional despite that dependency. Package metadata and source inspection establish available interfaces, not working assistant integration.
 
-The worktree has no installed local runtime dependency tree. A read-only typecheck using the primary checkout's compiler reports the explicit local Telegram import missing in `tests/subagent-target-scope.test.ts`. Checking the primary checkout's installed Telegram package reports two `ThinkingLevel` errors involving `max`. These are baseline environment/installation findings, not effects of the roadmap. A clean isolated install and compatibility run must establish a usable baseline; do not suppress these gates.
+The initial discovery used an incomplete local installation and found missing Telegram imports and `ThinkingLevel` errors. A clean `npm ci` applied all existing guarded patches and resolved both findings without source or dependency changes. The first full run also exposed the process runner selecting macOS Bash 3.2; explicitly selecting installed Bash 5 and Node 24 resolved the four affected fake-deployment tests without skipping or changing them.
 
-No production secrets, stores, provider requests, Telegram pollers or service operations were used. No latency/storage benchmark or native crash test has run. Those evidence requirements remain open below.
+C0 validation: `npm run check` passed all three type checks and 1,162 tests in 143 files. The existing platform/tool availability conditions skipped 39 tests, including the real-browser suites; those paths remain unverified. `npm run check:changed`, `npm run build`, and a separate typecheck of the baseline probe also passed. No production secrets, stores, provider requests, Telegram pollers or service operations were used.
+
+The [prototype-only baseline probe](../prototypes/durable-baseline/README.md) ran twice with ten samples per phase, measuring in-process host readiness, an immediate fake-provider turn, real Markdown CRUD, core compilation, FTS search, recall orchestration, inbox reopen/replay and finite-workload file growth. Raw measurements, environment details, baseline/lockfile hashes and comparison budgets remain in private external evidence. Recall retrieval/judgment and provider latency are synthetic; readiness is not live Telegram/systemd readiness. Comparison budgets trigger investigation of equivalent phases, not automatic rejection from ten samples. Native crash and live integration evidence remain open.
 
 ## Approved decisions
 
