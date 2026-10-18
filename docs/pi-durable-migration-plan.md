@@ -1,6 +1,6 @@
 # Pi-durable migration plan
 
-Status: approved architecture and checkpoint sequence; C0–C2 passed. C3 chat and memory are implemented on isolated `feat/durable-c3`, with local validation and independent review complete. Its dedicated live user checkpoint remains pending; see the [C3 guide](pi-durable-c3-chat-memory.md). Production remains on the legacy release; no production deployment or private-state migration ran.
+Status: approved architecture and checkpoint sequence; C0–C3 passed. C3 chat and memory are implemented on isolated `feat/durable-c3`, with local validation, independent review and dedicated live user acceptance complete; see the [C3 guide](pi-durable-c3-chat-memory.md). Production remains on the legacy release; no production deployment or private-state migration ran.
 
 The user approved the durable-only extension strategy, chat-and-memory MVP, retained hosting and Telegram experience, target architecture, and C0–C7 sequence. This plan records intended work; it does not describe implemented behavior or supersede existing ADRs until their replacements are accepted.
 
@@ -153,9 +153,11 @@ Use an isolated dependency tree, private disposable state, and a dedicated test 
 
 ### C3 — Chat-and-memory MVP
 
-**Checkpoint:** implementation and offline review complete; dedicated live user
-acceptance pending. The [C3 guide](pi-durable-c3-chat-memory.md) records the selected
-surface, canonical effect recovery, evidence resolver and validation limits.
+**Checkpoint:** passed. Implementation, offline review and dedicated live user
+acceptance are complete. Enabled recall, semantic search and the original pending
+sharing approval across restart passed. The user confirmed usability and noted
+slower perceived responses; the [C3 guide](pi-durable-c3-chat-memory.md) records
+timings, activity visibility, evidence and validation limits.
 
 This is the first usable assistant checkpoint, on a dedicated test instance using the capability profile and explicit skill/tool selection approved at C0. Run it through C0's release/dependency strategy while production retains its approved runtime. Production cutover remains C7.
 
@@ -277,15 +279,14 @@ Run `npm run check:changed` and `npm run build` after code changes. Use `npm run
 
 ## Estimates and decisions
 
-C0–C2 are complete. C3 implementation and the enabled-recall service smoke are
-complete; its dedicated live user checkpoint remains pending. The original C2 planning
-ranges below predate that work; re-estimate after C3 acceptance. These are
-provisional effort ranges, not delivery dates or measured completion times.
+C0–C3 are complete, including enabled-service and dedicated live user acceptance.
+The remaining ranges below are original C2 planning estimates and have not been
+re-estimated from C3 results. They are provisional effort ranges, not delivery
+dates or measured completion times.
 Provider, domain-integration and deployment parity remain later work.
 
 | Remaining checkpoint | Provisional engineer-days | Main uncertainty |
 | --- | --- | --- |
-| C3 chat-and-memory MVP | 5–8 | Canonical mutation receipts, scoped history and recall |
 | C4 integrations and provider parity | 10–15 | External side effects, OAuth/wire behavior and browser/operator flows |
 | C5 schedules and children | 5–8 | Handoff, concurrency and mixed-runtime recovery |
 | C6 integrated acceptance | 5–8 | Linux/systemd, full Telegram parity and staged activation |

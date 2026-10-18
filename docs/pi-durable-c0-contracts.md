@@ -1,6 +1,6 @@
 # Pi-durable C0 discovery and contracts
 
-Status: contracts approved; C0–C2 passed. C3 chat and memory are implemented on isolated `feat/durable-c3` with local validation and independent review; its dedicated live user checkpoint remains pending. No production migration has run.
+Status: contracts approved; C0–C3 passed. C3 chat and memory are implemented on isolated `feat/durable-c3` with local validation, independent review and dedicated live user acceptance; see the [C3 evidence](pi-durable-c3-chat-memory.md#validation-and-user-acceptance). No production migration has run.
 
 This supplements the [approved migration roadmap](pi-durable-migration-plan.md). It preserves its native-extension strategy, chat-and-memory MVP, Node/systemd hosting, Telegram experience, domain stores and historical evidence. The user approved these contracts for publication and subsequently authorized baseline validation and the C1 pilot. C0 baseline validation is recorded below; live rollout remains C7. Existing ADRs remain authoritative until implementation-specific successors are accepted.
 
