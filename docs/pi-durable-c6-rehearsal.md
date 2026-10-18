@@ -270,6 +270,9 @@ verifies that selected asset migration cannot bypass the empty-inbox gate.
 [Linux CI](https://github.com/isaaclyon/assistant/actions/runs/39159662779) also
 passes on `ef836d43`: 151 test files pass and one file is skipped, with 1,398
 tests passing and four tests skipped. The run completes in 6 minutes 12 seconds.
+The [follow-up CI run](https://github.com/isaaclyon/assistant/actions/runs/39163788343)
+also passes on `bd20641`: 152 test files pass and one file is skipped, with 1,401
+tests passing and four tests skipped. It completes in 6 minutes 3 seconds.
 A separate Linux run on the same source commit passes all 43 tests across the
 five protected-browser, private-login, takeover, stock-Chrome and credential-worker
 suites, without skips. This includes the two headed observer tests, the real
@@ -308,8 +311,15 @@ A dedicated full-builder instance uses the real Codex OAuth provider, a separate
 native store and ordinary Telegram polling. It delivers three replies and
 completes one hosted web request with HTTP 200. It reports no unfinished work or
 transport failure at shutdown. The access-only OAuth copy has refresh disabled;
-both credential copies are removed after the check. This run does not establish
-`/usage` or priority-tier behavior.
+both credential copies are removed after the check. This first run does not
+establish `/usage` or priority-tier behavior.
+
+A follow-up full-builder run on `bd20641` passes the actual user-driven controls:
+`/usage` returns HTTP 200, `/fast on` produces three priority-tier provider
+payloads, and hosted web search returns HTTP 200. Two replies reach Telegram.
+After `/fast off`, both the active and saved fast preferences are off. No
+unfinished work, transport failure or fatal error remains. The application closes
+and the process exits naturally with code 0. Both credential copies are removed.
 
 The native execution environment also runs the real YNAB CLI through the skill's
 `~/.bun/bin` fallback. The CLI reports no authentication and refuses a budget
@@ -331,6 +341,20 @@ provider close returns and the process exits naturally with code 0 in six second
 Its credential copies are removed. Real broker, Mini App and credential
 approval/copy acceptance remain open.
 
+A real restricted-broker instance also starts on a separate ephemeral Tailscale
+node. The native browser opens and inspects the synthetic HTTPS sign-in form,
+and the instance receives a real Telegram request. It delivers two replies and
+exits naturally with no unfinished work. Three private-login attempts return
+`browser_blocked`; the broker records no approval request. The safety gate stays
+enabled. This run does not prove successful sign-in, credential approval/copy or
+Mini App takeover. Those gates remain open alongside authenticated CLI acceptance.
+
+The test application, broker, site and browser stop after the check. The dedicated
+node's three proxy mappings and temporary loopback address are removed. The node
+logs out, credential copies are removed, and both synthetic vaults are deleted
+with absence verified. The test service account has a one-hour expiry; early
+revocation is not claimed.
+
 Check `tailscale serve status --json` before choosing a private test endpoint.
 The text status can omit foreground configurations. The occupied-port guard
 refuses the existing foreground mappings before any network change.
@@ -346,5 +370,5 @@ refuses the existing foreground mappings before any network change.
 Each Linux mode requires Docker and Node 24. The containers use only synthetic
 data and repository build output. Run the modes separately within their bounded
 execution times. The separate Linux browser run closes its 43 selected platform
-checks. Remaining end-to-end provider, browser, authenticated CLI and broker
-acceptance remain separate C6 gates.
+checks. User-driven provider controls and natural shutdown also pass. Remaining
+browser, authenticated CLI and broker acceptance remain separate C6 gates.
