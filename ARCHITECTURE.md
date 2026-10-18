@@ -26,8 +26,13 @@ explicitly selected Codex OAuth account under a bounded deadline.
 The separate `feat/durable-c4-parity` branch adds hosted `web_run` with stable
 store/conversation reference identity, unsafe POST recovery, provider retry/stall
 compatibility, integration diagnostics and protected-auth reservation guidance.
-The native Harness owns retry budgets and settlement. Live integration and
-privileged builder/deployment acceptance remain C6 work.
+The native Harness owns retry budgets and settlement. `feat/durable-c5-recipient`
+starts C5 with an explicit self-only scheduled-job recipient. Native reservation
+and submission evidence reconcile v1 claims; unknown historical claims stay held.
+The v1 completed state means admission, while native run outcome and final-only
+delivery remain separate. Read-only inspection reports counts. Coordinator and
+child migration remain open; see the [C5 guide](docs/pi-durable-c5-jobs.md).
+Live integration and privileged builder/deployment acceptance remain C6 work.
 These branches use the native package, tests and explicit test-instance entrypoint. See [ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md),
 [ADR-0053](docs/adr/0053-native-chat-memory-and-evidence.md), and the
 [C3 evidence](docs/pi-durable-c3-chat-memory.md) and
