@@ -19,6 +19,10 @@ browser configuration, process-scoped routing, registry-wide tool exclusion and
 cancellation cleanup. Browser calls are unsafe to replay; crashes preserve the
 stock-browser gate and report interruption. OpenTable mail lookup uses explicit
 native Google selection; broker approvals retain their existing authority.
+The separate `feat/durable-c4-provider` branch adds native `/fast` and `/usage`
+commands and weekend-planning guidance. Fast preferences persist with replay-safe
+command identities and apply after native work settles. Usage reads only the
+explicitly selected Codex OAuth account under a bounded deadline.
 These branches use the native package, tests and explicit test-instance entrypoint. See [ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md),
 [ADR-0053](docs/adr/0053-native-chat-memory-and-evidence.md), and the
 [C3 evidence](docs/pi-durable-c3-chat-memory.md) and

@@ -1,4 +1,4 @@
-# C4 tools, reads, CLI skills, places, guarded changes and browser
+# C4 integrations, protected browser and provider controls
 
 Status: **first slice implemented and locally validated on `feat/durable-c4`;
 a second Google-read slice is implemented and locally validated on
@@ -6,7 +6,8 @@ a second Google-read slice is implemented and locally validated on
 `feat/durable-c4-cli`; direct private places are implemented and locally validated on
 `feat/durable-c4-places`; guarded Calendar and places mutations are implemented on
 `feat/durable-c4-mutations`; protected browser operations are implemented on
-`feat/durable-c4-browser` (validation below).
+`feat/durable-c4-browser`; native fast/usage controls are implemented on
+`feat/durable-c4-provider` (validation below).
 C4 remains in progress.** C3 is accepted. The first slice restores general file,
 shell and bounded public-web tools in a separate selected profile. Production
 continues using its legacy release. The legacy planning checkout retains this
@@ -599,3 +600,71 @@ real Gmail login, Linux/systemd path ownership or current Chrome behavior. C6
 must run those gates with the relevant broker/security and operations owners.
 Full C4 remains open for provider/operator parity; production activation and
 private-state migration remain C6/C7 work.
+
+
+## Native provider controls slice
+
+`durable-provider-test` extends the Isaac-only browser profile with the
+`native-fast` and `native-usage` host bundles and the existing `plan-weekend`
+skill. Select a new private native store with the same explicit memory, Google,
+browser and optional CLI configuration described above. Earlier profile/resource
+objects retain their exact selections and recovery identities. The new profile
+inherits browser exclusion, Calendar/places safeguards, and shell environment
+binding. The two provider bundles add direct commands rather than model tools.
+
+`/fast`, `/fast status`, `/fast on` and `/fast off` are authenticated Telegram
+commands. Malformed arguments are rejected before model admission. Fast mode is
+off by default and supported only for the selected OpenAI/Codex Responses APIs.
+Status shows active, saved and pending values. A change during native work is
+saved immediately and applies after all native tasks and accepted submissions
+settle, including retry timers and tool rounds. The active value and update-ID
+receipts persist independently, so replaying an older update cannot undo a newer
+preference. A crash retains the active value while unfinished work recovers.
+Priority processing may consume more quota or cost more. The wrapper applies to
+all calls through the selected provider, including compaction and internal model
+calls. Command receipts currently remain in the native document; C6 must measure
+retention before introducing any pruning that could weaken replay deduplication.
+
+The provider wrapper preserves native transcript/tool serialization and composes
+the supported `onPayload` callback. It requests `service_tier: priority` when on
+and removes a per-request tier override when off. The pinned simple-stream
+conversion does not carry the API-specific `serviceTier` option, which is why
+this uses the payload seam. The native document is the single preference owner;
+legacy/project Codex settings and ambient fast-mode overrides are not read.
+
+`/usage` reads fresh subscription allowance for a canonical `openai-codex`
+Responses model with OAuth credentials in the explicitly selected native account.
+The fixed HTTPS endpoint rejects redirects, caps the streamed body at 256 KiB,
+and uses one ten-second deadline for model selection, auth refresh, fetch, body
+read and final model recheck. No raw payload, credential or provider error enters
+Telegram or model history. Other provider/API and API-key configurations return
+an explicit unsupported message. Shared Codex and matching active-model windows
+show remaining/used allowance, reset time and even-use pace when metadata permits.
+
+### Provider-controls validation and remaining acceptance
+
+Offline tests exercise authenticated commands through the selected production
+application, malformed/unauthorized input, old-profile visibility, active/saved
+state during running and queued work, replay after a newer setting, and restart.
+The actual pinned Codex serializer sends priority and preserves positional prompt
+and tool changes without mutating the input. Native retry tests keep one final
+Telegram destination and one completed effect. A real SIGKILL test preserves a
+pending preference and old command identity while an accepted native input
+recovers. Usage fixtures cover account headers, auth refusal, result filtering,
+model changes, malformed/oversize payloads and non-cooperative timeout paths.
+
+Under Node 24.18.1, `npm run check:changed` passed 801 tests in 77 files;
+38 platform/credential-dependent tests were skipped across four files (three
+entire suites). `npm run build` passed, including the compiled application import.
+An independent read-only review found no material issues and separately passed
+all 23 focused provider tests. Earlier profile/resource objects compare exactly
+with both the browser and guarded-mutation bases. Local documentation links and
+`git diff --check` passed.
+No live account, Telegram bot, browser, or production service is used here.
+
+Full C4 remains open. Public `web_search`/`web_fetch` do not establish legacy
+`web_run` feature parity. Legacy transient-error/stall behavior, remaining
+integration diagnostics and selected reservation guidance still require explicit
+acceptance. The privileged builder and its deployment prompt belong to the C6
+engineering boundary; this personal test profile does not select `/deploy`.
+Live provider/browser/CLI and Linux service evidence remain separate gates.
