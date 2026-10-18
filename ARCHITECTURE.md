@@ -42,7 +42,12 @@ loopback webhooks, scoped schedule helpers and temporary price watches. Native
 checker environments exclude ambient provider settings; Gmail uses only the
 selected Google configuration, and semantic schedules use a separate explicit
 judge key. The existing domain owners retain cursors and occurrence identities.
-Background children and their retention remain open; see the
+`durable-jobs-children-test` adds native background orchestration with separate
+process-owned temporary child Harness stores, stable launch IDs and OS writer/control
+leases. One bounded report returns to the original conversation after parent idle.
+Creation-based seven-day retirement commits a tombstone before store removal;
+main correlation evidence and bounded parent history remain durable. The child
+validation gate remains open; see the [child guide](docs/pi-durable-c5-children.md),
 [C5 recipient](docs/pi-durable-c5-jobs.md),
 [coordinator](docs/pi-durable-c5-coordinator.md) and
 [schedule](docs/pi-durable-c5-schedules.md) guides.

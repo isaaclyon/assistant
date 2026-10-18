@@ -2,7 +2,7 @@
 
 The isolated `feat/durable-c5-recipient` branch starts C5 with the recipient side
 of the approved [mixed-runtime contract](pi-durable-c0-contracts.md#mixed-runtime-jobs).
-C5 remains open. Production activation remains C6/C7.
+C5 validation remains open. Production activation remains C6/C7.
 
 ## Selection and ownership
 
@@ -127,7 +127,8 @@ The subsequent [coordinator slice](pi-durable-c5-coordinator.md) adds cron and l
 one-shot publication, four-way legacy/native admission and restart coverage, and
 coordinator inspection. The [schedule slice](pi-durable-c5-schedules.md) adds
 selected heartbeat/webhook execution, their four-way mixed-runtime matrix,
-price-watch tasks and schedule-editing selection. Background children and
-creation-based seven-day child-store retirement remain open. Canonical
-definitions, occurrence identities and legacy uncertainty must survive those slices. Optional codemode remains separately
-gated. See the [roadmap](pi-durable-migration-plan.md#c5--native-schedules-and-background-agents).
+price-watch tasks and schedule-editing selection. The [child slice](pi-durable-c5-children.md)
+adds process-owned temporary Harness stores, native orchestration and creation-based
+seven-day retirement. Its validation gate remains open. Canonical definitions,
+occurrence identities and legacy uncertainty retain their existing owners.
+Optional codemode remains separately gated. See the [roadmap](pi-durable-migration-plan.md#c5--native-schedules-and-background-agents).
