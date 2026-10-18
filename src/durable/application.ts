@@ -22,6 +22,9 @@ export interface NativeApplicationOptions {
  onTransportFailure(error:unknown):void;
  requestRestart?():void;
  provider?:Awaited<ReturnType<typeof createNativeProvider>>;
+ /** Explicit transport and timing seams for offline native acceptance. */
+ webRunFetch?:typeof fetch;
+ providerStallTimeoutMs?:number;
  transport?:RawTransport;
 }
 /** Store identity travels with the Harness, so citation locators survive moving a backup. */
@@ -32,7 +35,8 @@ const confirmationKey=(cid:ConversationId,id:string)=>createHash('sha256').updat
 export async function createNativeApplication(config:NativeConfig,options:NativeApplicationOptions) {
  await loadCapabilityProfile(config.resourceRoot,config.capabilityProfile);
  const enabled=isNativeMemoryProfile(config.capabilityProfile);
- const providerEnabled=config.capabilityProfile==='durable-provider-test';
+ const parityEnabled=config.capabilityProfile==='durable-parity-test';
+ const providerEnabled=config.capabilityProfile==='durable-provider-test'||parityEnabled;
  const browserEnabled=config.capabilityProfile==='durable-browser-test'||providerEnabled;
  const mutationsEnabled=config.capabilityProfile==='durable-mutations-test'||browserEnabled;
  const placesEnabled=config.capabilityProfile==='durable-places-test'||mutationsEnabled;
@@ -58,6 +62,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  let prepareIntent:((input:import('./memory-executor.js').PrepareMemoryIntentInput)=>Promise<{intent:import('./operations.js').MemoryIntent}>)|undefined;
  const registryListeners=new Set<()=>void>();
  let executionEnvironment:import('@earendil-works/pi-durable/env').ExecutionEnv|undefined;
+ let webRunFactory:(()=>NativeBundle)|undefined;
  let generalFactory:(()=>NativeBundle)|undefined;
  let publicWebFactory:(()=>NativeBundle)|undefined;
  let places:ReturnType<typeof import('./places.js')['createNativePlaces']>|undefined;
@@ -104,6 +109,14 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    const tools=await import('./general-tools.js');
    generalFactory=tools.createGeneralToolsBundle;
    publicWebFactory=(await import('./public-web.js')).createPublicWebBundle;
+   if(parityEnabled){
+    const {createWebRunBundle}=await import('./web-run.js');
+    webRunFactory=()=>createWebRunBundle({models:provider.models,...(options.webRunFetch?{fetch:options.webRunFetch}:{}),sessionId:async cid=>{
+     const identity=await requireHost().runtime.harness.snapshot(NativeIdentity,requireHost().runtime.root.id,context);
+     if(!identity?.storeId)throw new Error('Native web identity unavailable');
+     return `${identity.storeId}:${cid}`;
+    }});
+   }
    executionEnvironment=tools.createNativeExecutionEnvironment(config);
   }
   if(mutationsEnabled){
@@ -181,6 +194,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    if(!enabled)throw new Error('Native domain bundles are unavailable for this profile');
    if(browserEnabled&&name==='private-browser')return browser!.bundle();
    if(generalEnabled&&name==='general-tools')return generalFactory!();
+   if(parityEnabled&&name==='web-run')return webRunFactory!();
    if(generalEnabled&&name==='public-web')return publicWebFactory!();
    if(mutationsEnabled&&name==='google-mutations')return {...calendar!.bundle(),close:async()=>{}};
    if(googleEnabled&&!mutationsEnabled&&name==='google-reads')return googleFactory!();
@@ -222,7 +236,9 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   });
   const fast=providerEnabled?createNativeFast({host:requireHost,botId:config.transport.botId,model:async()=>{const m=await controls.currentModel();return provider.models.getModel(m.provider,m.modelId);}}):undefined;
   const usage=providerEnabled?createNativeUsage({models:provider.models,getModel:controls.currentModel}):undefined;
-  if(fast)provider.models.setProvider(withNativeFast(provider.provider,fast.active));
+  let selectedProvider=fast?withNativeFast(provider.provider,fast.active):provider.provider;
+  if(parityEnabled){const {withNativeRetry}=await import('./provider-retry.js');selectedProvider=withNativeRetry(selectedProvider,{...(options.providerStallTimeoutMs===undefined?{}:{stallTimeoutMs:options.providerStallTimeoutMs})});}
+  if(fast||parityEnabled)provider.models.setProvider(selectedProvider);
   const ui:NativeUiController={
    command:async request=>{
     try{

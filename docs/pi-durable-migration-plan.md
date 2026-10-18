@@ -212,6 +212,14 @@ offline evidence. Remaining web/retry parity, reservation guidance, diagnostics
 and live/platform acceptance stay open. Privileged builder/deploy coverage stays
 at the C6 engineering boundary.
 
+The `feat/durable-c4-parity` slice adds `durable-parity-test`: hosted `web_run`
+with stable store/conversation reference identity and unsafe recovery, native
+transient-error/idle-stream handling, integration diagnostic coverage and a
+separate protected-auth reservation skill. Offline wire/application/SIGKILL
+coverage records the local boundary. Live hosted endpoint/account behavior,
+browser/CLI and platform acceptance remain C6 gates; this does not activate a
+production profile or complete C4's live pass gate.
+
 Restore general file/shell/public-web tools with operation-specific replay policies as part of C4. The C3 profile deliberately selects only typed memory/history tools.
 
 Implement the integrations in this order, reusing domain code:
@@ -292,7 +300,7 @@ Browser recovery is a separate acceptance boundary. A surviving browser process 
 | `deploy` | Host command retaining instance privileges and deployment policy | C4/C6 |
 | `subagents` | Native durable tasks/owned conversations and completion reporter with bounded read-only execution | C5 |
 | Selected skills/instructions | Preserve content and profile selection; update guidance for actual runtime behavior | C2–C6 |
-| Codex conversion/web/retry dependencies | Replace or adapt each demonstrated behavior; retire only after request/tool/recovery parity | C1/C2/C4 |
+| Codex conversion/web/retry dependencies | Native serialization/fast/usage plus selected hosted web and idle/retry compatibility are implemented; live endpoint/account acceptance remains open | C1/C2/C4 local; live C6 |
 | Eleven install patches | Map each behavior to native code/fork change or documented retirement; retain guards while needed | C0 inventory, C6 closure |
 | Legacy session parser/provenance | Retain reader and exact old anchors; add durable history source | C3/C6 |
 

@@ -55,8 +55,15 @@ and weekend-planning guidance. Fast preferences and command identities persist
 in a native document; the host promotes saved changes only after native work,
 including retries, settles. A provider wrapper composes priority into the native
 wire payload. Usage reads the selected Codex OAuth account through a fixed,
-bounded endpoint and returns only formatted allowances. Full C4 web/retry/operator
-parity and live browser/platform acceptance remain pending.
+bounded endpoint and returns only formatted allowances. `durable-parity-test`
+adds the native hosted `web_run` adapter, provider retry/stall compatibility and
+reservation guidance. Hosted reference state uses a store/conversation identity;
+POST requests are replay-unsafe and never automatically resent after interruption.
+The wrapper classifies only the missing legacy transient errors and aborts idle
+provider streams; the native Harness owns retry budgets and delivery settlement.
+All integration tools use the existing private, redacted lifecycle diagnostics.
+Live provider/browser/CLI/platform acceptance and privileged builder/deployment
+coverage remain at C6.
 
 The sections below describe the deployed legacy architecture. Its package,
 source patches and service path remain in the legacy release tree until the
@@ -479,6 +486,7 @@ approved target architecture and C0–C7 checkpoints. C0–C3 passed. C4 general
 file/shell/public-web tools, Google reads, CLI-backed YNAB/Messages skills and
 direct private places flows and guarded Calendar/places mutations are implemented
 on isolated native branches. Protected browser operations and native fast/usage
-controls are also implemented; remaining web/retry/operator parity and live
-acceptance remain pending. The sections above the migration note describe legacy production,
+controls, hosted web, retry/stall compatibility and reservation guidance are also
+implemented. Live integration acceptance and privileged builder/deployment
+coverage remain pending. The sections above the migration note describe legacy production,
 except for the explicit native branch overview. Production activation remains C7.

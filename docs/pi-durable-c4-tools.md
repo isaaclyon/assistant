@@ -668,3 +668,96 @@ integration diagnostics and selected reservation guidance still require explicit
 acceptance. The privileged builder and its deployment prompt belong to the C6
 engineering boundary; this personal test profile does not select `/deploy`.
 Live provider/browser/CLI and Linux service evidence remain separate gates.
+
+
+## Native hosted web and retry slice
+
+`durable-parity-test` extends the provider test profile with `native-web-run`
+and a separate native reservation skill. Use a fresh private native store and
+the same explicit Isaac memory, Google, browser and optional CLI configuration.
+All earlier profile and resource objects retain their exact selections.
+
+### Hosted web and reference ownership
+
+The native `web_run` tool preserves the pinned legacy search, image search,
+open-by-URL/reference, click, find, line, recency/domain, response-length and
+search-context arguments. Additional hosted command fields still pass through;
+this is request-shape compatibility, not proof that every hosted service accepts
+them. `web_search` and `web_fetch` remain separately available.
+
+Only the explicitly selected canonical `openai-codex` Responses OAuth account
+can call the fixed ChatGPT Codex search endpoint. The tool resolves the model
+from its calling native conversation and uses that model ID. Ambient
+`PI_CODEX_MODEL`, aliases and alternate Responses endpoints are not consulted.
+A persistent native store UUID plus conversation ID owns server references;
+restart preserves that identity, while `/new` gives the next search a distinct
+conversation identity. Refs never serve as final-answer links; cite result URLs.
+
+The hosted POST is unsafe to replay because it changes server reference state.
+A surviving call with no committed result returns interruption/uncertainty;
+it never automatically resends the search. A distinct new request can perform a
+fresh read. This does not make the remote API idempotent or recover its hidden
+state. Ordinary local public fetch retains its own safe replay policy.
+
+Requests keep the legacy settings/defaults and fixed 2,500 output-token budget.
+The adapter caps request JSON at 256 KiB, response bytes at 8 MiB, output at
+50 KiB and the whole operation at sixty seconds, including native agent lookup,
+auth, session identity, network and body read. Parent cancellation propagates;
+late bodies are cancelled. Fixed errors expose no raw provider body or auth.
+Successful responses keep public output text or an allowlisted result projection.
+The adapter uses a fixed Codex-compatible user agent, refuses redirects and has
+no Cloudflare cookie jar or ambient proxy configuration. Current account/model
+and endpoint behavior require live C6 acceptance. A challenge is a failed lookup,
+not evidence of page contents or reservation inventory.
+
+### Retry, diagnostics and reservation guidance
+
+The native provider wrapper adds the two missing legacy transient-error classes
+and a 90-second idle watchdog. Native HTTP/network and explicit-retry handling
+remain in the pinned matcher, with quota/billing exclusions. Activity resets the
+idle timer; the timer is not a total generation deadline. It covers registered
+provider streams, including internal/compaction calls, and runs only while waiting
+on provider output. It cannot restart a tool. The Harness owns three retries by
+default, with exponential delay from two seconds capped at sixty seconds. Native
+retry settings govern disabled/exhausted behavior. No retry loop or environment
+settings are added by the wrapper.
+
+Caller abort stays aborted even if the provider ignores it and publishes a late
+success. Idle expiry aborts a child signal, emits one retryable terminal and drops
+late success/tool frames. A provider that ignores cancellation may retain its
+own pending work; the host cannot force an arbitrary third-party implementation
+to release it. Actual provider/socket cleanup remains part of live acceptance.
+
+Existing `/debug` output covers Google, places, shell, hosted web and protected
+browser lifecycle labels, retry and compaction. It remains opt-in, private-target
+bound, redacted and bounded; tool arguments, browser contents and raw domain or
+provider extras are not diagnostic output. The preceding provider profile keeps
+`/fast` and `/usage` but does not register hosted web or this retry wrapper.
+
+The separate native `reserve-restaurant` guidance reuses the release-root
+OpenTable discovery helper, exact-inventory checks, explicit final booking gate
+and uncertain-outcome inspection. Authentication uses the protected native
+input/login/OpenTable/takeover tools. User-controlled payment/account changes
+remain in takeover; no chat credentials or raw email-code reads are introduced.
+The legacy skill stays unchanged for deployed profiles. Scheduling-dependent
+weekend actions still wait for C5.
+
+### Hosted web and retry validation
+
+Focused acceptance passed all 39 tests in five files with native typechecking.
+It covers the actual application, stable hosted reference identity across restart
+and `/new`, bounded/redacted integration diagnostics, native retry exhaustion and
+cancellation, and real SIGKILL before/after a synthetic hosted POST effect.
+An independent review found a timer-overflow case; the wrapper now rejects
+out-of-range and fractional values, and its regression passes.
+The Node 24 release gate passed `npm run check:changed` (native typechecking
+and all 840 tests in 82 files) and `npm run build`, including compiled application
+import, in 93 seconds. Existing platform/tool conditions skipped 38 tests across
+three wholly skipped suites and individual conditional cases. All prior profile
+and resource objects compare unchanged against the preceding three C4 baselines;
+local documentation links, skill frontmatter and the release-owned helper resolve.
+Offline fixtures do not establish live hosted search, current Cloudflare behavior,
+real OAuth refresh, reservation inventory, Telegram/Mini App usability or Linux
+service readiness. Full C4 acceptance remains open for its live integration gates.
+The privileged builder and deployment boundary are tracked under C6; C5 owns
+schedules and children, and C7 owns production activation.
