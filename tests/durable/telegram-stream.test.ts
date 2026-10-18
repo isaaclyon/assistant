@@ -15,6 +15,32 @@ test('coalesces to latest visible text, bounds length and drops late updates aft
   stream.update({ chatId: 43 }, 'b', 'other chat'); stream.update({ chatId: 42, threadId: 1 }, 'b', 'thread'); await vi.advanceTimersByTimeAsync(5000);
   expect(sent).toHaveLength(2);
 });
+test('finish cannot rearm a pending preview when its in-flight send completes', async () => {
+  const gate = Promise.withResolvers<void>(), sent: string[] = [];
+  const stream = createPreviewStream({ authorize: () => true, intervalMs: 1000,
+    send: async (_target, text) => { sent.push(text); await gate.promise; } });
+  stream.update(target, 'a', 'first partial');
+  stream.update(target, 'a', 'later partial');
+  const finishing = stream.finish(target, 'a');
+  gate.resolve(); await finishing;
+  sent.push('FINAL');
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(sent).toEqual(['first partial', 'FINAL']);
+});
+test('finishing an older in-flight turn preserves a newer turn slot', async () => {
+  const gate = Promise.withResolvers<void>(), sent: string[] = [];
+  const stream = createPreviewStream({ authorize: () => true, intervalMs: 1000,
+    send: async (_target, text) => { sent.push(text); if (text === 'old') await gate.promise; } });
+  stream.update(target, 'a', 'old');
+  const finishing = stream.finish(target, 'a');
+  stream.update(target, 'b', 'new');
+  gate.resolve(); await finishing;
+  stream.update(target, 'b', 'newest');
+  expect(sent).toEqual(['old', 'new']);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(sent).toEqual(['old', 'new', 'newest']);
+  await stream.finish(target, 'b');
+});
 test('preview failures are best effort and do not stall later updates', async () => {
   const errors = vi.fn(); let calls = 0;
   const stream = createPreviewStream({ authorize: () => true, intervalMs: 10, onError: errors, send: async () => { if (++calls === 1) throw new Error('down'); } });

@@ -39,7 +39,13 @@ export function createPreviewStream(options: { send: PreviewSink; authorize: (ta
       const set = closed.get(id) ?? new Set<string>(); set.add(turn);
       if (set.size > 16) set.delete(set.values().next().value as string);
       closed.set(id, set);
-      if (slot?.turn === turn) { if (slot.timer) clearTimeout(slot.timer); await slot.inflight; slots.delete(id); }
+      if (slot?.turn === turn) {
+        // Detach before awaiting: the send's completion must not schedule one
+        // more preview, and a newer turn created during the wait must survive.
+        slots.delete(id);
+        if (slot.timer) clearTimeout(slot.timer);
+        await slot.inflight;
+      }
     },
     stop(): void { for (const slot of slots.values()) if (slot.timer) clearTimeout(slot.timer); slots.clear(); closed.clear(); },
   };

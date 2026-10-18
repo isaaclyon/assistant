@@ -159,17 +159,11 @@ export function createNativeTelegramTransport(options: NativeTelegramOptions) {
     async deliver(target: TelegramTarget, text: string, replyToMessageId?: number) {
       target = { ...target };
       const preview = previews.get(key(target));
-      // Detach first so a flush cannot schedule another stale draft. Telegram
-      // animates drafts independently of the final message: deleting local state
-      // alone leaves the client retyping the old answer until the draft expires.
+      // Detach first so an in-flight flush cannot schedule another stale draft.
+      // Telegram's final-message send replaces the preview; an empty draft is a
+      // Thinking placeholder, not a deletion request.
       previews.delete(key(target));
       if (preview?.flushPromise) await preview.flushPromise.catch(() => {});
-      if (preview?.draftId !== undefined) {
-        try {
-          await call('sendMessageDraft', { chat_id: target.chatId, draft_id: preview.draftId,
-            ...(target.threadId === undefined ? {} : { message_thread_id: target.threadId }) }, AbortSignal.timeout(2_000));
-        } catch { /* Draft cleanup is best effort; final delivery stays authoritative. */ }
-      }
       const markdown = normalizeTelegramNativeMarkdown(text);
       if (!markdown || markdown.length > 4096) throw new TelegramDeliveryError('failed', 'Telegram ledger segment exceeds message limit');
       const receipt = await call('sendRichMessage', { chat_id: target.chatId,

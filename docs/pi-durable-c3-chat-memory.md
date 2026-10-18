@@ -27,11 +27,13 @@ acknowledgement. A replay cannot request a second shutdown on reopening.
 Debug is opt-in and process-local. Its bounded, redacted messages report visible
 tool activity, lifecycle and core/date/recall diagnostics into the private target.
 Thinking and raw tool payloads are excluded. Before final delivery, the observer
-refreshes its committed snapshot/watch to drop delayed old-generation events;
-the transport waits for an in-flight draft and explicitly clears it in Telegram.
-Draft cleanup is bounded and best effort. Rapid queued turns can still lose a
-preview when an earlier final flushes. Committed final answers and their delivery
-receipts remain authoritative.
+refreshes its committed snapshot/watch to drop delayed old-generation events.
+The preview stream removes a finishing turn before awaiting its in-flight send,
+so completion cannot schedule another update after the final. The transport also
+detaches draft state before awaiting its flush. Telegram's final-message send
+replaces the preview. Rapid queued turns can still lose a preview when an earlier
+final flushes. Committed final answers and their delivery receipts remain
+authoritative.
 
 General shell/file/web tools, external integrations, media/group routing,
 schedules and children retain their later C4–C6 gates.
@@ -142,12 +144,14 @@ recall deduplication behavior.
 
 A clean `npm ci --ignore-scripts --no-audit --no-fund`, `npm run check:changed`
 and `npm run build` passed. After the live-pilot preview and model-selection fixes,
-`check:changed` and build passed again: 258 tests in 29 files, including 81 shared
+`check:changed` and build passed again: 260 tests in 29 files, including 81 shared
 canonical memory/CLI/provenance tests in the normal native gate. Regression tests
 cover delayed old-generation events, queued partial preservation, closed-watch
-recovery, in-flight draft clearing and clear failure. They also verify the real
-harness snapshot after final commit, configured model order, invalid selections
-and rejection of a persisted choice removed from the catalog. The build imports
+recovery and waiting for in-flight drafts before final delivery. Two new tests
+reproduced the finishing-send timer race and newer-slot loss before the fix;
+both now pass. They also verify
+the real harness snapshot after final commit, configured model order, invalid
+selections and rejection of a persisted choice removed from the catalog. The build imports
 the compiled application and includes its selected Markdown assets.
 Independent memory and context/UI reviews found no critical or high findings.
 The medium memory findings and restart/reload lifecycle findings were fixed.
@@ -187,13 +191,21 @@ The first four-minute dedicated user pilot completed without transport failures
 and successfully saved a fictional note. It did not pass acceptance: user feedback
 identified a stale animated draft after final answers and an unsuitable old-model
 default/catalog page. Draft clearing and observer fencing were added, and private
-provider settings can now select an ordered model list. A dedicated wire probe
-verified that Telegram accepts a rich draft followed by `sendMessageDraft` with
-the same ID and omitted text (both HTTP 200). This matches the pinned fork's
-clear adapter; [the current API](https://core.telegram.org/bots/api#sendmessagedraft)
-makes text optional. HTTP acceptance does not prove client animation behavior.
-A repeat user checkpoint is required; successful service calls and a clean
-process exit do not close it.
+provider settings can now select an ordered model list. A wire probe accepted a
+rich draft followed by an empty plain draft, but that did not establish deletion:
+[the current API](https://core.telegram.org/bots/api#sendmessagedraft) describes
+empty text as a “Thinking…” placeholder. A second live pilot still showed brief
+retyping after final answers, despite successful memory create/append and enabled
+service calls. Direct protocol samples and one synthetic native reply did not
+reproduce it.
+
+A subsequent trace of actual queued user messages captured a draft request 198 ms
+after the last final-message acknowledgement. The preview stream's in-flight
+completion scheduled a new timer while `finish` was awaiting that send; removing
+the slot afterward left that timer alive. The stream now detaches the slot before
+waiting, preserving newer turn slots and preventing that reschedule. The empty
+draft workaround was removed. Actual inbound user verification remains required;
+successful service calls and a clean process exit do not close the checkpoint.
 
 The pending dedicated checkpoint must use Jev recall and semantic search enabled,
 exercise chat/save/recall/edit and direct confirmation across restart, and record
