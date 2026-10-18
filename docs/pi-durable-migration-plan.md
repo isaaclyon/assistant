@@ -204,6 +204,14 @@ wrapper for blocked recovery. This is local implementation acceptance for these
 slices, not the complete C4 pass gate; live integration delivery, browser/platform
 acceptance and full provider/operator parity remain pending.
 
+The `feat/durable-c4-provider` slice adds the selected `durable-provider-test`
+profile with native `/fast` and `/usage` controls, persisted active/saved command
+state, explicit bounded subscription reads and weekend-planning guidance. Wire,
+production-application, retry-settlement and pending-preference SIGKILL tests are
+offline evidence. Remaining web/retry parity, reservation guidance, diagnostics
+and live/platform acceptance stay open. Privileged builder/deploy coverage stays
+at the C6 engineering boundary.
+
 Restore general file/shell/public-web tools with operation-specific replay policies as part of C4. The C3 profile deliberately selects only typed memory/history tools.
 
 Implement the integrations in this order, reusing domain code:
@@ -280,7 +288,7 @@ Browser recovery is a separate acceptance boundary. A surviving browser process 
 | `places` | Native tool plus direct sections/callbacks; retain ranking/application store | C4 |
 | `google-workspace` | Native typed operations; retain transport/cache and operation-specific write recovery | C4 |
 | `private-browser-input` | Implemented in `durable-browser-test`: unsafe native wrappers, registry-wide guard and scoped host lifetime around retained protected operations; broker stays authoritative | C4 local; live/platform C6 |
-| `fast`, `usage` | Explicit provider-facing host services and Telegram commands; remove dependence on old command contexts | C4, provider feasibility C1 |
+| `fast`, `usage` | Implemented in `durable-provider-test`: explicit provider services, persisted fast preference/receipts, bounded selected-account usage; no old command contexts | C4 local; live provider C6 |
 | `deploy` | Host command retaining instance privileges and deployment policy | C4/C6 |
 | `subagents` | Native durable tasks/owned conversations and completion reporter with bounded read-only execution | C5 |
 | Selected skills/instructions | Preserve content and profile selection; update guidance for actual runtime behavior | C2–C6 |

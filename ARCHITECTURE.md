@@ -49,7 +49,13 @@ before Harness close and environment release. All browser bundle calls are
 sequential and replay-unsafe; a crash keeps the stock-browser gate and reports
 an interrupted outcome. The retained domain owns private CDP and Mini App input;
 only whitelisted statuses/copy receipts reach the Harness. OpenTable email codes
-use the explicitly selected native Google runtime. Full C4 provider/operator
+use the explicitly selected native Google runtime. The separate
+`durable-provider-test` profile adds authenticated `/fast` and `/usage` commands
+and weekend-planning guidance. Fast preferences and command identities persist
+in a native document; the host promotes saved changes only after native work,
+including retries, settles. A provider wrapper composes priority into the native
+wire payload. Usage reads the selected Codex OAuth account through a fixed,
+bounded endpoint and returns only formatted allowances. Full C4 web/retry/operator
 parity and live browser/platform acceptance remain pending.
 
 The sections below describe the deployed legacy architecture. Its package,
@@ -472,6 +478,7 @@ The [pi-durable migration plan](docs/pi-durable-migration-plan.md) records the
 approved target architecture and C0–C7 checkpoints. C0–C3 passed. C4 general
 file/shell/public-web tools, Google reads, CLI-backed YNAB/Messages skills and
 direct private places flows and guarded Calendar/places mutations are implemented
-on isolated native branches; protected browser and provider/operator parity remain
-pending. The sections above the migration note describe legacy production,
+on isolated native branches. Protected browser operations and native fast/usage
+controls are also implemented; remaining web/retry/operator parity and live
+acceptance remain pending. The sections above the migration note describe legacy production,
 except for the explicit native branch overview. Production activation remains C7.

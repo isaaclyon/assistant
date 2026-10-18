@@ -14,13 +14,13 @@ const KEY = /^[A-Za-z0-9_-]{8,56}$/;
 
 /** Slash commands. Controls go through durable host controls; the rest through the UI controller. */
 export const CONTROL_COMMANDS = ['new', 'abort', 'stop', 'compact'] as const;
-export const UI_COMMANDS = ['menu', 'model', 'thinking', 'skills', 'debug', 'reload', 'restart', 'place_rankings'] as const;
+export const UI_COMMANDS = ['menu', 'model', 'thinking', 'skills', 'debug', 'reload', 'restart', 'place_rankings', 'fast', 'usage'] as const;
 export type ControlCommand = (typeof CONTROL_COMMANDS)[number];
 export type UiCommandName = (typeof UI_COMMANDS)[number];
 export type ParsedText =
   | { type: 'text' }
   | { type: 'control'; name: ControlCommand }
-  | { type: 'ui'; name: UiCommandName }
+  | { type: 'ui'; name: UiCommandName; arg?: string }
   | { type: 'unavailable'; command: string; reason: 'unknown' | 'arguments' | 'disabled' };
 const COMMAND = /^\/([A-Za-z][A-Za-z0-9_]{0,31})(?:@[A-Za-z0-9_]{3,64})?(?:\s+([\s\S]*))?$/;
 /** Unknown or argument-bearing slash commands are never forwarded to the model. */
@@ -33,9 +33,10 @@ export function parseCommandText(text: string, enabled?: ReadonlySet<string>): P
   const alias = command === 'start' || command === 'status' ? 'menu' : command;
   const known = (CONTROL_COMMANDS as readonly string[]).includes(alias) || (UI_COMMANDS as readonly string[]).includes(alias);
   if (!known) return { type: 'unavailable', command: alias, reason: 'unknown' };
-  if (match[2]?.trim()) return { type: 'unavailable', command: alias, reason: 'arguments' };
+  const arg = match[2]?.trim();
+  if (arg && (alias !== 'fast' || !['on','off','status'].includes(arg))) return { type: 'unavailable', command: alias, reason: 'arguments' };
   if (enabled && !enabled.has(alias)) return { type: 'unavailable', command: alias, reason: 'disabled' };
-  return (CONTROL_COMMANDS as readonly string[]).includes(alias) ? { type: 'control', name: alias as ControlCommand } : { type: 'ui', name: alias as UiCommandName };
+  return (CONTROL_COMMANDS as readonly string[]).includes(alias) ? { type: 'control', name: alias as ControlCommand } : { type: 'ui', name: alias as UiCommandName, ...(arg ? {arg} : {}) };
 }
 
 /** Callback data grammar (all <= 64 bytes):
@@ -179,6 +180,6 @@ export function formatDiagnostics(sections: readonly DiagnosticSection[]): Prese
   return { text: clean(out.join('\n'), DIAGNOSTIC_LIMITS.total) };
 }
 export const unavailableText = (item: Extract<ParsedText, { type: 'unavailable' }>): string =>
-  item.reason === 'arguments' ? `/${item.command} takes no arguments.`
+  item.reason === 'arguments' ? (item.command === 'fast' ? 'Use /fast on, /fast off or /fast status.' : `/${item.command} takes no arguments.`)
     : item.reason === 'disabled' ? `/${item.command} is unavailable on this instance.`
       : 'Unknown command. Available: /new /abort /stop /compact /model /thinking /skills /debug /reload /restart /menu.';

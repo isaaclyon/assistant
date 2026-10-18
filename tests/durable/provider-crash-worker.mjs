@@ -1,0 +1,17 @@
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+import { createModels } from '@earendil-works/pi-ai/models';
+import { fauxProvider } from '@earendil-works/pi-ai/providers/faux';
+import { createRegistry } from '@earendil-works/pi-durable';
+const [compiled,path]=process.argv.slice(2);
+const {DurableHost}=await import(pathToFileURL(join(compiled,'src/durable/host.js')).href);
+const {accept,admit}=await import(pathToFileURL(join(compiled,'src/durable/ingress.js')).href);
+const {createNativeFast}=await import(pathToFileURL(join(compiled,'src/durable/provider-fast.js')).href);
+const faux=fauxProvider(),models=createModels();models.setProvider(faux.provider);
+const host=await DurableHost.create({stateDir:path,models,registry:createRegistry(),agent:{model:{provider:faux.provider.id,modelId:faux.getModel().id}},compatibility:{runtimeGeneration:'fixture',releaseSchema:1,profile:'fixture',registrySignature:'fixture'},policy(){},controlPolicy(){},transport:{async start(){},async stop(){},async sendFinal(){return {messageId:1};}}});
+const fast=createNativeFast({host:()=>host,botId:123,model:async()=>({provider:'openai-codex',api:'openai-codex-responses'})});
+const envelope={instance:'fixture',principal:'isaac',bot:'123',chatId:42,messageIds:[1],originalAt:1,content:'synthetic'};
+await accept(host.runtime,envelope);await admit(host.runtime,envelope);
+await fast.command('telegram-command:123:pending','on');
+await new Promise((resolve,reject)=>process.send({event:'pending',active:false},error=>error?reject(error):resolve()));
+await new Promise(()=>{});

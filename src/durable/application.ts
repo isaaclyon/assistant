@@ -5,6 +5,8 @@ import { DurableHost, HostControlRejectedError } from './host.js';
 import { Bindings, context } from './ingress.js';
 import { createMemoryOperations } from './operations.js';
 import { createNativeProvider } from './provider.js';
+import { createNativeFast, withNativeFast } from './provider-fast.js';
+import { createNativeUsage } from './provider-usage.js';
 import { loadNativeRegistry, type NativeBundle } from './registry.js';
 import { createNativeControls, NativePreferences } from './controls.js';
 import { createNativeTelegramTransport } from './transport.js';
@@ -30,7 +32,8 @@ const confirmationKey=(cid:ConversationId,id:string)=>createHash('sha256').updat
 export async function createNativeApplication(config:NativeConfig,options:NativeApplicationOptions) {
  await loadCapabilityProfile(config.resourceRoot,config.capabilityProfile);
  const enabled=isNativeMemoryProfile(config.capabilityProfile);
- const browserEnabled=config.capabilityProfile==='durable-browser-test';
+ const providerEnabled=config.capabilityProfile==='durable-provider-test';
+ const browserEnabled=config.capabilityProfile==='durable-browser-test'||providerEnabled;
  const mutationsEnabled=config.capabilityProfile==='durable-mutations-test'||browserEnabled;
  const placesEnabled=config.capabilityProfile==='durable-places-test'||mutationsEnabled;
  if(placesEnabled&&config.principal!=='isaac')throw new Error('Places profile requires the Isaac principal');
@@ -185,7 +188,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    if(name==='memory')return {name,version:1,tools:[memoryTool!],close:async()=>{}};
    if(name==='search')return searchFactory!();
    if(name==='core-memory')return contextFactory!();
-   if(['reload','restart','skills','debug'].includes(name))return {name,version:1,tools:[],close:async()=>{}};
+   if(['reload','restart','skills','debug',...(providerEnabled?['fast','usage']:[])].includes(name))return {name,version:1,tools:[],close:async()=>{}};
    throw new Error('Unknown native bundle');
   };
   const load=()=>loadNativeRegistry({resourceRoot:config.resourceRoot,profileId:config.capabilityProfile,bundleContext:{bundle},...(browserGuard?{executionGuard:browserGuard.run}:{}),authorize:async(_name,api,ctx)=>{
@@ -217,6 +220,9 @@ export async function createNativeApplication(config:NativeConfig,options:Native
     try{await previous.close();}catch{console.warn('Previous native registry cleanup failed after reload');}
    },
   });
+  const fast=providerEnabled?createNativeFast({host:requireHost,botId:config.transport.botId,model:async()=>{const m=await controls.currentModel();return provider.models.getModel(m.provider,m.modelId);}}):undefined;
+  const usage=providerEnabled?createNativeUsage({models:provider.models,getModel:controls.currentModel}):undefined;
+  if(fast)provider.models.setProvider(withNativeFast(provider.provider,fast.active));
   const ui:NativeUiController={
    command:async request=>{
     try{
@@ -228,6 +234,8 @@ export async function createNativeApplication(config:NativeConfig,options:Native
       case 'thinking':return {view:{kind:'thinking',levels:await controls.thinkingLevels(),current:status.thinking}};
       case 'selectModel':await controls.setModel(request.commandId,request.arg);return {toast:'Model selected'};
       case 'selectThinking':await controls.setThinking(request.commandId,request.arg);return {toast:'Thinking selected'};
+      case 'fast':if(!fast)throw new UiRejectedError('Fast mode is unavailable.');return {view:{kind:'text',text:await fast.command(request.commandId,(request.arg??'status') as 'on'|'off'|'status')}};
+      case 'usage':if(!usage)throw new UiRejectedError('Usage is unavailable.');return {view:{kind:'text',text:await usage()}};
       case 'skills':return {view:{kind:'skills',skills:resources!.skills.map(skill=>({name:skill.content.match(/^name:\s*(.+)$/m)?.[1]?.trim()??'personal-memory'}))}};
       case 'debug':
        if(!debugCommands.has(request.commandId)){debugCommands.add(request.commandId);debugEnabled=!debugEnabled;}
@@ -261,7 +269,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    },
   };
   const raw=options.transport??createNativeTelegramTransport(config.transport.mode==='ordinary'?{...config.transport,cwd:config.workspaceCwd}:{mode:'restricted',socketPath:config.transport.socketPath,botId:config.transport.botId,allowedUserId:config.transport.allowedUserId});
-  transport=bridgeTelegram(config,raw,options.onTransportFailure,{...(enabled?{ui}:{}),commands:enabled?['menu','model','thinking','new','abort','stop','compact','reload','restart','skills','debug',...(placesEnabled?['place_rankings']:[])]:['new','abort','stop','compact']});
+  transport=bridgeTelegram(config,raw,options.onTransportFailure,{...(enabled?{ui}:{}),commands:enabled?['menu','model','thinking','new','abort','stop','compact','reload','restart','skills','debug',...(providerEnabled?['fast','usage']:[]),...(placesEnabled?['place_rankings']:[])]:['new','abort','stop','compact']});
   const bridge=transport;
   const signature=createHash('sha256').update(JSON.stringify({registry:resources.signature,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,memory:config.memory??null,...(googleEnabled?{google:config.google}:{} ),...(cliEnabled?{cli:config.cli??{}}:{}),...(browserEnabled?{browser:config.browser}:{})})).digest('hex');
   // The reader delegates to the active registry after a safe idle reload.
@@ -272,6 +280,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    compatibility:{runtimeGeneration:'pi-durable-1.3.0',releaseSchema:1,profile:config.capabilityProfile,registrySignature:signature},
    onEpochChange:async(tx,previous,nextEpoch)=>{browser?.cancel();for(const id of previous){if(memoryModule)await memoryModule.invalidateMemoryState(tx,operations,id,String(nextEpoch),'new');else await operations.invalidate(tx,id,String(nextEpoch),'new');}},
    onConversation:async cid=>{await visible?.attach(cid);},
+   ...(fast?{beforeAdmission:fast.settle}:{}),
    ...(config.idleHours>0?{idleMs:config.idleHours*3_600_000}:{}),
    transport:{start:bridge.start,stop:async()=>{await Promise.all([bridge.stop(),places?.close(),calendar?.close(),browser?.close()]);},sendFinal:async request=>{await visible?.finish();return bridge.sendFinal(request);}},
    policy:envelope=>assertNativeEnvelope(config,envelope),controlPolicy:control=>assertNativeControl(config,control),onFatal:options.onFatal,

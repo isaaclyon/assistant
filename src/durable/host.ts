@@ -30,6 +30,8 @@ export interface HostConfig {
   recoveryPreflight?:(harness:Harness)=>Promise<void>;
   /** Attach best-effort UI observers before any admitted input starts execution. */
   onConversation?:(conversationId:ConversationId)=>Promise<void>;
+  /** Runs on the acceptance line, before queued input admission. */
+  beforeAdmission?:()=>Promise<void>;
   onFatal?:(error:unknown)=>void;
   closeTimeoutMs?:number;
   reconcileIntervalMs?:number;
@@ -116,6 +118,7 @@ export class DurableHost {
       if(!this.validated){await this.preflight();this.validated=true;}
       this.dirty=false;
       await this.recoverControls();
+      await this.config.beforeAdmission?.();
       for(const row of this.runtime.store.inbox.pending()){
         const envelope=normalize(JSON.parse(row.payload) as SourceEnvelope);await this.config.policy(envelope);await admit(this.runtime,envelope);
       }

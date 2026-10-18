@@ -25,7 +25,7 @@ export type UiView=
 export type UiResult={view?:UiView;toast?:string;
  /** Runs only after the Telegram update offset is durably advanced (e.g. process restart), so a replayed update cannot restart twice. */
  afterAcknowledgement?:()=>void|Promise<void>};
-export type UiCommandRequest=UiOrigin&({name:UiCommandName;arg?:undefined}|{name:'selectModel';arg:string}|{name:'selectThinking';arg:string}|{name:'model';arg?:string});
+export type UiCommandRequest=UiOrigin&({name:UiCommandName;arg?:string}|{name:'selectModel';arg:string}|{name:'selectThinking';arg:string}|{name:'model';arg?:string}|{name:'fast';arg?:string});
 export type UiConfirmationRequest=UiOrigin&{messageId:number;key:string;choice:'approve'|'deny'};
 /** Parent-composed host side. Implementations must treat commandId as an idempotency key. */
 export interface NativeUiController {
@@ -41,7 +41,7 @@ export type TrustedCallback={id:string;commandId:string;actorId:number;principal
 export type NormalizedUpdate =
  |{type:'input';envelope:SourceEnvelope}
  |{type:'control';control:HostControl}
- |{type:'ui';origin:UiOrigin;name:UiCommandName}
+ |{type:'ui';origin:UiOrigin;name:UiCommandName;arg?:string}
  |{type:'callback';callback:TrustedCallback}
  |{type:'ignored'}
  |{type:'rejected';reason:string};
@@ -67,7 +67,7 @@ export function normalizeTelegramUpdate(config:NativeConfig,update:TelegramUpdat
  if(message.message_thread_id!==undefined)return {type:'rejected',reason:'Thread input is unavailable on the private foundation surface.'};
  const parsed=parseCommandText(message.text,commands);
  if(parsed.type==='control')return {type:'control',control:controlFor(config,update.update_id,parsed.name)};
- if(parsed.type==='ui')return {type:'ui',name:parsed.name,origin:{commandId:`telegram-command:${config.transport.botId}:${update.update_id}`,principal:config.principal,actorId:config.transport.allowedUserId,target}};
+ if(parsed.type==='ui')return {type:'ui',name:parsed.name,...(parsed.arg?{arg:parsed.arg}:{}),origin:{commandId:`telegram-command:${config.transport.botId}:${update.update_id}`,principal:config.principal,actorId:config.transport.allowedUserId,target}};
  if(parsed.type==='unavailable')return {type:'rejected',reason:unavailableText(parsed)};
  return {type:'input',envelope:{instance:config.instanceId,principal:config.principal,bot:String(config.transport.botId),chatId:config.transport.allowedUserId,messageIds:[message.message_id],originalAt:message.date*1000,content:message.text}};
 }
@@ -198,7 +198,7 @@ export function bridgeTelegram(config:NativeConfig,raw:RawTransport,onTransportF
       await onEnvelope(item.envelope);
      }
      else if(item.type==='control')await runControl(item.control,{});
-     else if(item.type==='ui')await runUi(update.update_id,{...item.origin,name:item.name},undefined);
+     else if(item.type==='ui')await runUi(update.update_id,{...item.origin,name:item.name,...(item.arg?{arg:item.arg}:{})},undefined);
      else if(item.type==='rejected')await reject(item.reason);
      else if(item.type==='callback')await callbackFor(update.update_id,item.callback);
     }catch(error){afterAck.delete(update.update_id);throw error;}

@@ -96,6 +96,7 @@ export function createNativeControls(options: {
       // Restore the template used for future epochs before acceptance begins.
       Object.assign(initial(), { model: { provider: choice.provider, modelId: choice.modelId }, thinkingLevel: choice.thinkingLevel });
     },
+    currentModel: selected,
     async status() { const choice = await selected(); return { model: key(choice.provider, choice.modelId), modelLabel: `${choice.provider}/${choice.modelId}`, thinking: choice.thinkingLevel, busy: !await idle() }; },
     models: () => catalog().map(({ id, label }) => ({ id, label })),
     async thinkingLevels() { const choice = await selected(); const model = options.models.getModel(choice.provider, choice.modelId); return model ? [...getSupportedThinkingLevels(model)] : []; },

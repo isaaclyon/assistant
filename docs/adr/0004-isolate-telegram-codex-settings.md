@@ -37,3 +37,20 @@ Status reports the active and saved values, pending application, and conflicting
 project/environment overrides. Invalid config files are preserved and reported.
 Fast mode requests priority processing where supported and may consume more
 quota or cost more; adding the command does not enable it by default.
+
+## Native migration implementation
+
+The selected `durable-provider-test` profile implements `/fast on|off|status`
+through an authenticated host command. The Harness root's `bridge.provider-fast`
+document owns active/saved values and update-ID receipts. Active work, including
+retries and accepted queued submissions, retains its active value. The host's
+serialized pre-admission step promotes a saved change only when native work is
+settled. Pending preferences and deduplication survive process death.
+
+The native provider wrapper composes `service_tier: priority` through the SDK's
+`onPayload` seam because the pinned simple-stream conversion omits `serviceTier`.
+Off removes a per-request tier override. Native provider/account settings and
+this document are the explicit owners; project settings and the legacy Codex
+config/environment override chain do not participate. The old settings file is
+never rewritten or imported by this slice. Earlier native profiles keep their
+existing command selections. See the [C4 guide](../pi-durable-c4-tools.md#native-provider-controls-slice).
