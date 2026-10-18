@@ -243,8 +243,14 @@ The isolated `feat/durable-c5-recipient` slice starts this checkpoint with
 the existing coordinator to stable native source/conversation/submission evidence,
 keeps admission separate from run completion, and preserves unknown historical
 claims. The [recipient guide](pi-durable-c5-jobs.md) records offline validation and
-remaining scope. Coordinator, full mixed-runtime matrix, heartbeat/webhook,
-price-watch and child/retention work remain open.
+remaining scope. The subsequent `feat/durable-c5-coordinator` slice selects
+`durable-jobs-coordinator-test` for cron and late one-shot publication through
+the existing occurrence ledger and v1 exchange. Its explicit same-UID targets,
+separate coordinator directory and native-only lease preserve ownership. Four
+legacy/native admission/restart combinations and real publication/cancellation
+crashes have offline coverage; see the [coordinator guide](pi-durable-c5-coordinator.md).
+Heartbeat/webhook and their full matrix, price-watch tasks, schedule editing and
+child/retention work remain open.
 
 **Deliverables**
 

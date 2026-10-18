@@ -30,8 +30,16 @@ The native Harness owns retry budgets and settlement. `feat/durable-c5-recipient
 starts C5 with an explicit self-only scheduled-job recipient. Native reservation
 and submission evidence reconcile v1 claims; unknown historical claims stay held.
 The v1 completed state means admission, while native run outcome and final-only
-delivery remain separate. Read-only inspection reports counts. Coordinator and
-child migration remain open; see the [C5 guide](docs/pi-durable-c5-jobs.md).
+delivery remain separate. Read-only inspection reports counts.
+`feat/durable-c5-coordinator` adds cron/at publication through the existing
+scheduler and occurrence ledger. Its coordinator state stays outside recipient
+trees; explicit same-UID targets constrain publication. A lifetime SQLite lease
+excludes other native coordinators; legacy/native switching still requires
+quiescent writers and one owner. Fresh-ledger provenance permits restart after a
+first rejected definition file without weakening historical migration guards.
+Heartbeat/webhook, price-watch and child migration remain open; see the
+[C5 recipient](docs/pi-durable-c5-jobs.md) and
+[coordinator](docs/pi-durable-c5-coordinator.md) guides.
 Live integration and privileged builder/deployment acceptance remain C6 work.
 These branches use the native package, tests and explicit test-instance entrypoint. See [ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md),
 [ADR-0053](docs/adr/0053-native-chat-memory-and-evidence.md), and the
