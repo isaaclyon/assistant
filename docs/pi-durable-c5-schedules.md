@@ -4,7 +4,7 @@ The isolated `feat/durable-c5-schedules` branch extends the
 [cron/at coordinator](pi-durable-c5-coordinator.md) with selected heartbeat
 checkers, loopback webhook ingestion, schedule editing and temporary price
 watches. The subsequent [child slice](pi-durable-c5-children.md) adds background
-children and their retention; its validation gate remains open. Production
+children and their retention; its offline validation gate passed. Production
 activation remains C6/C7.
 
 ## Explicit selection
@@ -150,5 +150,5 @@ multi-account reads and same-UID key-file ownership retain their current contrac
 
 The [child slice](pi-durable-c5-children.md) adds background children and
 creation-based seven-day child-store retirement in a separate profile. Its
-validation gate and C6 live/platform/migration acceptance remain open. No
-production service or private state is changed by this slice.
+offline validation gate passed; C6 live/platform/migration acceptance remains
+open. No production service or private state is changed by this slice.

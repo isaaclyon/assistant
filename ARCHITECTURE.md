@@ -47,7 +47,7 @@ process-owned temporary child Harness stores, stable launch IDs and OS writer/co
 leases. One bounded report returns to the original conversation after parent idle.
 Creation-based seven-day retirement commits a tombstone before store removal;
 main correlation evidence and bounded parent history remain durable. The child
-validation gate remains open; see the [child guide](docs/pi-durable-c5-children.md),
+offline validation gate passed; see the [child guide](docs/pi-durable-c5-children.md),
 [C5 recipient](docs/pi-durable-c5-jobs.md),
 [coordinator](docs/pi-durable-c5-coordinator.md) and
 [schedule](docs/pi-durable-c5-schedules.md) guides.

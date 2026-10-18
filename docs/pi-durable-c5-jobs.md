@@ -129,6 +129,6 @@ coordinator inspection. The [schedule slice](pi-durable-c5-schedules.md) adds
 selected heartbeat/webhook execution, their four-way mixed-runtime matrix,
 price-watch tasks and schedule-editing selection. The [child slice](pi-durable-c5-children.md)
 adds process-owned temporary Harness stores, native orchestration and creation-based
-seven-day retirement. Its validation gate remains open. Canonical definitions,
+seven-day retirement. Its offline validation gate passed. Canonical definitions,
 occurrence identities and legacy uncertainty retain their existing owners.
 Optional codemode remains separately gated. See the [roadmap](pi-durable-migration-plan.md#c5--native-schedules-and-background-agents).

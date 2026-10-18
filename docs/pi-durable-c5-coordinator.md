@@ -125,6 +125,6 @@ rules and cursors, webhook ingestion, temporary price-watch tasks and
 schedule-editing selection in a separate profile. It also adds the heartbeat and
 webhook mixed-runtime matrix. The [child slice](pi-durable-c5-children.md) adds
 native background orchestration and creation-based seven-day retirement of
-process-owned child stores; its validation gate remains open. Canonical
+process-owned child stores; its offline validation gate passed. Canonical
 definitions, terminal occurrence identities and historical uncertainty retain
 their existing owners. See the [roadmap](pi-durable-migration-plan.md#c5--native-schedules-and-background-agents).

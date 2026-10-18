@@ -257,8 +257,9 @@ The subsequent `durable-jobs-children-test` profile adds process-owned temporary
 child Harness stores, native orchestration and original-conversation completion
 reporting. Creation-based seven-day retirement shares exclusive ownership with
 recovery and commits a tombstone before removal. The [child guide](pi-durable-c5-children.md)
-records evidence and the open validation gate. C5 remains open until that gate
-passes; C6 live/platform/migration acceptance remains separate.
+records the passing full local gate, exact-head CI and scoped F1 follow-up
+review. This closes the child slice's offline validation gate; C6
+live/platform/migration acceptance remains separate.
 
 **Deliverables**
 
