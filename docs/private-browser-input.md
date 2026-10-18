@@ -95,6 +95,29 @@ apart from the closed OpenTable adapter above.
 The tool is for authorized sign-in and verification, never purchases or account
 changes. The operating-system user and destination website remain trusted.
 
+## Host-only failure diagnostics
+
+`runPrivateBrowserInput` and `runBrowserTakeover` accept an optional internal
+`onDiagnostic` callback. Private login uses the takeover function. This callback
+is absent from model tool arguments and results. It emits only the operation,
+a fixed failure phase, and an optional allowlisted error code or integer exit
+code from 0 through 255. It emits no error text, process output, paths, URLs,
+page content, request identifiers or credentials. No default logger is installed.
+Callback exceptions and rejected promises do not change cleanup or results.
+Sinks must return promptly; asynchronous completion is not awaited.
+
+The phases distinguish an existing gate, gate creation, observer resolution,
+observer disconnection, page protection, login protection, the protected operation,
+and cleanup failures. An uncertain touched page also emits
+`cleanup-unprotected-page`. These phases locate a failure; they do not prove its
+cause. Diagnostics do not authorize page inspection or gate removal.
+Recovery remains stop-only through the stock helper.
+
+To check the offline diagnostics:
+
+1. Run `npm test -- tests/private-browser-diagnostics.test.ts tests/private-browser-input.test.ts tests/browser-takeover.test.ts`.
+2. Confirm that all three test files pass, including gate retention and diagnostic privacy checks.
+
 ## Validation
 
 Tests cover signed identity and origin checks, replay and expiry, cancellation,

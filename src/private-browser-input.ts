@@ -13,6 +13,7 @@ import { withMutationLock } from "../.pi/lib/mutation-lock.mjs";
 import { preparePrivateEmailCode } from "./private-email-code.js";
 import { createPrivateLoginSubmission } from "./private-login-submission.js";
 import { privateBrowserEndpoint } from "./private-browser-endpoint.js";
+import { privateBrowserReporter, type PrivateBrowserDiagnosticSink, type PrivateBrowserPhase } from "./private-browser-diagnostics.js";
 
 const exec = promisify(execFile);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -22,6 +23,7 @@ const tailscale = async (...args: string[]) => JSON.parse((await exec("tailscale
 export async function runPrivateBrowserInput(options: {
   config: PrivateBrowserConfig; request: ProtectedInputRequest; chatId: number; threadId?: number;
   signal: AbortSignal; notifyWaiting(): void;
+  onDiagnostic?: PrivateBrowserDiagnosticSink;
 }): Promise<{ status: PrivateInputStatus | "unavailable" | "browser_blocked" }> {
   const { request, config } = options;
   validateProtectedRequest(request);
@@ -31,7 +33,9 @@ export async function runPrivateBrowserInput(options: {
   const proxyRuntime = join(process.env.XDG_RUNTIME_DIR || tmpdir(), `pi-private-input-${process.getuid?.()}`);
   await mkdir(proxyRuntime, { recursive: true, mode: 0o700 });
   return withMutationLock(join(proxyRuntime, "proxy-lock.sqlite"), () => withSessionLock(request.session, async () => {
-    try { await assertUnprotected(request.session); } catch { return { status: "browser_blocked" as const }; }
+    const report = privateBrowserReporter("input", options.onDiagnostic);
+    try { await assertUnprotected(request.session); }
+    catch (error) { report("gate-existing", error); return { status: "browser_blocked" as const }; }
     const location = paths(request.session);
     try { await access(join(location.runtimeDir, "handoff.json")); return { status: "unavailable" as const }; }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
@@ -47,14 +51,19 @@ export async function runPrivateBrowserInput(options: {
     const controller = new AbortController();
     const abort = () => controller.abort();
     options.signal.addEventListener("abort", abort, { once: true });
+    let phase: PrivateBrowserPhase = "gate-create";
     try {
       // Persist only the gate, never input. Crash recovery is deliberately stop-only.
       await writeFile(location.protectedPath, JSON.stringify({ version: 1, launchId: browser.launchId, requestId: randomUUID() }), { mode: 0o600, flag: "wx" });
       gateOwned = true;
+      phase = "observer-resolve";
       const binary = await executable("agent-browser", process.env.STOCK_BROWSER_AGENT_BROWSER);
       touched = true; // From here the page state is uncertain until protection closes cleanly.
+      phase = "observer-disconnect";
       await exec(binary, ["--session", agentSessionName(request.session), "--cdp", String(browser.port), "close"], { timeout: 10_000, maxBuffer: 32_000 });
+      phase = "page-protect";
       protectedPage = await protectBrowserPage(browser.port, request);
+      phase = "protected-operation";
       if (request.flow === "opentable") privateSubmission = createPrivateLoginSubmission(protectedPage,
         (recipient, signal) => preparePrivateEmailCode(config, recipient, signal));
       if (options.signal.aborted) controller.abort();
@@ -99,17 +108,17 @@ export async function runPrivateBrowserInput(options: {
       });
       options.notifyWaiting();
       result = await server.done;
-    } catch { result = controller.signal.aborted ? "cancelled" : "unavailable"; }
+    } catch (error) { report(phase, error); result = controller.signal.aborted ? "cancelled" : "unavailable"; }
     finally {
       controller.abort(); options.signal.removeEventListener("abort", abort);
       let clean = true;
-      try { await server?.close(); } catch { clean = false; }
-      try { privateSubmission?.close(); } catch { clean = false; }
-      try { proxy?.kill("SIGTERM"); } catch { clean = false; }
+      try { await server?.close(); } catch (error) { report("cleanup-listener", error); clean = false; }
+      try { privateSubmission?.close(); } catch (error) { report("cleanup-submission", error); clean = false; }
+      try { proxy?.kill("SIGTERM"); } catch (error) { report("cleanup-proxy", error); clean = false; }
       try { await protectedPage?.close(); }
-      catch { clean = false; }
+      catch (error) { report("cleanup-page", error); clean = false; }
       // A touched browser without a protected page to close is uncertain: keep the gate.
-      if (touched && !protectedPage) clean = false;
+      if (touched && !protectedPage) { report("cleanup-unprotected-page"); clean = false; }
       if (!clean) result = "browser_blocked";
       else if (gateOwned) await rm(location.protectedPath, { force: true });
       if (messageId !== undefined) {

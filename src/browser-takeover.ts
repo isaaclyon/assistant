@@ -16,6 +16,7 @@ import { privateLoginCredential } from "./private-login-credential.js";
 import { privateApprovedCredential } from "./private-approved-credential.js";
 import type { PrivateLoginOperations } from "./browser-takeover-server.js";
 import { privateBrowserEndpoint } from "./private-browser-endpoint.js";
+import { privateBrowserReporter, type PrivateBrowserDiagnosticSink, type PrivateBrowserPhase } from "./private-browser-diagnostics.js";
 
 const exec = promisify(execFile);
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -26,6 +27,7 @@ type Result = (TakeoverResult | { status: "unavailable" | "browser_blocked" }) &
 export async function runBrowserTakeover(options: {
   config: PrivateBrowserConfig; request: TakeoverRequest; chatId: number; threadId?: number;
   signal: AbortSignal; notifyWaiting(): void;
+  onDiagnostic?: PrivateBrowserDiagnosticSink;
   login?: PrivateLoginRequest;
 }): Promise<Result> {
   const { config, request } = options;
@@ -40,7 +42,9 @@ export async function runBrowserTakeover(options: {
   const runtime = join(process.env.XDG_RUNTIME_DIR || tmpdir(), `pi-browser-takeover-${process.getuid?.()}`);
   await mkdir(runtime, { recursive: true, mode: 0o700 });
   return withMutationLock(join(runtime, "proxy-lock.sqlite"), () => withSessionLock(request.session, async () => {
-    try { await assertUnprotected(request.session); } catch { return { status: "browser_blocked" as const }; }
+    const report = privateBrowserReporter(options.login ? "login" : "takeover", options.onDiagnostic);
+    try { await assertUnprotected(request.session); }
+    catch (error) { report("gate-existing", error); return { status: "browser_blocked" as const }; }
     const location = paths(request.session);
     if (await hasActiveHandoff(request.session)) return { status: "unavailable" as const };
     const browser = await current(request.session);
@@ -55,19 +59,27 @@ export async function runBrowserTakeover(options: {
     const controller = new AbortController();
     const abort = () => controller.abort();
     options.signal.addEventListener("abort", abort, { once: true });
+    let phase: PrivateBrowserPhase = "endpoint-preflight";
     try {
       const fixed = privateBrowserEndpoint("takeover");
       if (!fixed) assertDemoPortUnused(await serveStatus(), httpsPort);
+      phase = "gate-create";
       await writeFile(location.protectedPath, JSON.stringify({ version: 1, launchId: browser.launchId, requestId: randomUUID(), purpose: "takeover" }), { mode: 0o600, flag: "wx" });
       gateOwned = true;
+      phase = "observer-resolve";
       const binary = await executable("agent-browser", process.env.STOCK_BROWSER_AGENT_BROWSER);
       touched = true;
+      phase = "observer-disconnect";
       await exec(binary, ["--session", agentSessionName(request.session), "--cdp", String(browser.port), "close"], { timeout: 10_000, maxBuffer: 32_000 });
+      phase = "page-protect";
       protectedPage = await protectBrowserTakeover(browser.port, request);
+      phase = "protected-operation";
       if (options.login) {
         const loginRequest = options.login, loginAbort = new AbortController();
         const loginSignal = AbortSignal.any([controller.signal, loginAbort.signal]);
+        phase = "login-protect";
         const page = await protectPrivateLogin(browser.port, loginRequest, loginSignal);
+        phase = "protected-operation";
         let retainedCredential: { username: string; password: string } | undefined;
         let credentialAttempted = false;
         const clearCredential = () => {
@@ -162,7 +174,7 @@ export async function runBrowserTakeover(options: {
       options.notifyWaiting();
       result = await server.done;
       }
-    } catch { result = controller.signal.aborted ? { status: "cancelled", mode: "private" } : { status: "unavailable" }; }
+    } catch (error) { report(phase, error); result = controller.signal.aborted ? { status: "cancelled", mode: "private" } : { status: "unavailable" }; }
     finally {
       options.signal.removeEventListener("abort", abort); controller.abort();
       login?.close();
@@ -175,10 +187,10 @@ export async function runBrowserTakeover(options: {
           for (let i = 0; i < 15; i++) {
             try { assertDemoPortUnused(await serveStatus(), httpsPort); removed = true; break; } catch { await sleep(100); }
           }
-          if (!removed) { cleanupFailed = true; proxyRemoved = false; }
-        } catch { cleanupFailed = true; proxyRemoved = false; }
+          if (!removed) { report("cleanup-proxy"); cleanupFailed = true; proxyRemoved = false; }
+        } catch (error) { report("cleanup-proxy", error); cleanupFailed = true; proxyRemoved = false; }
       }
-      if (proxyRemoved) { try { await server?.close(); } catch { cleanupFailed = true; } }
+      if (proxyRemoved) { try { await server?.close(); } catch (error) { report("cleanup-listener", error); cleanupFailed = true; } }
       else if (server) {
         server.quarantine();
         // Exceptional cleanup only. Retire the refusal-only listener when the
@@ -194,15 +206,15 @@ export async function runBrowserTakeover(options: {
         }, 5_000);
         retry.unref();
       }
-      if (handoffStarted) { try { await stopPrivateHandoff(request.session); } catch { cleanupFailed = true; } }
+      if (handoffStarted) { try { await stopPrivateHandoff(request.session); } catch (error) { report("cleanup-handoff", error); cleanupFailed = true; } }
       if (protectedPage) {
         try {
           if ((await current(request.session))?.launchId !== browser.launchId) throw new Error();
           await protectedPage.finish(!cleanupFailed && result.status === "handed_back" ? result.mode : "private");
-        } catch { cleanupFailed = true; }
+        } catch (error) { report("cleanup-page", error); cleanupFailed = true; }
         finally { protectedPage.close(); }
       }
-      if (touched && !protectedPage) cleanupFailed = true; // Uncertain touched page: keep the gate.
+      if (touched && !protectedPage) { report("cleanup-unprotected-page"); cleanupFailed = true; } // Uncertain touched page: keep the gate.
       if (cleanupFailed) result = { status: "browser_blocked" };
       else if (gateOwned) await rm(location.protectedPath, { force: true });
       if (messageId !== undefined) await demoTelegramRequest(profile.botToken, "editMessageText", {

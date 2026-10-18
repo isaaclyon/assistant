@@ -44,10 +44,10 @@ describe("protected operation lifecycle", () => {
     h.spawn.mockImplementation(() => Object.assign(new EventEmitter(), { kill: vi.fn() }));
   });
   afterEach(async () => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); await rm(h.root, { recursive: true, force: true }); });
-  const run = (chatId = 123, signal = new AbortController().signal) => runPrivateBrowserInput({
+  const run = (chatId = 123, signal = new AbortController().signal, onDiagnostic?: (event: unknown) => void) => runPrivateBrowserInput({
     config: { instanceId: "test", telegramSurface: { type: "private" }, agentDir: "/unused", telegramProfile: "test", resourceRoot: "/release" } as BridgeInstanceConfig,
     request: { session: "default", pageUrl: "https://example.com/login", resumeUrl: "https://example.com/home", fields: [{ kind: "password", selector: "#password" }], submitSelector: "button" },
-    chatId, signal, notifyWaiting: vi.fn(),
+    chatId, signal, notifyWaiting: vi.fn(), onDiagnostic,
   });
   it("disconnects the owned observer before preparation and cleans resources before returning", async () => {
     expect(await run()).toEqual({ status: "submitted" });
@@ -56,10 +56,22 @@ describe("protected operation lifecycle", () => {
     await expect(readFile(join(h.root, "protected-input.json"))).rejects.toThrow();
     expect(h.send).toHaveBeenLastCalledWith("test-token", "editMessageText", expect.objectContaining({ message_id: 42, reply_markup: { inline_keyboard: [] } }));
   });
+  it("reports observer disconnection failure without exposing process output or clearing the gate", async () => {
+    const diagnostic = vi.fn(), previous = h.exec.getMockImplementation()!;
+    const failure = Object.assign(new Error("synthetic-secret-message"), { code: 1, stdout: "synthetic-secret-output", stderr: "synthetic-secret-error" });
+    h.exec.mockImplementation((binary, ...args) => binary === "agent-browser" ? Promise.reject(failure) : previous(binary, ...args));
+    expect(await run(123, new AbortController().signal, diagnostic)).toEqual({ status: "browser_blocked" });
+    expect(diagnostic).toHaveBeenCalledWith(expect.objectContaining({ operation: "input", phase: "observer-disconnect", exitCode: 1 }));
+    expect(JSON.stringify(diagnostic.mock.calls)).not.toContain("synthetic-secret");
+    expect(h.prepare).not.toHaveBeenCalled(); expect(h.send).not.toHaveBeenCalled();
+    expect(await readFile(join(h.root, "protected-input.json"), "utf8")).toContain("owned-launch");
+  });
   it("retains the gate when sensitive-document cleanup fails", async () => {
+    const diagnostic = vi.fn();
     h.pageClose.mockRejectedValue(new Error("synthetic-secret-123"));
-    expect(await run()).toEqual({ status: "browser_blocked" });
+    expect(await run(123, new AbortController().signal, diagnostic)).toEqual({ status: "browser_blocked" });
     expect(await readFile(join(h.root, "protected-input.json"), "utf8")).not.toContain("synthetic-secret-123");
+    expect(diagnostic).toHaveBeenCalledWith({ operation: "input", phase: "cleanup-page" });
   });
   it("still closes the sensitive document and retains the gate if listener cleanup fails", async () => {
     h.serverClose.mockRejectedValueOnce(new Error("synthetic-secret-123"));

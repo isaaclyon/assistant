@@ -349,6 +349,18 @@ exits naturally with no unfinished work. Three private-login attempts return
 enabled. This run does not prove successful sign-in, credential approval/copy or
 Mini App takeover. Those gates remain open alongside authenticated CLI acceptance.
 
+An offline source review identifies two failure paths: an existing crash gate,
+and uncertain observer disconnection or page protection that retains the gate.
+Stubbed observer failures reproduce the second path without a browser or secrets.
+Opt-in [host-only diagnostics](private-browser-input.md#host-only-failure-diagnostics)
+now distinguish setup and cleanup failure phases using content-free metadata.
+Regression tests cover phase reporting, privacy, callback failures and gate
+retention. The full Node 24 check passes 151 files and 1,379 tests, with 39
+platform/browser tests skipped; the build also passes. The independent source
+review finds no material defect. This does not establish the cause of the live failure. Socket-path
+and observer-environment explanations remain hypotheses. A new bounded live
+check needs separate authorization after the previous test resources are retired.
+
 The test application, broker, site and browser stop after the check. The dedicated
 node's three proxy mappings and temporary loopback address are removed. The node
 logs out, credential copies are removed, and both synthetic vaults are deleted
