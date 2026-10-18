@@ -1,6 +1,6 @@
 # Pi-durable migration plan
 
-Status: approved architecture and checkpoint sequence; C0–C3 passed. C3 chat and memory are implemented on isolated `feat/durable-c3`, with local validation, independent review and dedicated live user acceptance complete; see the [C3 guide](pi-durable-c3-chat-memory.md). Production remains on the legacy release; no production deployment or private-state migration ran.
+Status: approved architecture and checkpoint sequence; C0–C3 passed. C3 chat and memory are implemented on isolated `feat/durable-c3`, with local validation, independent review and dedicated live user acceptance complete; see the [C3 guide](pi-durable-c3-chat-memory.md). C4's [first slice](pi-durable-c4-tools.md) adds locally validated general tools and bounded public web on `feat/durable-c4`; full C4 remains in progress. Production remains on the legacy release; no production deployment or private-state migration ran.
 
 The user approved the durable-only extension strategy, chat-and-memory MVP, retained hosting and Telegram experience, target architecture, and C0–C7 sequence. This plan records intended work; it does not describe implemented behavior or supersede existing ADRs until their replacements are accepted.
 
@@ -177,6 +177,13 @@ This is the first usable assistant checkpoint, on a dedicated test instance usin
 **User checkpoint:** try the dedicated instance and confirm chat/memory behavior is useful and familiar. Record gaps before extending scope.
 
 ### C4 — Remaining integrations and protected browser workflows
+
+**Checkpoint:** in progress. The [first-slice guide](pi-durable-c4-tools.md)
+records implemented general file/shell tools, bounded public search/fetch,
+production-profile checks and SIGKILL/abort evidence on `feat/durable-c4`.
+The original C3 profile remains selected separately. This is local implementation
+acceptance for that slice, not the complete C4 pass gate; external integrations,
+protected browser workflows and full provider/operator parity remain pending.
 
 Restore general file/shell/public-web tools with operation-specific replay policies as part of C4. The C3 profile deliberately selects only typed memory/history tools.
 

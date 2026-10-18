@@ -1,5 +1,5 @@
 import type { ConversationId, Tx } from '@earendil-works/pi-durable';
-import type { NativeConfig } from './config.js';
+import { isNativeMemoryProfile, type NativeConfig } from './config.js';
 import type { DurableHost } from './host.js';
 import { Bindings } from './ingress.js';
 import type { MemoryBinding } from './operations.js';
@@ -8,7 +8,7 @@ import type { MemoryBinding } from './operations.js';
 export async function nativeMemoryBinding(
   tx: Tx, host: DurableHost, config: NativeConfig, conversationId: ConversationId,
 ): Promise<MemoryBinding | undefined> {
-  if (config.capabilityProfile !== 'durable-chat-memory-test' || !config.memory || config.principal === 'engineering') return undefined;
+  if (!isNativeMemoryProfile(config.capabilityProfile) || !config.memory || config.principal === 'engineering') return undefined;
   const state = await tx.doc(Bindings, host.runtime.root.id);
   if (state.epochs[String(state.epoch)] !== conversationId) return undefined;
   const sources = Object.values(state.sources).filter(source => source.conversationId === conversationId && !source.cancelled);

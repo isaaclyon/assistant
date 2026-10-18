@@ -28,7 +28,7 @@ function inside(root: string, target: string): boolean {
 async function rootsReal(roots: string[]): Promise<string[]> {
   return Promise.all(roots.map((root) => realpath(root)));
 }
-function privateAddress(address: string): boolean {
+export function privateAddress(address: string): boolean {
   const family = isIP(address);
   return family === 4
     ? NON_PUBLIC_NETWORKS.check(address, "ipv4")

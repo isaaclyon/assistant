@@ -35,6 +35,7 @@ export interface HostConfig {
   reconcileIntervalMs?:number;
   idleMs?:number;
   settings?:HarnessOptions['settings'];
+  env?:HarnessOptions['env'];
 }
 export class DurableHost {
   private line:Promise<unknown>=Promise.resolve();
@@ -52,7 +53,7 @@ export class DurableHost {
     const store=await openHostStorage(config.stateDir,config.inboxPath);
     let harness:Harness|undefined;
     try{
-      harness=await Harness.open(store.storage,{models:config.models,registry:config.registry,settings:{...config.settings,followUpMode:'one-at-a-time',steeringMode:'one-at-a-time'}},context);
+      harness=await Harness.open(store.storage,{models:config.models,registry:config.registry,env:config.env,settings:{...config.settings,followUpMode:'one-at-a-time',steeringMode:'one-at-a-time'}},context);
       const root=await harness.root(context,{agent:config.agent});
       await root.commit(async tx=>{const state=await tx.doc(HostState,root.id);if(state.compatibility&&JSON.stringify(state.compatibility)!==JSON.stringify(config.compatibility))throw new Error('Incompatible native host metadata');state.compatibility=config.compatibility;},context);
       const host=new DurableHost(config,{harness,root,store,agent:config.agent,...(config.onEpochChange?{onEpochChange:config.onEpochChange}:{})});

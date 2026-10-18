@@ -11,6 +11,7 @@ export interface NativeMemoryConfig {
  judgeKeyFile?: string;
  embeddingKeyFile?: string;
 }
+export const isNativeMemoryProfile=(profile:string)=>['durable-chat-memory-test','durable-tools-test'].includes(profile);
 export interface NativeConfig {
  version: 1; runtime: 'pi-durable'; instanceId: string; principal: 'isaac'|'emma'|'household'|'engineering';
  releaseSha: string; resourceRoot: string; workspaceCwd: string; stateDir: string;
@@ -56,7 +57,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
  const principal=text(value.principal,'principal');
  if(!['isaac','emma','household','engineering'].includes(principal)) throw new Error('Invalid principal');
  const capabilityProfile=text(value.capabilityProfile,'capability profile');
- if(!['durable-foundation-test','durable-chat-memory-test'].includes(capabilityProfile)) throw new Error('Unsupported native capability profile');
+ if(!['durable-foundation-test','durable-chat-memory-test','durable-tools-test'].includes(capabilityProfile)) throw new Error('Unsupported native capability profile');
  const resourceRoot=await realpath(absolute(value.resourceRoot,'resourceRoot'));
  const workspaceCwd=await realpath(absolute(value.workspaceCwd,'workspaceCwd'));
  const stateDir=await realpath(absolute(value.stateDir,'stateDir'));
@@ -64,7 +65,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
  const stateStat=await lstat(stateDir);
  if(!stateStat.isDirectory() || (stateStat.mode&0o077)!==0 || (process.getuid && stateStat.uid!==process.getuid())) throw new Error('Native state directory must be private and owned by this runtime');
  let memory: NativeMemoryConfig | undefined;
- if (capabilityProfile === 'durable-chat-memory-test') {
+ if (isNativeMemoryProfile(capabilityProfile)) {
   const selected = record(value.memory, 'memory');
   fields(selected, ['vaultRoot','gitAutocommit','legacySessionRoots','timeZone','recall','semantic','judgeKeyFile','embeddingKeyFile'], 'memory');
   if (principal === 'engineering') throw new Error('Chat-memory profile requires a memory principal');

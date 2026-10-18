@@ -12,7 +12,7 @@ import { assertNativeControl, assertNativeEnvelope, bridgeTelegram, UiRejectedEr
 import { nativeMemoryBinding } from './authority.js';
 import { nativeMemoryEnvironment } from './environment.js';
 import { confirmationPresentation, formatDiagnostics, type DiagnosticSection } from './telegram-ui.js';
-import type { NativeConfig } from './config.js';
+import { isNativeMemoryProfile, type NativeConfig } from './config.js';
 
 export interface NativeApplicationOptions {
  onFatal(error:unknown):void;
@@ -28,7 +28,8 @@ const confirmationKey=(cid:ConversationId,id:string)=>createHash('sha256').updat
 /** Composition for a dedicated native instance; domain modules load only after selection validation. */
 export async function createNativeApplication(config:NativeConfig,options:NativeApplicationOptions) {
  await loadCapabilityProfile(config.resourceRoot,config.capabilityProfile);
- const enabled=config.capabilityProfile==='durable-chat-memory-test';
+ const enabled=isNativeMemoryProfile(config.capabilityProfile);
+ const generalEnabled=config.capabilityProfile==='durable-tools-test';
  if(enabled&&(!config.memory||config.principal==='engineering'))throw new Error('Chat-memory profile requires scoped memory configuration');
  const provider=options.provider??await createNativeProvider({credentialPath:config.credentialPath,settingsPath:config.settingsPath,account:config.account});
  let resources:Awaited<ReturnType<typeof loadNativeRegistry>>|undefined;
@@ -45,10 +46,22 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  let initializeHistory:((storeId:string)=>void)|undefined;
  let prepareIntent:((input:import('./memory-executor.js').PrepareMemoryIntentInput)=>Promise<{intent:import('./operations.js').MemoryIntent}>)|undefined;
  const registryListeners=new Set<()=>void>();
+ let executionEnvironment:import('@earendil-works/pi-durable/env').ExecutionEnv|undefined;
+ let generalFactory:(()=>NativeBundle)|undefined;
+ let publicWebFactory:(()=>NativeBundle)|undefined;
  let debugEnabled=false;
  const debugCommands=new Set<string>();
  let debugQueued=false;
  let debugPending:DiagnosticSection[]=[];
+ let closing:Promise<void>|undefined;
+ const close=()=>closing??=(async()=>{
+  debugEnabled=false;
+  const failures:unknown[]=[];
+  for(const cleanup of [()=>visible?.close(),()=>host?.close(),()=>executionEnvironment?.cleanup(context),()=>resources?.close(),()=>search?.close(),()=>provider.close()]){
+   try{await cleanup();}catch(error){failures.push(error);}
+  }
+  if(failures.length)throw new AggregateError(failures,'Native application cleanup failed');
+ })();
  const target={chatId:config.transport.allowedUserId};
  const requireHost=()=>{if(!host)throw new Error('Host authority is not bound');return host;};
  let transport:ReturnType<typeof bridgeTelegram>|undefined;
@@ -64,6 +77,12 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   });
  };
  try {
+  if(generalEnabled){
+   const tools=await import('./general-tools.js');
+   generalFactory=tools.createGeneralToolsBundle;
+   publicWebFactory=(await import('./public-web.js')).createPublicWebBundle;
+   executionEnvironment=tools.createNativeExecutionEnvironment(config);
+  }
   if(enabled){
    // No canonical domain code imports before every selected path is validated above.
    const [memory,markdown,searching,recall,contexts,history,usage]=await Promise.all([
@@ -128,6 +147,8 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   }
   const bundle=(name:string):NativeBundle=>{
    if(!enabled)throw new Error('Native domain bundles are unavailable for this profile');
+   if(generalEnabled&&name==='general-tools')return generalFactory!();
+   if(generalEnabled&&name==='public-web')return publicWebFactory!();
    if(name==='memory')return {name,version:1,tools:[memoryTool!],close:async()=>{}};
    if(name==='search')return searchFactory!();
    if(name==='core-memory')return contextFactory!();
@@ -207,6 +228,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   // The reader delegates to the active registry after a safe idle reload.
   const registry={snapshot:()=>resources!.registry.snapshot(),subscribe:(listener:()=>void)=>{registryListeners.add(listener);return()=>{registryListeners.delete(listener);};}};
   host=await DurableHost.create({stateDir:config.historyDir,inboxPath:config.inboxPath,models:provider.models,registry,
+   ...(executionEnvironment?{env:({cwd})=>{if(cwd!==config.workspaceCwd)throw new Error('Tool working directory differs from selected workspace');return executionEnvironment;}}:{}),
    agent:{model:provider.model,thinkingLevel:provider.thinkingLevel,cwd:config.workspaceCwd,instructions:[resources.instructions,...resources.skills.map(s=>s.content)].join('\n\n')},
    compatibility:{runtimeGeneration:'pi-durable-1.3.0',releaseSchema:1,profile:config.capabilityProfile,registrySignature:signature},
    onEpochChange:async(tx,previous,nextEpoch)=>{for(const id of previous){if(memoryModule)await memoryModule.invalidateMemoryState(tx,operations,id,String(nextEpoch),'new');else await operations.invalidate(tx,id,String(nextEpoch),'new');}},
@@ -226,16 +248,9 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    return executeMemoryOperation('lint',{}, {env:nativeMemoryEnvironment(config),cwd:config.workspaceCwd,sourceResolver:search.provenanceResolver});
   };
   const restartAtOpen=(await runtime.runtime.harness.snapshot(NativePreferences,runtime.runtime.root.id,context))?.restartNotice?.requestId;
-  return {host:runtime,operations,controls,search,lintMemory,start:async()=>{await runtime.start();if(restartAtOpen)await controls.notifyRestart(async()=>{await bridge.presenter.present(target,{text:'Restart complete.'});},restartAtOpen);},close:async()=>{
-   debugEnabled=false;
-   await visible?.close();
-   await runtime.close();
-   try{await resources!.close();await search?.close();}finally{provider.close();}
-  }};
+  return {host:runtime,operations,controls,search,lintMemory,start:async()=>{await runtime.start();if(restartAtOpen)await controls.notifyRestart(async()=>{await bridge.presenter.present(target,{text:'Restart complete.'});},restartAtOpen);},close};
  } catch(error) {
-  await visible?.close();
-  if(host)await host.close();
-  try{await resources?.close();await search?.close();}finally{provider.close();}
+  try{await close();}catch(cleanup){throw new AggregateError([error,cleanup],'Native application construction failed');}
   throw error;
  }
 }

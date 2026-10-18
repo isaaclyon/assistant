@@ -3,6 +3,16 @@
   "resources": {
     "extensions": [
       {
+        "id": "native-public-web",
+        "path": ".pi/native/public-web.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-general-tools",
+        "path": ".pi/native/general-tools.mjs",
+        "enabled": true
+      },
+      {
         "id": "native-core-memory",
         "path": ".pi/native/core-memory.mjs",
         "enabled": true
@@ -187,6 +197,11 @@
     ],
     "instructions": [
       {
+        "id": "telegram-tools-test",
+        "path": ".pi/telegram/tools-test.md",
+        "enabled": true
+      },
+      {
         "id": "telegram-chat-memory-test",
         "path": ".pi/telegram/chat-memory-test.md",
         "enabled": true
@@ -204,6 +219,24 @@
     ]
   },
   "profiles": [
+    {
+      "id": "durable-tools-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web"
+      ],
+      "skills": [
+        "personal-memory"
+      ],
+      "instructions": "telegram-tools-test"
+    },
     {
       "id": "durable-chat-memory-test",
       "extensions": ["native-core-memory", "native-search", "native-memory", "native-reload", "native-restart", "native-skills", "native-debug"],
