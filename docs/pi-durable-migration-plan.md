@@ -249,8 +249,11 @@ the existing occurrence ledger and v1 exchange. Its explicit same-UID targets,
 separate coordinator directory and native-only lease preserve ownership. Four
 legacy/native admission/restart combinations and real publication/cancellation
 crashes have offline coverage; see the [coordinator guide](pi-durable-c5-coordinator.md).
-Heartbeat/webhook and their full matrix, price-watch tasks, schedule editing and
-child/retention work remain open.
+The separate `durable-jobs-schedules-test` profile adds selected heartbeat
+checkers, loopback webhooks, temporary price watches and scoped schedule helpers.
+Its four-way heartbeat/webhook admission matrix and publication crash recovery
+are covered offline; see the [schedule guide](pi-durable-c5-schedules.md).
+Background children and creation-based seven-day retention remain open.
 
 **Deliverables**
 

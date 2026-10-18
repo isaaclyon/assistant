@@ -43,3 +43,13 @@ scheduled observation time and verify the new release before its next run.
 
 This is the general rule for situational work: store task instances in temporary
 private data with a lifecycle, and keep only reusable mechanisms in the release.
+
+## Native schedule integration
+
+The separate `durable-jobs-schedules-test` profile selects the existing watch and
+scheduling skills. Its shell receives explicit coordinator paths; helper code
+resolves from the immutable release, while watch manifests stay under private
+coordinator temporary data. Publication acknowledgement and retirement retain
+this decision's existing lifecycle. The
+[schedule guide](../pi-durable-c5-schedules.md) records the compiled-helper
+application test and remaining acceptance gates.

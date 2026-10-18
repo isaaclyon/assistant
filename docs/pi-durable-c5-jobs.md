@@ -125,8 +125,9 @@ state migration or cross-UID handoff.
 
 The subsequent [coordinator slice](pi-durable-c5-coordinator.md) adds cron and late
 one-shot publication, four-way legacy/native admission and restart coverage, and
-coordinator inspection. Heartbeat/webhook execution and their full mixed-runtime
-matrix, price-watch tasks, schedule-editing selection, background children and
-creation-based seven-day child-store retirement remain open. Canonical definitions, occurrence identities and legacy
-uncertainty must survive those later slices. Optional codemode remains separately
+coordinator inspection. The [schedule slice](pi-durable-c5-schedules.md) adds
+selected heartbeat/webhook execution, their four-way mixed-runtime matrix,
+price-watch tasks and schedule-editing selection. Background children and
+creation-based seven-day child-store retirement remain open. Canonical
+definitions, occurrence identities and legacy uncertainty must survive those slices. Optional codemode remains separately
 gated. See the [roadmap](pi-durable-migration-plan.md#c5--native-schedules-and-background-agents).

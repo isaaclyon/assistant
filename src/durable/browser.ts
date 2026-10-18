@@ -38,7 +38,7 @@ async function findCandidates(origin:string,signal:AbortSignal):Promise<unknown>
  if(!response.ok)throw new Error('Saved logins unavailable');return response.json();
 }
 export function createNativeBrowser(config:NativeConfig,services:NativeBrowserServices={input:runPrivateBrowserInput,takeover:runBrowserTakeover}) {
- if(!['durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test'].includes(config.capabilityProfile)||config.principal!=='isaac'||!config.browser||!config.google)throw new Error('Native browser selection is unavailable');
+ if(!['durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test'].includes(config.capabilityProfile)||config.principal!=='isaac'||!config.browser||!config.google)throw new Error('Native browser selection is unavailable');
  const selected=config.browser;
  const domain:PrivateBrowserConfig={instanceId:config.instanceId,executionInstanceId:config.instanceId,telegramSurface:{type:'private'},agentDir:selected.agentDir,
   telegramProfile:selected.telegramProfile,resourceRoot:config.resourceRoot,credentialScope:selected.credentialScope,emailCodeEnabled:true,googleRuntime:nativeGoogleRuntime(config)};

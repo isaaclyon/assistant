@@ -425,6 +425,7 @@ export function runCompiledHeartbeatChecker(
   timeoutMs: number,
   args?: HeartbeatCheckerArgs,
   cursor?: JsonObject | null,
+  options: { env?: NodeJS.ProcessEnv } = {},
 ): Promise<HeartbeatCheckResult> {
   const argv = [resolveHeartbeatCheckerPath(checkerId)];
   if (args !== undefined) argv.push(JSON.stringify(args));
@@ -432,7 +433,11 @@ export function runCompiledHeartbeatChecker(
     const child = execFile(
       process.execPath,
       argv,
-      { timeout: timeoutMs, maxBuffer: 1024 * 1024 },
+      {
+        timeout: timeoutMs,
+        maxBuffer: 1024 * 1024,
+        ...(options.env === undefined ? {} : { env: options.env }),
+      },
       (error, stdout) => {
         resolve({ ok: !error, stdout: stdout ?? "" });
       },

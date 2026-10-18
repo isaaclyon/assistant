@@ -15,12 +15,19 @@ import {
   type JobsLogger,
   startJobScheduler,
 } from "../jobs.js";
+import type { NativeGoogleConfig } from "./config.js";
+import {
+  buildScheduleRuntime,
+  type NativeScheduleConfig,
+  type NativeScheduleTestOptions,
+} from "./schedules.js";
 
 export type NativeCoordinatorConfig = {
   stateRoot: string;
   coordinatorStateDir: string;
   targets: string[];
   scope: "self" | "shared-owner";
+  schedules?: NativeScheduleConfig;
 };
 
 export interface NativeJobsCoordinator {
@@ -28,6 +35,8 @@ export interface NativeJobsCoordinator {
   reload(): Promise<void>;
   stop(): Promise<void>;
   getJobs(): readonly JobDefinition[];
+  /** Actual webhook listener port, or undefined when no listener is running. */
+  webhookPort(): number | undefined;
 }
 
 export interface NativeJobsCoordinatorOptions {
@@ -38,10 +47,12 @@ export interface NativeJobsCoordinatorOptions {
     enqueue: typeof enqueueJobHandoff;
     cancel: typeof cancelJobHandoff;
   };
+  /** Isolated-test seams; only honoured when the config selects schedules. */
+  schedules?: NativeScheduleTestOptions;
 }
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const SUPPORTED_TYPES: ReadonlySet<JobDefinition["type"]> = new Set(["cron", "at"]);
+const LEGACY_TYPES: ReadonlySet<JobDefinition["type"]> = new Set(["cron", "at"]);
 const HANDOFF_STATES = ["pending", "processing", "completed", "acknowledged", "failed", "cancelled"];
 const LEASE_FILE = "native-jobs-coordinator.lock.db";
 
@@ -170,7 +181,7 @@ function expectedDispatchId(dispatch: JobDispatch): string {
 }
 
 export async function startNativeJobsCoordinator(
-  config: { instanceId: string; stateDir: string; coordinator: NativeCoordinatorConfig },
+  config: { instanceId: string; stateDir: string; coordinator: NativeCoordinatorConfig; google?: NativeGoogleConfig },
   options: NativeJobsCoordinatorOptions,
 ): Promise<NativeJobsCoordinator> {
   const { instanceId } = config;
@@ -201,10 +212,22 @@ export async function startNativeJobsCoordinator(
   assertPrivateDirectory(stateDir, "own state directory");
   assertPrivateDirectory(coordinatorStateDir, "coordinator state directory");
 
+  const schedules = config.coordinator.schedules;
+  if (schedules === undefined && options.schedules !== undefined) {
+    throw new Error("Schedule test options require a schedules configuration");
+  }
+  const runtime = schedules === undefined ? undefined : buildScheduleRuntime({
+    schedules,
+    ...(config.google === undefined ? {} : { google: config.google }),
+    coordinatorStateDir,
+    ...(options.schedules === undefined ? {} : { test: options.schedules }),
+  });
+  const supportedTypes = runtime?.allowedTypes ?? LEGACY_TYPES;
+
   const publication = options.publication ?? { enqueue: enqueueJobHandoff, cancel: cancelJobHandoff };
 
   const inject = async (prompt: string, dispatch?: JobDispatch): Promise<void> => {
-    if (!dispatch || !SUPPORTED_TYPES.has(dispatch.jobType)) {
+    if (!dispatch || !supportedTypes.has(dispatch.jobType)) {
       throw new Error("Native coordinator does not publish this job type");
     }
     validateOccurrenceIdentity(dispatch);
@@ -257,18 +280,20 @@ export async function startNativeJobsCoordinator(
     scheduler = await startJobScheduler({
       stateDir: coordinatorStateDir,
       webhookHost: "127.0.0.1",
-      webhookPort: 0,
+      webhookPort: runtime?.webhookPort ?? 0,
       inject,
       cancel,
       logger: options.logger,
       validTargets: allowed,
       requireTargets: true,
-      allowedTypes: SUPPORTED_TYPES,
+      allowedTypes: supportedTypes,
+      ...(runtime === undefined ? {} : { allowedCheckerIds: runtime.allowedCheckerIds }),
       ...(options.nowMs === undefined ? {} : { nowMs: options.nowMs }),
       ...(options.tickIntervalMs === undefined ? {} : { tickIntervalMs: options.tickIntervalMs }),
-      // Checker and judge work is outside this coordinator slice.
-      runCheck: async () => { throw new Error("Checkers are not supported by the native coordinator"); },
-      judge: async () => { throw new Error("Judges are not supported by the native coordinator"); },
+      runCheck: runtime?.runCheck ??
+        (async () => { throw new Error("Checkers are not supported by the native coordinator"); }),
+      judge: runtime?.judge ??
+        (async () => { throw new Error("Judges are not supported by the native coordinator"); }),
     });
   } catch (error) {
     lease.close();
@@ -280,6 +305,7 @@ export async function startNativeJobsCoordinator(
     tick: () => scheduler.tick(),
     reload: () => scheduler.reload(),
     getJobs: () => scheduler.getJobs(),
+    webhookPort: () => scheduler.webhookPort(),
     stop: () => {
       // A failed stop keeps the lease so no second writer can start beside a
       // scheduler that may still be running; a retry may complete it.

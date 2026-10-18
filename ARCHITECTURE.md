@@ -74,9 +74,15 @@ trees. Explicit same-UID targets constrain publication, and a lifetime SQLite
 lease excludes other native coordinators. Legacy/native switching still requires
 quiescent writers and one owner. Fresh-ledger provenance permits restart after a
 first rejected definition file without weakening historical migration guards.
-Heartbeat/webhook, price-watch and child migration remain open; see the
-[C5 recipient](docs/pi-durable-c5-jobs.md) and
-[coordinator](docs/pi-durable-c5-coordinator.md) guides.
+`durable-jobs-schedules-test` adds explicitly selected compiled checkers,
+loopback webhooks, scoped schedule helpers and temporary price watches. Native
+checker environments exclude ambient provider settings; Gmail uses only the
+selected Google configuration, and semantic schedules use a separate explicit
+judge key. The existing domain owners retain cursors and occurrence identities.
+Background children and their retention remain open; see the
+[C5 recipient](docs/pi-durable-c5-jobs.md),
+[coordinator](docs/pi-durable-c5-coordinator.md) and
+[schedule](docs/pi-durable-c5-schedules.md) guides.
 Live provider/browser/CLI/platform acceptance and privileged builder/deployment
 coverage remain at C6.
 

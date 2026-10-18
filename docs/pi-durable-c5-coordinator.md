@@ -120,8 +120,10 @@ webhook work remains pending with those implementations.
 
 ## Remaining C5 work
 
-Heartbeat/checker rules and cursors, webhook ingestion, temporary price-watch
-tasks, schedule-editing capability selection, background children and
-creation-based seven-day child-store retirement remain open. Keep canonical
+The subsequent [schedule slice](pi-durable-c5-schedules.md) adds heartbeat/checker
+rules and cursors, webhook ingestion, temporary price-watch tasks and
+schedule-editing selection in a separate profile. It also adds the heartbeat and
+webhook mixed-runtime matrix. Background children and creation-based seven-day
+child-store retirement remain open. Keep canonical
 definitions, terminal occurrence identities and historical uncertainty through
 those slices. See the [roadmap](pi-durable-migration-plan.md#c5--native-schedules-and-background-agents).

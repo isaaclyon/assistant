@@ -3,7 +3,10 @@
   "include": [
     "src/durable/**/*.ts",
     ".pi/lib/mutation-lock.mjs",
-    ".pi/skills/personal-memory/scripts/*.mjs"
+    ".pi/skills/personal-memory/scripts/*.mjs",
+    "src/jobs-cli.ts",
+    "src/price-watches.ts",
+    "src/checkers/*.ts"
   ],
   "exclude": [
     "tests"

@@ -8,6 +8,7 @@ import { isDeepStrictEqual } from "node:util";
 import {
   createHeartbeatRunner,
   type HeartbeatCheckerArgs,
+  type JsonObject,
   parseHeartbeatFields,
   runCompiledHeartbeatChecker,
   type StatefulHeartbeatDefinition,
@@ -82,6 +83,8 @@ export interface ParseJobsFileOptions {
   compatibilityTarget?: string;
   /** Rejects any declared job type outside this set before reconciliation. */
   allowedTypes?: ReadonlySet<JobDefinition["type"]>;
+  /** Rejects any heartbeat checker outside this set before reconciliation. */
+  allowedCheckerIds?: ReadonlySet<string>;
 }
 
 export function parseJobsFile(
@@ -239,6 +242,10 @@ export function parseJobsFile(
         const schedule = requireSchedule();
         const fields = parseHeartbeatFields(entry, `${label} (${id})`, errors);
         if (schedule === undefined || fields === undefined) return;
+        if (options.allowedCheckerIds !== undefined && !options.allowedCheckerIds.has(fields.checker.id)) {
+          errors.push(`${label} (${id}): checker "${fields.checker.id}" is not supported by this scheduler`);
+          return;
+        }
         jobs.push({
           id,
           type: "heartbeat",
@@ -349,6 +356,7 @@ export interface JobSchedulerOptions {
   requireTargets?: boolean;
   compatibilityTarget?: string;
   allowedTypes?: ReadonlySet<JobDefinition["type"]>;
+  allowedCheckerIds?: ReadonlySet<string>;
   nowMs?: () => number;
   tickIntervalMs?: number;
   checkTimeoutMs?: number;
@@ -356,6 +364,7 @@ export interface JobSchedulerOptions {
     checkerId: string,
     timeoutMs: number,
     args?: HeartbeatCheckerArgs,
+    cursor?: JsonObject | null,
   ) => Promise<CheckResult>;
   judge?: SemanticJudge;
 }
@@ -390,6 +399,7 @@ export async function startJobScheduler({
   requireTargets,
   compatibilityTarget,
   allowedTypes,
+  allowedCheckerIds,
   nowMs = Date.now,
   tickIntervalMs = 30_000,
   checkTimeoutMs = 60_000,
@@ -411,6 +421,7 @@ export async function startJobScheduler({
     ...(requireTargets === undefined ? {} : { requireTargets }),
     ...(compatibilityTarget === undefined ? {} : { compatibilityTarget }),
     ...(allowedTypes === undefined ? {} : { allowedTypes }),
+    ...(allowedCheckerIds === undefined ? {} : { allowedCheckerIds }),
   };
   const dispatchFor = (occurrence: JobOccurrence): JobDispatch => ({
     jobId: occurrence.jobId,

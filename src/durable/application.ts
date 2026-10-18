@@ -36,10 +36,11 @@ const confirmationKey=(cid:ConversationId,id:string)=>createHash('sha256').updat
 export async function createNativeApplication(config:NativeConfig,options:NativeApplicationOptions) {
  await loadCapabilityProfile(config.resourceRoot,config.capabilityProfile);
  const enabled=isNativeMemoryProfile(config.capabilityProfile);
- const coordinatorEnabled=config.capabilityProfile==='durable-jobs-coordinator-test';
+ const coordinatorEnabled=['durable-jobs-coordinator-test','durable-jobs-schedules-test'].includes(config.capabilityProfile);
  const jobsEnabled=config.capabilityProfile==='durable-jobs-test'||coordinatorEnabled;
  if(config.jobsRole!==(coordinatorEnabled?'coordinator':jobsEnabled?'recipient':'disabled'))throw new Error('jobsRole must match the selected native profile');
  if(coordinatorEnabled!==!!config.coordinator)throw new Error('Coordinator configuration must match the selected native profile');
+ if((config.capabilityProfile==='durable-jobs-schedules-test')!==!!config.coordinator?.schedules)throw new Error('Schedule configuration must match the selected native profile');
  const parityEnabled=config.capabilityProfile==='durable-parity-test'||jobsEnabled;
  const providerEnabled=config.capabilityProfile==='durable-provider-test'||parityEnabled;
  const browserEnabled=config.capabilityProfile==='durable-browser-test'||providerEnabled;
@@ -342,7 +343,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
     if(coordinatorEnabled&&!coordinator){
      const module=await import('./coordinator.js');
      const diagnostic=()=>debug('durable coordinator',{event:'diagnostic'});
-     coordinator=await module.startNativeJobsCoordinator({instanceId:config.instanceId,stateDir:config.stateDir,coordinator:config.coordinator!},{...options.coordinator,logger:{info:diagnostic,warn:diagnostic,error:diagnostic}});
+     coordinator=await module.startNativeJobsCoordinator({instanceId:config.instanceId,stateDir:config.stateDir,coordinator:config.coordinator!,...(config.google?{google:config.google}:{})},{...options.coordinator,logger:{info:diagnostic,warn:diagnostic,error:diagnostic}});
     }
     await runtime.start();
     if(restartAtOpen)await controls.notifyRestart(async()=>{await bridge.presenter.present(target,{text:'Restart complete.'});},restartAtOpen);

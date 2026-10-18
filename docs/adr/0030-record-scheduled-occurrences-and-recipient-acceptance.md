@@ -157,4 +157,14 @@ initialization retain their migration guard. This additive domain record keeps
 the version-1 occurrence and handoff identities intact.
 
 The [coordinator guide](../pi-durable-c5-coordinator.md) records offline evidence
-and remaining heartbeat/webhook, price-watch and child migration gates.
+and the subsequent schedule and child migration gates.
+
+## Native heartbeat and webhook publication
+
+The separate `durable-jobs-schedules-test` profile extends the same coordinator
+with explicit heartbeat checker selection, scoped schedule helpers and optional
+loopback webhook ingestion. Existing domain owners retain cursor, definition and
+occurrence identity; HTTP 202 still establishes materialization only. The
+[schedule guide](../pi-durable-c5-schedules.md) records the four-way heartbeat and
+webhook admission matrix and SIGKILL publication barriers. Child execution and
+retention remain open; this evidence does not establish production migration.

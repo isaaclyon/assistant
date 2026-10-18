@@ -231,6 +231,7 @@
       }
     ],
     "instructions": [
+      {"id":"telegram-jobs-schedules-test","path":".pi/telegram/jobs-schedules-test.md","enabled":true},
       {"id":"telegram-jobs-coordinator-test","path":".pi/telegram/jobs-coordinator-test.md","enabled":true},
       {"id":"telegram-jobs-test","path":".pi/telegram/jobs-test.md","enabled":true},
       {"id":"telegram-parity-test","path":".pi/telegram/parity-test.md","enabled":true},
@@ -279,6 +280,40 @@
     ]
   },
   "profiles": [
+    {
+      "id": "durable-jobs-schedules-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-mutations",
+        "native-places",
+        "native-private-browser",
+        "native-fast",
+        "native-usage",
+        "native-web-run"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-mutations",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "google-calendar",
+        "agent-browser",
+        "plan-weekend",
+        "native-reserve-restaurant",
+        "schedule-reminders-and-jobs",
+        "watch-prices"
+      ],
+      "instructions": "telegram-jobs-schedules-test"
+    },
     {
       "id": "durable-jobs-coordinator-test",
       "extensions": [
