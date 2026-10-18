@@ -109,7 +109,17 @@ history. Unknown send receipts use exact authenticated bot-prompt references to
 consume replies without authorizing effects. Tombstone storage growth is a C6
 measurement gate; removing IDs requires preserving that reply-capture guarantee.
 
-This native slice excludes cancel, delete, undo and confirmation requests until
-the guarded-mutation integration. It does not replace the legacy approval rules.
-See the [C4 guide](../pi-durable-c4-tools.md#direct-places-application-slice) for
-implemented selection, recovery and validation limits.
+The earlier `durable-places-test` profile retains its non-destructive surface.
+The separate `durable-mutations-test` profile adds cancel, delete and undo through
+direct user-only confirmations. `PlacesApplication.prepareConfirmation` takes
+the deletion snapshot once; `confirmPrepared` applies that original snapshot or
+insertion revision under the existing domain checks. The native Confirm
+capability stores this prepared request, and Confirm/Cancel invalidate each
+other. The model may request a preview but cannot obtain a token or invoke the
+approved effect. Ordinary restart preserves valid capabilities; reset/reload,
+expiry and unknown preview delivery cannot authorize a mutation. A claimed
+unknown mutation remains interrupted and requires inspection.
+
+Legacy approval rules and the canonical store/schema remain unchanged. See the
+[C4 guide](../pi-durable-c4-tools.md#guarded-mutation-integration-slice) for
+selection, recovery and validation limits.

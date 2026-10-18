@@ -1,6 +1,6 @@
 # Pi-durable migration plan
 
-Status: approved architecture and checkpoint sequence; C0–C3 passed. C3 chat and memory are implemented on isolated `feat/durable-c3`, with local validation, independent review and dedicated live user acceptance complete; see the [C3 guide](pi-durable-c3-chat-memory.md). C4's [first slice](pi-durable-c4-tools.md) adds locally validated general tools and bounded public web on `feat/durable-c4`; the Google-read slice on `feat/durable-c4-reads` adds Calendar/Gmail/Contacts/Places with bounded transports and metered recovery. The CLI slice on `feat/durable-c4-cli` selects the existing YNAB and editable Messages skills through the replay-unsafe shell, with explicit optional Messages configuration and synthetic recovery coverage. The direct-places slice on `feat/durable-c4-places` adds native private menus, model handoff and persisted callback claims around the existing ranking store; destructive actions remain deferred. Full C4 remains in progress. Production remains on the legacy release; no production deployment or private-state migration ran.
+Status: approved architecture and checkpoint sequence; C0–C3 passed. C3 chat and memory are implemented on isolated `feat/durable-c3`, with local validation, independent review and dedicated live user acceptance complete; see the [C3 guide](pi-durable-c3-chat-memory.md). C4's [first slice](pi-durable-c4-tools.md) adds locally validated general tools and bounded public web on `feat/durable-c4`; the Google-read slice on `feat/durable-c4-reads` adds Calendar/Gmail/Contacts/Places with bounded transports and metered recovery. The CLI slice on `feat/durable-c4-cli` selects the existing YNAB and editable Messages skills through the replay-unsafe shell, with explicit optional Messages configuration and synthetic recovery coverage. The direct-places slice on `feat/durable-c4-places` adds native private menus, model handoff and persisted callback claims around the existing ranking store. The guarded-mutation slice on `feat/durable-c4-mutations` adds a separate profile for Calendar changes and direct places delete/cancel/undo confirmations, with claimed-effect recovery. Full C4 remains in progress. Production remains on the legacy release; no production deployment or private-state migration ran.
 
 The user approved the durable-only extension strategy, chat-and-memory MVP, retained hosting and Telegram experience, target architecture, and C0–C7 sequence. This plan records intended work; it does not describe implemented behavior or supersede existing ADRs until their replacements are accepted.
 
@@ -191,10 +191,13 @@ paths and an explicit optional private Messages origin. Interrupted CLI commands
 stay interrupted; unknown financial outcomes require read-only reconciliation.
 The direct places slice on `feat/durable-c4-places` adds a separate Isaac-only
 profile with native menus, model handoff, resumable comparisons and durable
-message/epoch-bound callback claims. Destructive actions remain in step 3.
+message/epoch-bound callback claims. The guarded-mutation slice on
+`feat/durable-c4-mutations` adds Calendar creates/updates/deletion and places
+delete/cancel/undo through direct user confirmations. It retains original
+version/snapshot authority and never automatically repeats an uncertain effect.
 This is local implementation acceptance for these slices, not the complete C4
-pass gate; live places delivery, guarded mutations, protected browser workflows and
-full provider/operator parity remain pending.
+pass gate; live integration delivery, protected browser workflows and full
+provider/operator parity remain pending.
 
 Restore general file/shell/public-web tools with operation-specific replay policies as part of C4. The C3 profile deliberately selects only typed memory/history tools.
 

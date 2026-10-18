@@ -57,3 +57,40 @@ Telegram result delivery never replays the mutation.
 - Failed reconciliation remains explicitly unresolved. A generic failed read
   is never evidence of successful deletion. No real user events are needed for
   automated validation.
+
+## Native C4 addendum
+
+The isolated `durable-mutations-test` profile selects the combined native Google
+bundle. Earlier read-only profiles retain their original schema and selection.
+The native host persists write claims and deletion previews in the Harness;
+`CalendarWrites` continues to own field validation, allowlisted targets, Google
+permission checks, stable creation IDs and best-effort event version checks.
+The reusable `prepareDelete`/`executePreparedDelete` seam carries the original
+account, stable calendar ID, event ID and etag without relying on a process-local
+token. Legacy Telegram confirmations keep their existing session-local behavior.
+
+A native preview is bound to the authenticated principal, actor, private chat,
+acknowledged message, conversation epoch and ten-minute expiry. The model sees
+no approval handle. Confirm and Cancel are mutually exclusive. A valid pending
+preview survives ordinary restart; reset and reload invalidate its authority.
+An uncertain preview send has no acknowledged message binding and cannot delete.
+
+Native execution keys its claim by the stable Harness task identity before
+transport. Provider-supplied tool-call IDs may repeat across invocations and do
+not identify journal entries. Recovery of an unrecorded result only reads the
+remote state; it cannot issue the mutation again. Shutdown aborts active Google
+transports while polling drains, before closing the Harness; cancelled claims
+remain available for read-only recovery. A stable
+creation ID and draft fingerprint can prove the intended event exists. An update
+can prove the requested fields are present, without proving which writer set
+them. A returned deletion tombstone proves deletion; a failed read does not.
+Unproven outcomes remain explicitly uncertain and require inspection. Native
+call receipts remain retained, including unknown claims: pruning one while its
+Harness task can replay would turn an old call into a fresh mutation. Completed
+receipts discard the original input. C6 must measure this storage and prove a
+safe task/receipt retirement policy before cutover. These rules do not strengthen
+the underlying client's non-atomic revision check.
+
+See the [C4 guide](../pi-durable-c4-tools.md#guarded-mutation-integration-slice)
+for the selected profile and synthetic acceptance boundaries. Production
+activation and private-state migration remain later checkpoints.
