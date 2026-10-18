@@ -399,9 +399,25 @@ service account has a one-hour expiry; early revocation is not claimed.
 Exact-source [Linux CI on 6c2dcca](https://github.com/isaaclyon/assistant/actions/runs/39166498677)
 reports 1,412 passing tests, four skipped tests and two failures in
 `tests/protected-browser.test.ts`: `Test Chrome did not start` and a timeout.
-The CI build is skipped after the test failure. The earlier passing Linux run
-and the successful live browser check do not close this CI gate. C6 remains
-unaccepted pending CI resolution and authenticated native CLI acceptance.
+The CI build is skipped after the test failure. A separate
+[repeat run on d71933e](https://github.com/isaaclyon/assistant/actions/runs/39175769662)
+passes 153 files and 1,414 tests, with four tests skipped; its build also passes.
+The original CI failure is intermittent. A dedicated Linux baseline passes all
+19 protected-browser tests without reproducing it; the exact cause remains unproven.
+
+The synthetic Chrome fixture now waits for an actual CDP connection, not only a
+port file. It retries readiness within one 30-second startup deadline. Partial
+port files and early endpoint refusals do not trigger protected actions. Failure
+reports include the exit state and at most 2 KB of startup stderr, captured
+before input is inserted. Cleanup bounds SIGTERM and SIGKILL waits. The 60-second
+test limit leaves room for startup and assertions. These changes affect tests only.
+
+Nine deterministic regressions cover cold startup, partial files, endpoint retry,
+spawn/exit failures, late connections and bounded cleanup. The dedicated Linux
+check passes those nine tests and all 19 real-browser tests without skips.
+An independent source review finds no material defect. The full local check
+passes 152 files and 1,388 tests, with 39 platform/browser tests skipped; the
+build also passes. C6 remains unaccepted pending authenticated native CLI acceptance.
 
 Check `tailscale serve status --json` before choosing a private test endpoint.
 The text status can omit foreground configurations. The occupied-port guard
@@ -418,5 +434,5 @@ refuses the existing foreground mappings before any network change.
 Each Linux mode requires Docker and Node 24. The containers use only synthetic
 data and repository build output. Run the modes separately within their bounded
 execution times. The separate Linux browser run closes its 43 selected platform
-checks. User-driven provider controls and natural shutdown also pass. Remaining
-authenticated CLI acceptance and the latest Linux CI failures remain open C6 gates.
+checks. User-driven provider controls and natural shutdown also pass.
+Authenticated native CLI acceptance remains an open C6 gate.
