@@ -45,7 +45,7 @@ export function createNativeTelegramTransport(options: NativeTelegramOptions) {
   const previews = new Map<string, ReturnType<typeof createTelegramPreviewRuntimeState>>();
   const key = (target: TelegramTarget) => JSON.stringify(target);
   const owns = () => !stopped && (!lock || lock.owns(context));
-  async function call(method: string, body: unknown, signal?: AbortSignal): Promise<any> {
+  async function authorize(method: string) {
     if (!owns()) throw new TelegramDeliveryError('failed', 'Telegram ownership unavailable');
     // A response may finish after pairing is revoked. Recheck ordinary outbound
     // authority at the effect boundary, independently of the polling loop.
@@ -56,6 +56,9 @@ export function createNativeTelegramTransport(options: NativeTelegramOptions) {
       } catch { throw new TelegramDeliveryError('failed', 'Telegram identity unavailable'); }
       if (!owns()) throw new TelegramDeliveryError('failed', 'Telegram ownership unavailable');
     }
+  }
+  async function call(method: string, body: unknown, signal?: AbortSignal): Promise<any> {
+    await authorize(method);
     let response: Response;
     try {
       response = await request(`https://api.telegram.org/bot${token}/${method}`, {
@@ -205,5 +208,24 @@ export function createNativeTelegramTransport(options: NativeTelegramOptions) {
     /** Explicit callback/control output port; acceptance remains in the durable hook. */
     answerCallback(callbackId: string, text: string) { return call('answerCallbackQuery', { callback_query_id: callbackId, text }); },
     reconcile,
+    /** Raw media port. Every call passes the same ownership and pairing check as other effects. Classification belongs to media-transport.ts. */
+    media: {
+      async call(method: string, body: object | FormData, signal?: AbortSignal): Promise<{ status: number; payload: any }> {
+        if (!/^[A-Za-z]{1,40}$/.test(method)) throw new TelegramDeliveryError('failed', 'Invalid Telegram method');
+        await authorize(method);
+        const form = body instanceof FormData;
+        const response = await request(`https://api.telegram.org/bot${token}/${method}`, {
+          method: 'POST', ...(form ? {} : { headers: { 'content-type': 'application/json' } }), body: form ? body : JSON.stringify(body),
+          signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(form ? 120_000 : 35_000)]),
+        });
+        let payload: any; try { payload = await response.json(); } catch { payload = undefined; }
+        return { status: response.status, payload };
+      },
+      async file(filePath: string, signal?: AbortSignal): Promise<Response> {
+        if (!/^[A-Za-z0-9_./-]{1,512}$/.test(filePath) || filePath.split('/').includes('..')) throw new TelegramDeliveryError('failed', 'Invalid Telegram file path');
+        await authorize('getFile');
+        return request(`https://api.telegram.org/file/bot${token}/${filePath}`, { method: 'GET', signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(120_000)]) });
+      },
+    },
   };
 }

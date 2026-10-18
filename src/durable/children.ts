@@ -10,6 +10,8 @@ import { ChildArtifacts } from './child-artifacts.js';
 import { createChildSupervisor } from './child-supervisor.js';
 import { CHILD_RETENTION_MS, CHILD_TIMEOUT_MS, boundedChildText, type ChildManifest, type ChildOutcome } from './child-contracts.js';
 import { textToolResult, type NativeBundle } from './registry.js';
+import { sourceInAuthority } from './authority.js';
+import { chatIdOf } from './surface.js';
 
 const hash=(...parts:unknown[])=>createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 type JobStatus='queued'|'running'|ChildOutcome['status'];
@@ -39,8 +41,8 @@ export function createNativeChildren(options:{config:NativeConfig;host:()=>Durab
   const value=await tx.doc(Bindings,host().runtime.root.id);
   if(value.epochs[String(value.epoch)]!==cid)throw new Error('Child launch requires current conversation authority');
   const sources=Object.values(value.sources).filter(s=>s.conversationId===cid&&!s.cancelled);
-  if(!sources.length||sources.some(s=>s.principal!==options.config.principal||s.chatId!==options.config.transport.allowedUserId||s.threadId!==null||s.envelope.instance!==options.config.instanceId||s.envelope.bot!==String(options.config.transport.botId)))throw new Error('Child launch authority rejected');
-  return {conversationId:cid,epoch:value.epoch,principal:options.config.principal,chatId:options.config.transport.allowedUserId,threadId:null,instance:options.config.instanceId,bot:String(options.config.transport.botId)};
+  if(!sources.length||sources.some(s=>!sourceInAuthority(options.config,s)||s.envelope.instance!==options.config.instanceId||s.envelope.bot!==String(options.config.transport.botId)))throw new Error('Child launch authority rejected');
+  return {conversationId:cid,epoch:value.epoch,principal:options.config.principal,chatId:chatIdOf(options.config),threadId:null,instance:options.config.instanceId,bot:String(options.config.transport.botId)};
  }
  // The caller holds the batch control lease. A settled native task cannot resume;
  // reconcile its missing bridge outcome only after proving the writer has stopped.

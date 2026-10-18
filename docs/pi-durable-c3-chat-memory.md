@@ -71,7 +71,9 @@ configuration. This branch supplies validation-only CI and does not activate a
 production service.
 
 Stop the runtime before native inspection. The normal private configuration
-selects the same principal-scoped history resolver used by search:
+selects the same principal-scoped history resolver used by search. Broker
+configurations also require the administrator-reviewed `PI_DURABLE_CONFIG_SHA256`
+pin, as described in the [foundation guide](pi-durable-c2-foundation.md).
 
 ```sh
 PI_DURABLE_CONFIG=/absolute/private/native-instance.json npm run inspect

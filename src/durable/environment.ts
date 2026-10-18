@@ -16,7 +16,7 @@ export function nativeMemoryEnvironment(config: NativeConfig): NodeJS.ProcessEnv
     PI_TELEGRAM_BRIDGE_SESSION_ROOTS: JSON.stringify(memory.legacySessionRoots),
     PI_TELEGRAM_MEMORY_RECALL: memory.recall,
     PI_TELEGRAM_MEMORY_SEMANTIC: memory.semantic,
-    PI_TELEGRAM_SESSION_ROUTING: 'off',
+    PI_TELEGRAM_SESSION_ROUTING: config.routing ? 'jev' : 'off',
     ...(memory.judgeKeyFile ? { PI_TELEGRAM_TYPESAFE_API_KEY_FILE: memory.judgeKeyFile } : {}),
     ...(memory.embeddingKeyFile ? { PI_TELEGRAM_OPENAI_API_KEY_FILE: memory.embeddingKeyFile } : {}),
   };

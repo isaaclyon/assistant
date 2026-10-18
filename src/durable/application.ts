@@ -11,10 +11,22 @@ import { loadNativeRegistry, type NativeBundle } from './registry.js';
 import { createNativeControls, NativePreferences } from './controls.js';
 import { createNativeTelegramTransport } from './transport.js';
 import { assertNativeControl, assertNativeEnvelope, bridgeTelegram, UiRejectedError, type NativeUiController, type RawTransport } from './telegram-bridge.js';
-import { nativeMemoryBinding } from './authority.js';
+import { nativeBinding, nativeMemoryBinding, sourceInAuthority } from './authority.js';
+import { requireProfilePolicy } from './profiles.js';
+import { actorOf, chatIdOf } from './surface.js';
+import { createGroupNew } from './group-new.js';
 import { nativeMemoryEnvironment } from './environment.js';
 import { confirmationPresentation, formatDiagnostics, type DiagnosticSection } from './telegram-ui.js';
-import { isNativeMemoryProfile, type NativeConfig } from './config.js';
+import { join, resolve } from 'node:path';
+import { lstat, readFile, realpath } from 'node:fs/promises';
+import { createTypeSafeJudge, TYPESAFE_API_KEY_FILE_ENV, type SemanticJudge } from '../semantic-judge.js';
+import { createNativeConversationRouter } from './routing.js';
+import { createMediaRetention } from './media-retention.js';
+import { createMediaArtifactStore, type NativeImageProcessor } from './media-artifacts.js';
+import { assertMediaAttachments, createAlbumJournal, createMediaIngest, createNativeInputAdapter, type MediaIngest } from './media-ingest.js';
+import { createMediaSender, createNativeMediaOutbound, type NativeMediaOutbound } from './media-outbound.js';
+import { MediaDeliveryError, type MediaPort } from './media-transport.js';
+import type { NativeConfig } from './config.js';
 
 export interface NativeApplicationOptions {
  browserServices?:import('./browser.js').NativeBrowserServices;
@@ -28,6 +40,8 @@ export interface NativeApplicationOptions {
  providerStallTimeoutMs?:number;
  coordinator?:Omit<Parameters<typeof import('./coordinator.js')['startNativeJobsCoordinator']>[1], 'logger'>;
  transport?:RawTransport;
+ routingJudge?:SemanticJudge;
+ mediaImages?:NativeImageProcessor;
 }
 /** Store identity travels with the Harness, so citation locators survive moving a backup. */
 export const NativeIdentity=defineDoc({kind:'bridge.identity',version:1,scope:'conversation',history:'latest',fork:'initial',initial:()=>({storeId:''})});
@@ -36,24 +50,21 @@ const confirmationKey=(cid:ConversationId,id:string)=>createHash('sha256').updat
 /** Composition for a dedicated native instance; domain modules load only after selection validation. */
 export async function createNativeApplication(config:NativeConfig,options:NativeApplicationOptions) {
  await loadCapabilityProfile(config.resourceRoot,config.capabilityProfile);
- const enabled=isNativeMemoryProfile(config.capabilityProfile);
- const childrenEnabled=config.capabilityProfile==='durable-jobs-children-test';
- const coordinatorEnabled=['durable-jobs-coordinator-test','durable-jobs-schedules-test','durable-jobs-children-test'].includes(config.capabilityProfile);
- const jobsEnabled=config.capabilityProfile==='durable-jobs-test'||coordinatorEnabled;
- if(config.jobsRole!==(coordinatorEnabled?'coordinator':jobsEnabled?'recipient':'disabled'))throw new Error('jobsRole must match the selected native profile');
+ const policy=requireProfilePolicy(config.capabilityProfile);
+ if(!(policy.principals as readonly string[]).includes(config.principal))throw new Error('The selected native profile does not permit this principal');
+ const enabled=policy.memory!=='none';
+ const canonicalMemory=policy.memory==='canonical';
+ const childrenEnabled=policy.children;
+ const coordinatorEnabled=config.jobsRole==='coordinator';
+ const jobsEnabled=config.jobsRole!=='disabled';
+ if(!(policy.jobsRoles as readonly string[]).includes(config.jobsRole))throw new Error('jobsRole must match the selected native profile');
  if(coordinatorEnabled!==!!config.coordinator)throw new Error('Coordinator configuration must match the selected native profile');
- if((['durable-jobs-schedules-test','durable-jobs-children-test'].includes(config.capabilityProfile))!==!!config.coordinator?.schedules)throw new Error('Schedule configuration must match the selected native profile');
- const parityEnabled=config.capabilityProfile==='durable-parity-test'||jobsEnabled;
- const providerEnabled=config.capabilityProfile==='durable-provider-test'||parityEnabled;
- const browserEnabled=config.capabilityProfile==='durable-browser-test'||providerEnabled;
- const mutationsEnabled=config.capabilityProfile==='durable-mutations-test'||browserEnabled;
- const placesEnabled=config.capabilityProfile==='durable-places-test'||mutationsEnabled;
- if(placesEnabled&&config.principal!=='isaac')throw new Error('Places profile requires the Isaac principal');
- const cliEnabled=config.capabilityProfile==='durable-cli-integrations-test'||placesEnabled;
- const googleEnabled=config.capabilityProfile==='durable-read-integrations-test'||cliEnabled;
- const generalEnabled=config.capabilityProfile==='durable-tools-test'||googleEnabled;
+ if(coordinatorEnabled&&(policy.schedules==='required'&&!config.coordinator?.schedules||policy.schedules==='forbidden'&&config.coordinator?.schedules))throw new Error('Schedule configuration must match the selected native profile');
+ if(!!config.group!==(policy.surface==='group'))throw new Error('Surface configuration must match the selected native profile');
+ const parityEnabled=policy.parity,providerEnabled=policy.provider,browserEnabled=policy.browser,mutationsEnabled=policy.mutations,placesEnabled=policy.places;
+ const cliEnabled=policy.cli,googleEnabled=policy.google,generalEnabled=policy.general;
  if(googleEnabled&&!config.google)throw new Error('Google reads require explicit instance configuration');
- if(enabled&&(!config.memory||config.principal==='engineering'))throw new Error('Chat-memory profile requires scoped memory configuration');
+ if(enabled&&(!config.memory||(config.principal==='engineering')!==(policy.memory==='history')))throw new Error('Chat-memory profile requires scoped memory configuration');
  const provider=options.provider??await createNativeProvider({credentialPath:config.credentialPath,settingsPath:config.settingsPath,account:config.account});
  let resources:Awaited<ReturnType<typeof loadNativeRegistry>>|undefined;
  let host:DurableHost|undefined;
@@ -83,6 +94,14 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  let browser:ReturnType<typeof import('./browser.js')['createNativeBrowser']>|undefined;
  let browserGuard:ReturnType<typeof import('./browser-environment.js')['createNativeBrowserGate']>|undefined;
  let unbindBrowser:(()=>void)|undefined;
+ let mediaIngest:MediaIngest|undefined;
+ let mediaJournal:ReturnType<typeof createAlbumJournal>|undefined;
+ let mediaOutbound:NativeMediaOutbound|undefined;
+ let mediaInput:import('./ingress.js').InputAdapter|undefined;
+ let mediaStore:ReturnType<typeof createMediaArtifactStore>|undefined;
+ let mediaOutStore:ReturnType<typeof createMediaArtifactStore>|undefined;
+ let mediaRetention:ReturnType<typeof createMediaRetention>|undefined;
+ let mediaSender:ReturnType<typeof createMediaSender>|undefined;
  let debugEnabled=false;
  const debugCommands=new Set<string>();
  let debugQueued=false;
@@ -97,7 +116,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   if(!failures.length)unbindBrowser?.();
   if(failures.length)throw new AggregateError(failures,'Native application cleanup failed');
  })();
- const target={chatId:config.transport.allowedUserId};
+ const target={chatId:chatIdOf(config)};
  const requireHost=()=>{if(!host)throw new Error('Host authority is not bound');return host;};
  let transport:ReturnType<typeof bridgeTelegram>|undefined;
  const debug=(title:string,value:unknown)=>{
@@ -111,7 +130,30 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    if(debugEnabled&&transport)void transport.presenter.present(target,formatDiagnostics(sections)).catch(()=>{});
   });
  };
+ const raw=options.transport??createNativeTelegramTransport(config.transport.mode==='ordinary'?{...config.transport,cwd:config.workspaceCwd}:{mode:'restricted',socketPath:config.transport.socketPath,botId:config.transport.botId,allowedUserId:config.transport.allowedUserId});
  try {
+  if(policy.media){
+   const port:MediaPort=raw.media??{call:async()=>{throw new MediaDeliveryError('Telegram media port unavailable.',true);},file:async()=>{throw new MediaDeliveryError('Telegram media port unavailable.',true);}};
+   mediaStore=createMediaArtifactStore({root:join(config.stateDir,'media')});
+   const images=options.mediaImages??(await import('./media-images.js')).createNativeImageProcessor();
+   mediaInput=createNativeInputAdapter(mediaStore,{images});
+   const adapter=mediaInput;
+   mediaJournal=createAlbumJournal(join(config.stateDir,'media-pending'));
+   mediaIngest=createMediaIngest({identity:{instance:config.instanceId,principal:config.principal,bot:String(config.transport.botId)},port,store:mediaStore,journal:mediaJournal,
+    authorize:record=>record.chatId===target.chatId&&(config.group?!!record.actor&&config.group.actors.some(actor=>actor.id===record.actor!.id&&actor.label===record.actor!.label):!record.actor),
+    validateInput:async envelope=>{await adapter(envelope,envelope.content);}});
+   mediaOutStore=createMediaArtifactStore({root:join(config.stateDir,'media-out'),limits:{maxFileBytes:50*1024*1024}});
+   mediaOutbound=createNativeMediaOutbound({runtime:()=>requireHost().runtime,store:mediaOutStore,authorize:async(path,cid)=>{
+    const current=requireHost();
+    if(!await current.runtime.root.commit(tx=>nativeBinding(tx,current,config,cid),context))throw new Error('Current native authority rejected');
+    const selected=resolve(config.workspaceCwd,path),info=await lstat(selected);
+    if(!info.isFile()||info.isSymbolicLink())throw new Error('Attachment source must be a regular file');
+    const canonical=await realpath(selected);
+    if(!(await lstat(canonical)).isFile())throw new Error('Attachment source must be a regular file');
+    return canonical;
+   }});
+   mediaSender=createMediaSender(port,destination=>destination.chatId===target.chatId&&destination.threadId===undefined);
+  }
   if(childrenEnabled){const {createNativeChildren}=await import('./children.js');children=createNativeChildren({config,host:requireHost,provider,...(options.childSupervisor?{supervisor:options.childSupervisor}:{})});}
   if(jobsEnabled){
    const {reconcileJobHandoffs}=await import('./job-admission.js');
@@ -129,7 +171,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   }
   if(generalEnabled){
    const tools=await import('./general-tools.js');
-   generalFactory=tools.createGeneralToolsBundle;
+   generalFactory=()=>{const bundle=tools.createGeneralToolsBundle();return mediaOutbound?{...bundle,tools:[...bundle.tools,...mediaOutbound.bundle.tools]}:bundle;};
    publicWebFactory=(await import('./public-web.js')).createPublicWebBundle;
    if(parityEnabled){
     const {createWebRunBundle}=await import('./web-run.js');
@@ -155,7 +197,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    const [memory,markdown,searching,recall,contexts,history,usage]=await Promise.all([
     import('./memory.js'),import('./memory-executor.js'),import('./search.js'),import('./recall.js'),import('./context.js'),import('./history-native.js'),import('../memory-usage.js'),
    ]);
-   memoryModule=memory;
+   if(canonicalMemory)memoryModule=memory;
    const selected=config.memory!;
    const env=nativeMemoryEnvironment(config);
    const view=markdown.defaultMemoryView(config.principal);
@@ -163,6 +205,9 @@ export async function createNativeApplication(config:NativeConfig,options:Native
     vaultRoot:selected.vaultRoot,resourceRoot:config.resourceRoot,legacySessionRoots:selected.legacySessionRoots,env,stores:()=>store?[store]:[]});
    const service=search;
    searchFactory=()=>({...searching.createSearchBundle(service),close:async()=>{}});
+   // History-only profiles stop after session search and the history adapter.
+   initializeHistory=(storeId)=>{store=history.createHarnessHistoryStore(requireHost().runtime,{instanceId:config.instanceId,principal:config.principal,storeId});};
+   if(canonicalMemory){
    const domain=memory.createCanonicalMemoryDomain({env,cwd:config.workspaceCwd,
     findDuplicates:async draft=>{
      const page=await service.memorySearch({query:`${draft.title}\n${draft.body}`.slice(0,512),limit:5});
@@ -180,19 +225,18 @@ export async function createNativeApplication(config:NativeConfig,options:Native
      const state=await api.snapshot(Bindings,current.runtime.root.id,ctx);
      if(state?.epochs[String(state.epoch)]!==api.conversationId)return undefined;
      const sources=Object.values(state.sources).filter(source=>source.conversationId===api.conversationId&&!source.cancelled);
-     if(!sources.length||sources.some(source=>source.principal!==config.principal||source.chatId!==target.chatId||source.threadId!==null))return undefined;
+     if(!sources.length||!sources.every(source=>sourceInAuthority(config,source)))return undefined;
      return {principalId:config.principal,memoryView:view.memoryView,env,stateDir:config.stateDir,vaultRoot:selected.vaultRoot,resourceRoot:config.resourceRoot,
       sessionRoots:selected.legacySessionRoots,rootConversationId:current.runtime.root.id,timeZone:selected.timeZone};
     },
    });
-   // Keep host construction lazy for the history adapter.
-   initializeHistory=(storeId)=>{store=history.createHarnessHistoryStore(requireHost().runtime,{instanceId:config.instanceId,principal:config.principal,storeId});};
    prepareIntent=input=>markdown.prepareMemoryIntent({root:selected.vaultRoot,forbiddenRoots:[config.resourceRoot,config.workspaceCwd],view},input);
    memoryDomain=domain;
+   }
   }
   const operations=createMemoryOperations({...(executor?{executor}:{}),authority:{check:async(operation,mode,tx)=>{
    const current=requireHost();
-   if(!enabled||!config.memory||operation.binding.principal!==config.principal||operation.binding.target.chatId!==String(target.chatId)||operation.binding.target.threadId!==null)return false;
+   if(!canonicalMemory||!config.memory||operation.binding.principal!==config.principal||operation.binding.target.chatId!==String(target.chatId)||operation.binding.target.threadId!==null)return false;
    // Reconciliation may inspect an old epoch's own receipt; it cannot repeat Markdown.
    if(mode==='reconcile')return true;
    const state=await tx.doc(Bindings,current.runtime.root.id);
@@ -201,7 +245,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    const binding=await nativeMemoryBinding(tx,current,config,cid);
    return !!binding&&binding.epoch===operation.binding.epoch;
   }}});
-  if(enabled){
+  if(canonicalMemory){
    memoryTool=memoryModule!.createMemoryTool({operations,handler:{name:executor!.name,version:executor!.version},domain:memoryDomain!,prepareIntent:prepareIntent!,
     resolveBinding:(tx,cid)=>nativeMemoryBinding(tx,requireHost(),config,cid),
     presenter:{present:async({conversationId,operation,preview})=>{
@@ -222,15 +266,15 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    if(mutationsEnabled&&name==='google-mutations')return {...calendar!.bundle(),close:async()=>{}};
    if(googleEnabled&&!mutationsEnabled&&name==='google-reads')return googleFactory!();
    if(placesEnabled&&name==='places')return {...places!.bundle(),close:async()=>{}}; // Application owns the shared domain lifetime across reloads.
-   if(name==='memory')return {name,version:1,tools:[memoryTool!],close:async()=>{}};
+   if(canonicalMemory&&name==='memory')return {name,version:1,tools:[memoryTool!],close:async()=>{}};
    if(name==='search')return searchFactory!();
-   if(name==='core-memory')return contextFactory!();
+   if(canonicalMemory&&name==='core-memory')return contextFactory!();
    if(['reload','restart','skills','debug',...(providerEnabled?['fast','usage']:[])].includes(name))return {name,version:1,tools:[],close:async()=>{}};
    throw new Error('Unknown native bundle');
   };
   const load=()=>loadNativeRegistry({resourceRoot:config.resourceRoot,profileId:config.capabilityProfile,bundleContext:{bundle},...(browserGuard?{executionGuard:browserGuard.run}:{}),authorize:async(_name,api,ctx)=>{
-   const binding=await api.commit(tx=>nativeMemoryBinding(tx,requireHost(),config,api.conversationId),ctx);
-   if(!binding)throw new Error('Current memory authority rejected');
+   const binding=await api.commit(tx=>nativeBinding(tx,requireHost(),config,api.conversationId),ctx);
+   if(!binding)throw new Error('Current native authority rejected');
   }});
   const install=(selected:Awaited<ReturnType<typeof load>>)=>selected.registry.install(defineExtension({name:'native-memory-operation-foundation',tasks:[operations.task]}));
   resources=await load();install(resources);
@@ -268,6 +312,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
      const status=await controls.status();
      switch(request.name){
       case 'menu':return {view:{kind:'menu',state:{model:status.modelLabel,thinking:status.thinking,busy:status.busy,...(placesEnabled?{places:true}:{})}}};
+      case 'deploy':throw new UiRejectedError('Use /deploy as a command.');
       case 'place_rankings':if(!places)throw new UiRejectedError('Places is unavailable.');return places.command(request);
       case 'model':return {view:{kind:'models',choices:controls.models(),current:status.model,page:Number(request.arg??0)}};
       case 'thinking':return {view:{kind:'thinking',levels:await controls.thinkingLevels(),current:status.thinking}};
@@ -284,6 +329,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
      }
     }catch(error){if(error instanceof HostControlRejectedError)throw new UiRejectedError(error.message);throw error;}
    },
+   ...(config.group?{groupNew:createGroupNew({config,host:requireHost,present:async(destination,presentation)=>{if(!transport)throw new Error('Telegram presenter unavailable');return transport.presenter.present(destination,presentation);}})}:{}),
    ...(calendar?{calendar:(request)=>calendar!.callback(request)}:{}),
    ...(places?{places:(request)=>places!.callback(request),placesInput:(request)=>places!.input(request)}: {}),
    confirmation:async request=>{
@@ -293,7 +339,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
      const state=await tx.doc(Bindings,current.runtime.root.id),cid=state.epochs[String(state.epoch)];
      if(cid===undefined)return undefined;
      const binding=await nativeMemoryBinding(tx,current,config,cid);
-     if(!binding||request.actorId!==config.transport.allowedUserId||request.principal!==binding.principal||String(request.target.chatId)!==binding.target.chatId||request.target.threadId!==undefined)return undefined;
+     if(!binding||!actorOf(config,request.actorId)||request.principal!==binding.principal||String(request.target.chatId)!==binding.target.chatId||request.target.threadId!==undefined)return undefined;
      const {MemoryOperations}=await import('./operations.js');
      const op=(await tx.doc(MemoryOperations,cid)).operations.find(item=>confirmationKey(cid,item.id)===request.key);
      if(!op)return undefined;
@@ -307,10 +353,12 @@ export async function createNativeApplication(config:NativeConfig,options:Native
     return {view:{kind:'text',text:memoryModule.memoryOutcomeMessage(op)},toast:'Recorded'};
    },
   };
-  const raw=options.transport??createNativeTelegramTransport(config.transport.mode==='ordinary'?{...config.transport,cwd:config.workspaceCwd}:{mode:'restricted',socketPath:config.transport.socketPath,botId:config.transport.botId,allowedUserId:config.transport.allowedUserId});
-  transport=bridgeTelegram(config,raw,options.onTransportFailure,{...(enabled?{ui}:{}),commands:enabled?['menu','model','thinking','new','abort','stop','compact','reload','restart','skills','debug',...(providerEnabled?['fast','usage']:[]),...(placesEnabled?['place_rankings']:[])]:['new','abort','stop','compact']});
+  transport=bridgeTelegram(config,raw,options.onTransportFailure,{...(enabled?{ui}:{}),...(mediaIngest?{media:mediaIngest}:{}),commands:enabled?['menu','model','thinking','new','abort','stop','compact','reload','restart','skills','debug',...(providerEnabled?['fast','usage']:[]),...(placesEnabled?['place_rankings']:[]),...(policy.commands??[])]:['new','abort','stop','compact'],...(policy.commands?.includes('deploy')?{deployPrompt:async()=>{
+   const path=join(config.resourceRoot,'.pi/prompts/deploy.md');
+   return (await readFile(path,'utf8')).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/,'').trim();
+  }}:{})});
   const bridge=transport;
-  const signature=createHash('sha256').update(JSON.stringify({registry:resources.signature,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,memory:config.memory??null,...(jobsEnabled?{jobs:{role:config.jobsRole,stateDir:config.stateDir,...(coordinatorEnabled?{coordinator:config.coordinator}:{})}}:{}),...(googleEnabled?{google:config.google}:{} ),...(cliEnabled?{cli:config.cli??{}}:{}),...(browserEnabled?{browser:config.browser}:{}),...(childrenEnabled?{children:{workspaceCwd:config.workspaceCwd,resourceRoot:config.resourceRoot,account:config.account,credentialPath:config.credentialPath,settingsPath:config.settingsPath}}:{})})).digest('hex');
+  const signature=createHash('sha256').update(JSON.stringify({registry:resources.signature,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,...(config.group?{group:config.group}:{}),...(config.routing?{routing:config.routing}:{}),memory:config.memory??null,...(jobsEnabled?{jobs:{role:config.jobsRole,stateDir:config.stateDir,...(coordinatorEnabled?{coordinator:config.coordinator}:{})}}:{}),...(googleEnabled?{google:config.google}:{} ),...(cliEnabled?{cli:config.cli??{}}:{}),...(browserEnabled?{browser:config.browser}:{}),...(childrenEnabled?{children:{workspaceCwd:config.workspaceCwd,resourceRoot:config.resourceRoot,account:config.account,credentialPath:config.credentialPath,settingsPath:config.settingsPath}}:{})})).digest('hex');
   // The reader delegates to the active registry after a safe idle reload.
   const registry={snapshot:()=>resources!.registry.snapshot(),subscribe:(listener:()=>void)=>{registryListeners.add(listener);return()=>{registryListeners.delete(listener);};}};
   host=await DurableHost.create({stateDir:config.historyDir,inboxPath:config.inboxPath,models:provider.models,registry,
@@ -320,18 +368,22 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    onEpochChange:async(tx,previous,nextEpoch)=>{browser?.cancel();for(const id of previous){if(memoryModule)await memoryModule.invalidateMemoryState(tx,operations,id,String(nextEpoch),'new');else await operations.invalidate(tx,id,String(nextEpoch),'new');}},
    onConversation:async cid=>{await visible?.attach(cid);},
    ...(fast?{beforeAdmission:fast.settle}:{}),
+   ...(mediaInput?{inputAdapter:mediaInput}:{}),
+   ...(mediaOutbound?{recoveryPreflight:async()=>{await mediaRetention!.reconcile(true);},reconcileOutputs:async()=>{await mediaOutbound!.reconcile(mediaSender!,async(destination,text)=>{await raw.deliver(destination,text);});await mediaRetention!.reconcile();}}:{}),
    ...((reconcileJobs||children)?{reconcileSources:async(runtime:import('./ingress.js').IngressRuntime)=>{await reconcileJobs?.(runtime);await children?.cleanup();}}:{}),
    ...(config.idleHours>0?{idleMs:config.idleHours*3_600_000}:{}),
    transport:{start:bridge.start,stop:async()=>{await Promise.all([bridge.stop(),places?.close(),calendar?.close(),browser?.close()]);},sendFinal:async request=>{await visible?.finish();return bridge.sendFinal(request);}},
-   policy:envelope=>assertNativeEnvelope(config,envelope),controlPolicy:control=>assertNativeControl(config,control),onFatal:options.onFatal,
+   policy:async(envelope,phase)=>{assertNativeEnvelope(config,envelope);if(mediaStore){if(phase==='recovery')await mediaRetention!.validate(envelope);else await assertMediaAttachments(envelope,mediaStore);}},controlPolicy:control=>assertNativeControl(config,control),onFatal:options.onFatal,
   });
   const runtime=host;
+  if(mediaStore&&mediaOutStore)mediaRetention=createMediaRetention({runtime:()=>runtime.runtime,inbound:mediaStore,outbound:mediaOutStore,inboundPending:async()=>!!(await mediaJournal!.list()).length});
+  if(config.routing)runtime.runtime.routeHuman=createNativeConversationRouter({runtime:runtime.runtime,judge:options.routingJudge??createTypeSafeJudge({env:{[TYPESAFE_API_KEY_FILE_ENV]:config.routing.judgeKeyFile},timeoutMs:3000,maxAttempts:1}),onError:()=>debug('conversation routing','Judgment unavailable; current conversation kept.')});
   const storeId=await runtime.runtime.root.commit(async tx=>{const identity=await tx.doc(NativeIdentity,runtime.runtime.root.id);identity.storeId||=randomUUID();return identity.storeId;},context);
   initializeHistory?.(storeId);
   await controls.restore();
-  if(enabled){const {createVisibleEvents}=await import('./visible-events.js');visible=createVisibleEvents({host:requireHost,config,stream:bridge.stream,debug});}
+  if(enabled){const {createVisibleEvents}=await import('./visible-events.js');visible=createVisibleEvents({host:requireHost,config,stream:bridge.stream,activity:bridge.activity,cwd:config.workspaceCwd,debug});}
   const lintMemory=async()=>{
-   if(!search||!config.memory)throw new Error('Memory lint requires the chat-memory profile');
+   if(!canonicalMemory||!search||!config.memory)throw new Error('Memory lint requires the chat-memory profile');
    const {executeMemoryOperation}=await import('../../.pi/skills/personal-memory/scripts/memory.mjs');
    return executeMemoryOperation('lint',{}, {env:nativeMemoryEnvironment(config),cwd:config.workspaceCwd,sourceResolver:search.provenanceResolver});
   };
@@ -345,6 +397,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   };
   return {host:runtime,operations,controls,search,lintMemory,inspectJobs,inspectChildren:async()=>children?.inspect(),start:async()=>{
    try{
+    await runtime.validateRecovery();
     if(coordinatorEnabled&&!coordinator){
      const module=await import('./coordinator.js');
      const diagnostic=()=>debug('durable coordinator',{event:'diagnostic'});

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { profilePolicy } from './profiles.js';
 import { join } from 'node:path';
 import { StringEnum, Type, validateToolArguments } from '@earendil-works/pi-ai';
 import { defineDoc, defineTool, type ConversationId, type Tx } from '@earendil-works/pi-durable';
@@ -104,7 +105,7 @@ const escapeError = (error: unknown): string => error instanceof PlacesServiceEr
 
 export function createNativePlaces(options: NativePlacesOptions) {
   const { config } = options;
-  const mutationsEnabled = ['durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test','durable-jobs-children-test'].includes(config.capabilityProfile);
+  const mutationsEnabled = profilePolicy(config.capabilityProfile)?.mutations === true;
   const description = mutationsEnabled ? PLACES_TOOL_DESCRIPTION : "Maintain the user's private restaurant, coffee-shop, bar, and other place rankings. Supports categories, adding a place, durable pairwise comparisons, resume, and paginated rankings. Deleting, undoing, cancelling and confirmation requests are unavailable in this migration slice.";
   const now = options.now ?? Date.now;
   const randomKey = options.randomKey ?? (() => randomUUID().replaceAll('-', ''));

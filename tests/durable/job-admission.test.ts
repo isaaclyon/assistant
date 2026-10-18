@@ -10,6 +10,8 @@ import { Bindings, accept, context, fingerprint, sourceKey, type SourceEnvelope 
 import { JobAdmissions, inspectJobHandoffs, jobEnvelope, reconcileJobHandoffs } from '../../src/durable/job-admission.js';
 import type { FinalRequest } from '../../src/durable/delivery.js';
 import { MAX_HANDOFF_PROMPT_BYTES, cancelJobHandoff, enqueueJobHandoff } from '../../src/job-handoff.js';
+import { MediaOutbox } from '../../src/durable/media-outbound.js';
+import { inspectScheduledCompletion } from '../../src/durable/canary-proof.js';
 
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -72,6 +74,15 @@ it('admits an enqueued job once, completes the v1 file on admission, and records
   expect(faux.state.callCount).toBe(1); expect(sent.map(s => s.text)).toEqual(['DONE']);
   expect(sent[0]!.target).toEqual(TARGET);
   expect(await list(d, 'completed')).toEqual([`${dispatchId}.json`]);
+  expect(await inspectScheduledCompletion(h.runtime,dispatchId)).toMatchObject({dispatchId,submissionId:receipt.submissionId,outcome:'done',createdAt:NOW.getTime()});
+  expect(faux.state.callCount).toBe(1);
+  for(const status of ['queued','sending','uncertain'] as const){
+   await h.runtime.root.commit(async tx=>{(await tx.doc(MediaOutbox,h.runtime.root.id)).items['synthetic-media']={files:[{status,notice:'done'} as never]};},context);
+   await expect(inspectScheduledCompletion(h.runtime,dispatchId)).rejects.toThrow(/uncertain media/);
+  }
+  await h.runtime.root.commit(async tx=>{delete (await tx.doc(MediaOutbox,h.runtime.root.id)).items['synthetic-media'];},context);
+  await h.runtime.root.commit(async tx=>{(await tx.doc(JobAdmissions,h.runtime.root.id)).receipts[dispatchId]!.run='pending';},context);
+  await expect(inspectScheduledCompletion(h.runtime,dispatchId)).rejects.toThrow(/completed native admission/);
 });
 
 it('admits a maximum-size prompt whose JSON escaping expands the file', async () => {

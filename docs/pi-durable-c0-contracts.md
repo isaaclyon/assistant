@@ -267,6 +267,24 @@ All names below are under `scripts/`; existing patch/source guards remain until 
 | patch-telegram-thinking-level.mjs | Support max thinking level; provider validation/menu | C1/C3; `telegram-thinking-level.test.ts` |
 | patch-telegram-trusted-transport.mjs | Broker fetch and no direct fallback; restricted transport | C1/C2; `telegram-trusted-transport.test.ts` |
 
+C6 replacement evidence (`feat/durable-c6`). Native code has no legacy postinstall patches. The retained legacy scripts and source/version guards remain necessary for old releases until C7 retirement. The cases below test behavior, rather than inferring replacement from a dependency pin. Final integrated release checks and Linux rehearsal results appear in the [C6 guide](pi-durable-c6-rehearsal.md#validation-scope).
+
+| Patch | Native owner and behavior evidence (`tests/durable/`) |
+| --- | --- |
+| codex-conversion | `provider.ts` selects explicit per-instance settings and native Responses serialization. `provider-gpt61.test.ts` exercises the actual SDK catalog and fake-OAuth request path: off/minimal rejected, high/max serialized. SDK 1.3.0 supplies a 500K context window; the legacy backport used 272K. Legacy Responses Lite/context wrappers are unnecessary in this native protocol. |
+| tool-activity | `tool-activity.ts`, `visible-events.ts`, `telegram-bridge.ts`: friendly private-safe labels and one-second edits. `tool-activity.test.ts` covers labels/cadence; `visible-events.test.ts` covers suppression and cleanup; `media-application.test.ts` observes actual native tool events through the application. |
+| new-session-dedup | Durable command receipts replace the old TTL cache. `new-session-parity.test.ts` replays the same actual Telegram `/new` before and after restart and proves one epoch change. `host.test.ts` retains busy rejection across restart. |
+| agent-settled | Native submission settlement and `delivery.ts` own final output. `provider-retry.test.ts` exercises actual Harness retries/stalls; `provider-fast.test.ts` proves one final destination and completed effects while pending preferences wait for settlement. |
+| subagent-target-scope | `children.ts` retains original conversation/epoch and target. `children.test.ts` covers reporting after parent idle/new; `children-application.test.ts` checks application authority and original-target delivery. |
+| model-menu-return | `telegram-bridge.test.ts`: model and thinking selection edit the pressed message back to the status menu. |
+| new-session-menu | `telegram-bridge.test.ts`: successful `/new` shows the menu; a rejected control does not. Household confirmation is actor/message/epoch-bound with a ten-minute expiry (`group-new.test.ts`). |
+| debug | `telegram-bridge.ts` and domain diagnostics: `telegram-bridge.test.ts` checks bounded redacted output at the originating target; `parity-diagnostics.test.ts` excludes private arguments. |
+| silent-veto | `delivery.ts` suppresses proactive `NO_REPLY`, while human literal `NO_REPLY` remains visible (`host.test.ts`). `visible-events.test.ts` suppresses proactive partials/activity, including child reports with scheduled jobs disabled. |
+| thinking-level | Provider validation and Telegram menus retain max. `provider.test.ts`, `provider-gpt61.test.ts` and `telegram-ui.test.ts` test supported levels and callback bounds; `telegram-bridge.test.ts` tests selection. |
+| trusted-transport | `transport.ts` uses the restricted broker protocol without direct fetch fallback. `transport.test.ts` exercises real IPC reconnect/replay and failed offset persistence. |
+
+Media acceptance uses immutable artifacts, actual native image blocks, verified document paths, durable album recovery and operation-owned upload receipts. Unsupported voice fails visibly because the legacy deployment has no transcription provider. Frozen-copy migration remains held by design. Disposable Linux evidence and live provider/browser/operator acceptance have separate limits; see the C6 guide.
+
 ## ADR disposition
 
 Keep domain facts and authority from existing ADRs. Successors must describe implemented changes, not preemptively mark this proposal accepted.

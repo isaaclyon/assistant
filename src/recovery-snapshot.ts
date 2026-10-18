@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { cp, lstat, mkdir, open, readdir, readFile, readlink, realpath, rename, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { readMigrationJson } from "./jobs-migration.js";
+import { releaseFromEntrypoint } from "./runtime-entrypoint.js";
 
 const unitPattern = /^pi-telegram-bridge(?:-[a-z0-9-]{1,64})?\.service$/;
 const excludedState = new Set(["deploy.lock", ".recovery-maintenance"]);
@@ -130,8 +131,9 @@ export async function captureRecoverySnapshot(options: {
     const match = /^ExecStart=("(?:\\.|[^"\\])*") ("(?:\\.|[^"\\])*")$/m.exec(raw);
     if (!match) throw new Error("Cannot prove previous bridge binary path");
     const executable: unknown = JSON.parse(match[2]!);
-    if (typeof executable !== "string" || !executable.endsWith("/dist/src/daemon.js")) throw new Error("Invalid previous bridge binary");
-    const release = dirname(dirname(dirname(executable)));
+    if (typeof executable !== "string") throw new Error("Invalid previous bridge binary");
+    const { release, runtime } = releaseFromEntrypoint(executable);
+    if (runtime === "broker") throw new Error("Invalid previous bridge binary");
     const sha = relative(releaseRoot, release);
     if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error("Previous bridge binary is not an immutable release");
     const daemon = await lstat(executable);

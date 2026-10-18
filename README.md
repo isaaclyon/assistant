@@ -1,6 +1,6 @@
 # Pi Telegram Bridge Host
 
-> This `feat/durable-c5-children` branch extends the accepted native chat-and-memory
+> This durable migration branch extends the accepted native chat-and-memory
 > MVP with general tools, bounded public web, typed Google reads and the YNAB/
 > editable Messages-link skills, plus direct private place rankings, guarded Calendar/places changes and protected
 > browser operations, native fast-mode/subscription-usage controls, hosted web
@@ -14,6 +14,13 @@
 > checkers, loopback webhooks, temporary watches and scoped schedule helpers.
 > The [child guide](docs/pi-durable-c5-children.md) adds process-owned child
 > Harnesses, original-conversation reporting and temporary-store retirement.
+> The [C6 guide](docs/pi-durable-c6-rehearsal.md) covers the four full durable
+> profiles (`durable-personal-isaac`, `durable-personal-emma`,
+> `durable-household-shared`, `durable-builder`), the held frozen-copy migration
+> inventory, the immutable release builder and explicit staged activation. C6 is
+> in progress: the integrated check, build and disposable Linux rehearsal pass.
+> Live integration acceptance remains open.
+> No production rollout has run (C7).
 > Root scripts build and test `src/durable/` and shared domain contracts. C1
 > remains prototype evidence. The description below documents the legacy fleet.
 

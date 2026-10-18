@@ -2,7 +2,9 @@ import { mkdtemp, mkdir, writeFile, rm, chmod, symlink, realpath } from 'node:fs
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { loadNativeConfig } from '../../src/durable/config.js';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { loadNativeConfig, loadPinnedNativeConfig } from '../../src/durable/config.js';
 import { nativeMemoryEnvironment } from '../../src/durable/environment.js';
 const dirs: string[] = [];
 afterEach(async () => { await Promise.all(dirs.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
@@ -49,4 +51,16 @@ test('chat-memory selection requires explicit scoped paths and provider authoriz
 test('rejects symlinked configuration and broker options that allow direct fallback',async()=>{
  const f=await fixture(); const link=join(f.root,'link.json'); await symlink(f.path,link); await expect(loadNativeConfig(link)).rejects.toThrow(/regular/);
  (f.config.transport as any).tokenPath=join(f.root,'bot-token'); await f.save(); await expect(loadNativeConfig(f.path)).rejects.toThrow(/unknown field/);
+});
+test('a pinned configuration digest is enforced on every load and isolated broker use requires it',async()=>{
+ const f=await fixture(),pin=createHash('sha256').update(await readFile(f.path)).digest('hex');
+ await expect(loadNativeConfig(f.path,{expectedSha256:pin})).resolves.toMatchObject({instanceId:'test'});
+ await expect(loadPinnedNativeConfig(f.path,{PI_DURABLE_CONFIG_SHA256:pin})).resolves.toMatchObject({instanceId:'test'});
+ await expect(loadPinnedNativeConfig(f.path,{})).rejects.toThrow(/requires an administrator digest/);
+ await expect(loadPinnedNativeConfig(f.path,{PI_DURABLE_CONFIG_SHA256:'nope'})).rejects.toThrow(/Invalid pinned/);
+ // A runtime-owned rewrite that is still valid JSON changes the bytes and is refused.
+ f.config.account='rewritten-account'; await f.save();
+ await expect(loadNativeConfig(f.path,{expectedSha256:pin})).rejects.toThrow(/pinned administrator digest/);
+ await expect(loadPinnedNativeConfig(f.path,{PI_DURABLE_CONFIG_SHA256:pin})).rejects.toThrow(/pinned administrator digest/);
+ await expect(loadNativeConfig(f.path)).resolves.toMatchObject({account:'rewritten-account'});
 });

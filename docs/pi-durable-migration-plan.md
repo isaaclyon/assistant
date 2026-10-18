@@ -292,6 +292,19 @@ live/platform/migration acceptance remains separate.
 
 **Pass gate:** full capability matrix passes; no unresolved migration ambiguity is silently replayed; a complete offline rehearsal preserves references and accepted-work evidence; staged activation demonstrates an observed canary and deliberate advancement with mixed-fleet work accounted for; target Linux/systemd/broker acceptance passes; release checks and build pass.
 
+**C6 implementation status (draft `feat/durable-c6`; not accepted)**
+
+The pass gate above remains open. The integrated check passes with 1,362 tests, and the build passes. All four compiled-adapter Linux rehearsal modes pass. The items below have offline implementation and test evidence. Live integration acceptance remains a separate gate. Details and commands are in the [C6 guide](pi-durable-c6-rehearsal.md).
+
+- **Profiles:** `src/durable/profiles.ts` is the single policy table. It holds four full profiles (`durable-personal-isaac`, `durable-personal-emma`, `durable-household-shared`, `durable-builder`) and 14 compatibility profiles (foundation through `durable-jobs-children-test`). Only the full profiles accept Telegram media. The builder uses history-only memory (session search; no canonical memory notes, CRUD or core memory), no places and no Google, and owns `/deploy`, which submits a durable prompt through normal admission. Emma and household have no Google or places.
+- **Household group:** one configured group main chat with exact Isaac and Emma actors. Topics are not supported. `/new` needs a confirmation bound to the requester, one bot message and the conversation epoch.
+- **Routing and recall:** Jev conversation routing is an explicit `routing` setting with its own judge key file. It is independent of memory recall, and absence means off. Memory recall defaults to off.
+- **Media:** admitted input becomes an immutable private artifact. Photon validates, orients and bounds image blocks for the native model. The actual application tests verify images and host-verified document paths. Voice is refused visibly because no legacy transcription provider is configured. Album members are journaled before the update offset advances. `telegram_attach` sends through a retained effect ledger; unknown outcomes never repeat automatically. Artifact bytes retire seven days after settlement with pending/live/album protection. Source history and effect receipts remain durable.
+- **Migration inventory:** the frozen-copy tool preserves legacy evidence and holds it. It is not an executable legacy task importer, and the output never activates. Resolution of held work is a separate reviewed procedure before C7. Retained receipts and backups stay with the vault.
+- **Activation:** one instance changes per `stage-activate`. A first legacy transition requires a known empty inbox before holds, after quiescence and after selected asset migration. Units pin native configuration bytes for every restart. Preflight verifies every selected runtime/start-check/inspector/support entrypoint. A separate `stage-observe` checks scheduled native completion and a controlled restart before a later stage.
+
+The [C0 patch table](pi-durable-c0-contracts.md#install-patch-disposition) records replacement evidence for all eleven install patches. Media processor and application integration tests pass. Remaining C6 acceptance gaps include live provider, browser, CLI, broker and platform acceptance. Held legacy work needs separate reconciliation before activation. Production rollout remains C7.
+
 ### C7 — Production rollout and retirement
 
 **Deliverables and order**

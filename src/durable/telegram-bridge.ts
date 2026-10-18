@@ -1,13 +1,20 @@
 import type { NativeConfig } from './config.js';
 import { HostControlRejectedError, type HostControl, type HostTransport } from './host.js';
-import type { SourceEnvelope, Target } from './ingress.js';
+import type { SourceActor, SourceEnvelope, Target } from './ingress.js';
+import type { MediaIngest } from './media-ingest.js';
 import type { createNativeTelegramTransport, TelegramUpdate } from './transport.js';
 import { assertPresentation, clean, formatDiagnostics, modelMenu, parseCallbackData, parseCommandText, skillsList, statusMenu, thinkingMenu, unavailableText,
   type Buttons, type CallbackAction, type ControlCommand, type DiagnosticSection, type MenuState, type ModelChoice, type Presentation, type UiCommandName } from './telegram-ui.js';
 import { createPreviewStream } from './telegram-stream.js';
+import type { ToolActivityPort } from './tool-activity.js';
+import { TELEGRAM_NATIVE_MEDIA_LIMITS } from '@llblab/pi-telegram/durable';
+import { profilePolicy } from './profiles.js';
+import { actorOf, chatIdOf } from './surface.js';
 
+/** The ingest surface the bridge uses. The parent constructs it with the instance actor authorization. */
+export type NativeMediaIngest=Pick<MediaIngest,'receive'|'recover'|'collect'|'requeue'|'done'|'nextDueAt'>;
 export type RawTransport = Pick<ReturnType<typeof createNativeTelegramTransport>, 'start'|'stop'|'deliver'|'answerCallback'> &
-  Partial<Pick<ReturnType<typeof createNativeTelegramTransport>, 'present'|'edit'|'preview'>>;
+  Partial<Pick<ReturnType<typeof createNativeTelegramTransport>, 'present'|'edit'|'preview'|'media'>>;
 const object=(value:unknown):Record<string,unknown>|undefined=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:undefined;
 const integer=(value:unknown):value is number=>typeof value==='number'&&Number.isSafeInteger(value);
 
@@ -34,6 +41,11 @@ export interface NativeUiController {
   confirmation(request:UiConfirmationRequest):Promise<UiResult>;
   calendar?(request:UiOrigin&{messageId:number;key:string}):Promise<UiResult>;
   places?(request:UiOrigin&{messageId:number;key:string}):Promise<UiResult>;
+  /** Household group /new: durable per-actor confirmation. Only present on a group surface. */
+  groupNew?:{
+    request(request:UiOrigin&{userMessageId:number}):Promise<void>;
+    decide(request:UiOrigin&{messageId:number;key:string;choice:'approve'|'deny'}):Promise<UiResult>;
+  };
   /** Exact private reply capture; true consumes the input before model admission. */
   placesInput?(request:UiOrigin&{messageId:number;replyToMessageId:number;text:string;trustedPromptText?:string}):Promise<boolean>;
 }
@@ -41,11 +53,14 @@ export type TrustedCallback={id:string;commandId:string;actorId:number;principal
 export type NormalizedUpdate =
  |{type:'input';envelope:SourceEnvelope}
  |{type:'control';control:HostControl}
+ |{type:'groupNew';origin:UiOrigin&{userMessageId:number}}
+ |{type:'deploy';envelope:SourceEnvelope}
+ |{type:'media';message:Record<string,unknown>;actor?:SourceActor}
  |{type:'ui';origin:UiOrigin;name:UiCommandName;arg?:string}
  |{type:'callback';callback:TrustedCallback}
  |{type:'ignored'}
  |{type:'rejected';reason:string};
-export const controlFor=(config:NativeConfig,updateId:number,type:ControlCommand):HostControl=>({type,requestId:`telegram-control:${config.transport.botId}:${updateId}`,principal:config.principal,target:{chatId:config.transport.allowedUserId}});
+export const controlFor=(config:NativeConfig,updateId:number,type:ControlCommand):HostControl=>({type,requestId:`telegram-control:${config.transport.botId}:${updateId}`,principal:config.principal,target:{chatId:chatIdOf(config)}});
 /** Private text and callback boundary. Full grouped/media and household surfaces are C6 gates. */
 export function normalizeTelegramUpdate(config:NativeConfig,update:TelegramUpdate,commands?:ReadonlySet<string>):NormalizedUpdate {
  if(!integer(update.update_id)||update.update_id<0) throw new Error('Invalid Telegram update identity');
@@ -53,29 +68,55 @@ export function normalizeTelegramUpdate(config:NativeConfig,update:TelegramUpdat
  const message=object(callback?.message??update.message);
  if(!message) return {type:'ignored'};
  const from=object(callback?.from??message.from),chat=object(message.chat);
- if(from?.id!==config.transport.allowedUserId||from.is_bot===true||chat?.id!==config.transport.allowedUserId||chat.type!=='private')return {type:'ignored'};
- const target:Target={chatId:config.transport.allowedUserId};
+ const actor=from?.is_bot===true?undefined:actorOf(config,from?.id);
+ const chatId=chatIdOf(config);
+ if(!actor||chat?.id!==chatId||chat.type!==(config.group?undefined:'private')&&!(config.group&&(chat.type==='group'||chat.type==='supergroup')))return {type:'ignored'};
+ const target:Target={chatId};
+ // Forum topics are outside the household surface. Plain supergroup reply threads are not topics.
+ const threaded=config.group?message.is_topic_message===true||(chat.is_forum===true&&message.message_thread_id!==undefined):message.message_thread_id!==undefined;
  if(callback){
   if(typeof callback.id!=='string'||callback.id.length===0||callback.id.length>128)throw new Error('Invalid callback identity');
   if(!integer(message.message_id)||message.message_id<=0)throw new Error('Invalid callback message');
   const data=typeof callback.data==='string'?callback.data:'';
-  const action=message.message_thread_id===undefined?parseCallbackData(data):undefined;
-  return {type:'callback',callback:{id:callback.id,commandId:`telegram-callback:${config.transport.botId}:${update.update_id}`,actorId:config.transport.allowedUserId,principal:config.principal,target,messageId:message.message_id,data,action}};
+  const action=threaded?undefined:parseCallbackData(data);
+  return {type:'callback',callback:{id:callback.id,commandId:`telegram-callback:${config.transport.botId}:${update.update_id}`,actorId:actor.id,principal:config.principal,target,messageId:message.message_id,data,action}};
  }
  if(!integer(message.message_id)||message.message_id<=0||!integer(message.date)||message.date<0)throw new Error('Invalid Telegram source');
- if(typeof message.text!=='string'||message.media_group_id!==undefined||message.photo!==undefined||message.document!==undefined||message.voice!==undefined)return {type:'rejected',reason:'This native foundation profile requires an ungrouped text message.'};
- if(message.message_thread_id!==undefined)return {type:'rejected',reason:'Thread input is unavailable on the private foundation surface.'};
+ // Media is considered only after actor, chat and topic checks, and only for profiles that enable it.
+ if(!threaded&&typeof message.text!=='string'&&profilePolicy(config.capabilityProfile)?.media===true)
+  return {type:'media',message,...(config.group&&actor.label?{actor:{id:actor.id,label:actor.label}}:{})};
+ if(typeof message.text!=='string'||message.media_group_id!==undefined||message.photo!==undefined||message.document!==undefined||message.voice!==undefined)return {type:'rejected',reason:config.group?'The household group accepts ungrouped text messages only.':'This native foundation profile requires an ungrouped text message.'};
+ if(threaded)return {type:'rejected',reason:config.group?'Topic input is unavailable on the household group surface.':'Thread input is unavailable on the private foundation surface.'};
  const parsed=parseCommandText(message.text,commands);
- if(parsed.type==='control')return {type:'control',control:controlFor(config,update.update_id,parsed.name)};
- if(parsed.type==='ui')return {type:'ui',name:parsed.name,...(parsed.arg?{arg:parsed.arg}:{}),origin:{commandId:`telegram-command:${config.transport.botId}:${update.update_id}`,principal:config.principal,actorId:config.transport.allowedUserId,target}};
+ const origin:UiOrigin={commandId:`telegram-command:${config.transport.botId}:${update.update_id}`,principal:config.principal,actorId:actor.id,target};
+ const source:SourceEnvelope={instance:config.instanceId,principal:config.principal,bot:String(config.transport.botId),chatId,messageIds:[message.message_id],originalAt:message.date*1000,content:message.text,...(config.group&&actor.label?{actor:{id:actor.id,label:actor.label}}:{})};
+ if(parsed.type==='control'){
+  if(config.group&&parsed.name==='new')return {type:'groupNew',origin:{...origin,userMessageId:message.message_id}};
+  return {type:'control',control:controlFor(config,update.update_id,parsed.name)};
+ }
+ if(parsed.type==='ui'&&parsed.name==='deploy')return {type:'deploy',envelope:{...source,content:''}};
+ if(parsed.type==='ui')return {type:'ui',name:parsed.name,...(parsed.arg?{arg:parsed.arg}:{}),origin};
  if(parsed.type==='unavailable')return {type:'rejected',reason:unavailableText(parsed)};
- return {type:'input',envelope:{instance:config.instanceId,principal:config.principal,bot:String(config.transport.botId),chatId:config.transport.allowedUserId,messageIds:[message.message_id],originalAt:message.date*1000,content:message.text}};
+ return {type:'input',envelope:source};
 }
 export function assertNativeEnvelope(config:NativeConfig,envelope:SourceEnvelope):void {
- if(envelope.instance!==config.instanceId||envelope.principal!==config.principal||envelope.bot!==String(config.transport.botId)||envelope.chatId!==config.transport.allowedUserId||envelope.threadId!==undefined||(envelope.child?config.capabilityProfile!=='durable-jobs-children-test'||envelope.proactive!==true||envelope.messageIds.length!==0:envelope.job?!['durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test','durable-jobs-children-test'].includes(config.capabilityProfile)||!['recipient','coordinator'].includes(config.jobsRole)||envelope.proactive!==true||envelope.messageIds.length!==0:envelope.proactive===true)||(envelope.attachments?.length??0)>0)throw new Error('Source is outside this instance authority');
+ const policy=profilePolicy(config.capabilityProfile);
+ const rejected=()=>new Error('Source is outside this instance authority');
+ if(!policy||envelope.instance!==config.instanceId||envelope.principal!==config.principal||envelope.bot!==String(config.transport.botId)||envelope.chatId!==chatIdOf(config)||envelope.threadId!==undefined)throw rejected();
+ const attachments=envelope.attachments??[];
+ if(attachments.length>0){
+  // Structural only. The application verifies each artifact with assertMediaAttachments.
+  if(!policy.media||envelope.child||envelope.job||envelope.proactive===true||attachments.length>TELEGRAM_NATIVE_MEDIA_LIMITS.maxFilesPerMessage*10||attachments.some(item=>object(item)===undefined))throw rejected();
+ }
+ if(envelope.child){if(!policy.children||envelope.proactive!==true||envelope.messageIds.length!==0||envelope.actor)throw rejected();return;}
+ if(envelope.job){if(config.jobsRole==='disabled'||!policy.jobsRoles.includes(config.jobsRole)||envelope.proactive!==true||envelope.messageIds.length!==0||envelope.actor)throw rejected();return;}
+ if(envelope.proactive===true)throw rejected();
+ // Human input: a group source must name one of its two configured actors.
+ if(config.group){const actor=envelope.actor;if(!actor||!config.group.actors.some(item=>item.id===actor.id&&item.label===actor.label))throw rejected();}
+ else if(envelope.actor)throw rejected();
 }
 export function assertNativeControl(config:NativeConfig,control:HostControl):void {
- if(control.principal!==config.principal||control.target.chatId!==config.transport.allowedUserId||control.target.threadId!==undefined||!control.requestId.startsWith(`telegram-control:${config.transport.botId}:`))throw new Error('Control is outside this instance authority');
+ if(control.principal!==config.principal||control.target.chatId!==chatIdOf(config)||control.target.threadId!==undefined||!control.requestId.startsWith(`telegram-control:${config.transport.botId}:`))throw new Error('Control is outside this instance authority');
 }
 export type NativeBridgeOptions={
  /** Slash/callback UI behavior. Without it only durable controls work and other commands are refused. */
@@ -83,7 +124,12 @@ export type NativeBridgeOptions={
  /** Restrict enabled slash commands (profile visibility). Defaults to all. */
  commands?:readonly string[];
  previewIntervalMs?:number;
+ /** Release-owned /deploy prompt. Only builder-class profiles provide it. */
+ deployPrompt?:()=>Promise<string>;
+ /** Media ingest for profiles with media enabled. Without it, media updates are refused visibly. */
+ media?:NativeMediaIngest;
 };
+const ACCEPT_RETRY_LIMIT=5,TIMER_FAILURE_LIMIT=5;
 const view=(item:UiView):Presentation=>{
  switch(item.kind){
   case 'menu':return statusMenu(item.state);
@@ -99,11 +145,13 @@ export function bridgeTelegram(config:NativeConfig,raw:RawTransport,onTransportF
  presenter:{present(target:Target,presentation:Presentation):Promise<{messageId:number}>};
  /** Visible assistant text only; the durable final remains authoritative. */
  stream:{update(target:Target,turn:string,text:string):void;finish(target:Target,turn:string):Promise<void>};
+ /** Transient tool-activity message port for the private instance target. Absent when the raw transport cannot send. */
+ activity:ToolActivityPort;
 } {
- const allowed=(target:Target)=>target.chatId===config.transport.allowedUserId&&target.threadId===undefined;
+ const allowed=(target:Target)=>target.chatId===chatIdOf(config)&&target.threadId===undefined;
  const only=(target:Target)=>{if(!allowed(target))throw Object.assign(new Error('Delivery target outside instance authority'),{definitelyNotSent:true});};
  const commands=options.commands?new Set(options.commands):undefined;
- const home:Target={chatId:config.transport.allowedUserId};
+ const home:Target={chatId:chatIdOf(config)};
  // Rejections are not accepted work. Their notices are best effort, so an
  // uncertain notice cannot cause a rejected update to block or execute later.
  const reject=async(reason:string)=>{try{await raw.deliver(home,clean(reason,500));}catch(error){onTransportFailure(error);}};
@@ -140,22 +188,39 @@ export function bridgeTelegram(config:NativeConfig,raw:RawTransport,onTransportF
   defer(updateId,result.afterAcknowledgement);
   return result;
  }
- async function runControl(control:HostControl,origin:{messageId?:number},callbackId?:string){
+ async function runControl(control:HostControl,origin:{messageId?:number;actorId?:number},callbackId?:string){
   try{await onControlRef(control);}
   catch(error){if(error instanceof HostControlRejectedError){if(callbackId)await answer(callbackId,error.message);else await reject(error.message);return;}throw error;}
   if(callbackId)await answer(callbackId);
   // A successful /new returns to the status menu.
-  if(control.type==='new')await showMenu({commandId:`menu:${control.requestId}`,principal:control.principal,actorId:config.transport.allowedUserId,target:home,...(origin.messageId!==undefined?{messageId:origin.messageId}:{})});
+  if(control.type==='new')await showMenu({commandId:`menu:${control.requestId}`,principal:control.principal,actorId:origin.actorId??config.transport.allowedUserId,target:home,...(origin.messageId!==undefined?{messageId:origin.messageId}:{})});
  }
  let onControlRef:(control:HostControl)=>Promise<void>=async()=>{throw new Error('Bridge not started');};
- const streamer=createPreviewStream({authorize:allowed,...(options.previewIntervalMs!==undefined?{intervalMs:options.previewIntervalMs}:{}),
+ const streamer=createPreviewStream({authorize:target=>!config.group&&allowed(target),...(options.previewIntervalMs!==undefined?{intervalMs:options.previewIntervalMs}:{}),
   send:(target,text)=>raw.preview?raw.preview(target,text):Promise.resolve(),onError:()=>{/* previews are best effort */}});
  const callbackFor=async(updateId:number,item:TrustedCallback)=>{
   const action=item.action;
   if(!action){await answer(item.id,'This action is unavailable.');return;}
   const origin:UiOrigin={commandId:item.commandId,principal:item.principal,actorId:item.actorId,target:item.target,messageId:item.messageId};
   switch(action.type){
-   case 'control':return runControl(controlFor(config,updateId,action.name),origin,item.id);
+   case 'groupNew':{
+    const ui=options.ui?.groupNew;if(!ui){await answer(item.id,'Unavailable');return;}
+    let result:UiResult;
+    try{result=await ui.decide({...origin,messageId:item.messageId,key:action.key,choice:action.choice});}
+    catch(error){if(error instanceof UiRejectedError){await answer(item.id,error.message);return;}throw error;}
+    if(result.view)await render(origin,view(result.view));
+    if(result.view&&action.choice==='approve')await showMenu({...origin,commandId:`menu:${item.commandId}`,messageId:undefined} as UiOrigin);
+    await answer(item.id,result.toast);defer(updateId,result.afterAcknowledgement);return;
+   }
+   case 'control':
+    // A household /new is a shared-session decision that needs the requester's confirmation.
+    if(config.group&&action.name==='new'){
+     const ui=options.ui?.groupNew;if(!ui){await answer(item.id,'Unavailable');return;}
+     try{await ui.request({...origin,userMessageId:item.messageId});await answer(item.id);}
+     catch(error){if(error instanceof UiRejectedError){await answer(item.id,error.message);return;}throw error;}
+     return;
+    }
+    return runControl(controlFor(config,updateId,action.name),origin,item.id);
    case 'menu':await runUi(updateId,{...origin,name:action.name==='menu'?'menu':action.name},item.id);return;
    case 'modelPage':await runUi(updateId,{...origin,name:'model',arg:String(action.page)},item.id);return;
    case 'model':case 'thinking':{
@@ -180,9 +245,67 @@ export function bridgeTelegram(config:NativeConfig,raw:RawTransport,onTransportF
    }
   }
  };
+
+ // Media: receive and collect are serialized so a timer can never race an update.
+ const media=options.media;
+ let chain:Promise<unknown>=Promise.resolve(),stopped=false,timer:ReturnType<typeof setTimeout>|undefined,timerFailures=0;
+ const serial=<T>(work:()=>Promise<T>):Promise<T>=>{const next=chain.then(work,work);chain=next.catch(()=>{});return next;};
+ const acceptFailures=new Map<string,number>();
+ let envelopeSink:(envelope:SourceEnvelope)=>Promise<void>=async()=>{throw new Error('Bridge not started');};
+ const arm=()=>{
+  if(!media||stopped)return;
+  if(timer)clearTimeout(timer);timer=undefined;
+  const due=media.nextDueAt();if(due===undefined)return;
+  timer=setTimeout(()=>{timer=undefined;void collectDue();},Math.min(2**31-1,Math.max(10,due-Date.now())));
+  timer.unref?.();
+ };
+ /** Must run inside serial(). Accepts every due album, or re-queues it after an acceptance failure. */
+ async function drain():Promise<void>{
+  if(!media)return;
+  const due=await media.collect();
+  for(const error of due.failed)onTransportFailure(error);
+  for(const item of due.rejected)await reject(item.reason);
+  let failure:unknown,failedAny=false;
+  for(const item of due.inputs){
+   const key=item.messageIds.join(',');
+   try{await envelopeSink(item.envelope);await media.done(item.messageIds);acceptFailures.delete(key);}
+   catch(error){
+    onTransportFailure(error);
+    const count=(acceptFailures.get(key)??0)+1;acceptFailures.set(key,count);
+    // The journal keeps the album. After the bound it stays journaled for the next restart.
+    if(count<ACCEPT_RETRY_LIMIT){try{media.requeue(item.messageIds);}catch(requeueError){onTransportFailure(requeueError);}}
+    else{acceptFailures.delete(key);onTransportFailure(new Error('Media album acceptance failed repeatedly; it stays journaled for restart.'));}
+    failedAny=true;failure=error;
+   }
+  }
+  if(failedAny)throw failure;
+ }
+ async function collectDue():Promise<void>{
+  if(stopped)return;
+  let failed=false;
+  try{await serial(drain);}catch{failed=true;}
+  if(failed){if(++timerFailures>=TIMER_FAILURE_LIMIT){onTransportFailure(new Error('Media album retries paused until the next update or restart.'));return;}}
+  else timerFailures=0;
+  arm();
+ }
+ async function acceptMedia(item:{message:Record<string,unknown>;actor?:SourceActor},updateId:number):Promise<void>{
+  if(!media){await reject('Media is unavailable on this instance.');return;}
+  await serial(async()=>{
+   const result=await media.receive(item.message,{updateId,...(item.actor?{actor:item.actor}:{})});
+   switch(result.type){
+    case 'none':await reject('This message type is not supported.');return;
+    case 'rejected':await reject(result.reason);return;
+    case 'pending':return;
+    case 'input':await envelopeSink(result.envelope);await media.done(result.messageIds);return;
+   }
+  });
+  arm();
+ }
  return {
   start:async(onEnvelope,onControl)=>{
-   onControlRef=onControl;
+   onControlRef=onControl;envelopeSink=onEnvelope;stopped=false;
+   // Recovery fails closed: an unreadable or unauthorized journal stops startup before any update is read.
+   if(media)await media.recover();
    await raw.start({accept:async(update)=>{
     try{
      const item=normalizeTelegramUpdate(config,update,commands);
@@ -197,7 +320,18 @@ export function bridgeTelegram(config:NativeConfig,raw:RawTransport,onTransportF
       }
       await onEnvelope(item.envelope);
      }
-     else if(item.type==='control')await runControl(item.control,{});
+     else if(item.type==='control')await runControl(item.control,{actorId:object(object(update.message)?.from)?.id as number});
+     else if(item.type==='groupNew'){
+      const ui=options.ui?.groupNew;
+      if(!ui)await reject('/new is unavailable on this instance.');
+      else{try{await ui.request(item.origin);}catch(error){if(error instanceof UiRejectedError)await reject(error.message);else throw error;}}
+     }
+     else if(item.type==='media')await acceptMedia(item,update.update_id);
+     else if(item.type==='deploy'){
+      const prompt=await options.deployPrompt?.();
+      if(!prompt)await reject('/deploy is unavailable on this instance.');
+      else await onEnvelope({...item.envelope,content:prompt});
+     }
      else if(item.type==='ui')await runUi(update.update_id,{...item.origin,name:item.name,...(item.arg?{arg:item.arg}:{})},undefined);
      else if(item.type==='rejected')await reject(item.reason);
      else if(item.type==='callback')await callbackFor(update.update_id,item.callback);
@@ -206,8 +340,13 @@ export function bridgeTelegram(config:NativeConfig,raw:RawTransport,onTransportF
     const work=afterAck.get(updateId);afterAck.delete(updateId);
     for(const fn of work??[])await fn();
    },failed:onTransportFailure});
+   // Recovered albums become due after their quiet period.
+   if(media)arm();
   },
-  stop:async()=>{streamer.stop();await raw.stop();},
+  stop:async()=>{
+   stopped=true;if(timer)clearTimeout(timer);timer=undefined;streamer.stop();
+   await raw.stop();await chain.catch(()=>{});
+  },
   sendFinal:async request=>{
    only(request.target);
    const messageId=await raw.deliver(request.target,request.text);
@@ -219,5 +358,21 @@ export function bridgeTelegram(config:NativeConfig,raw:RawTransport,onTransportF
    return {messageId:await raw.present(target,presentation)};
   }},
   stream:{update:(target,turn,text)=>streamer.update(target,turn,text),finish:(target,turn)=>streamer.finish(target,turn)},
+  activity:{
+   // Private chat only (like previews); every call passes the transport's pairing and field policy.
+   send:async(target,text)=>{
+    if(config.group||!allowed(target)||!raw.media)return undefined;
+    const r=await raw.media.call('sendMessage',{chat_id:target.chatId,text,disable_notification:true});
+    const id=r.payload?.result?.message_id;return integer(id)&&id>0?id:undefined;
+   },
+   edit:async(target,messageId,text)=>{
+    if(config.group||!allowed(target)||!raw.media)return;
+    await raw.media.call('editMessageText',{chat_id:target.chatId,message_id:messageId,text});
+   },
+   remove:async(target,messageId)=>{
+    if(config.group||!allowed(target)||!raw.media)return;
+    await raw.media.call('deleteMessage',{chat_id:target.chatId,message_id:messageId});
+   },
+  },
  };
 }

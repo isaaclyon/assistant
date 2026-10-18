@@ -150,6 +150,17 @@ export class ScopedCredentialStore implements CredentialStore {
   }
 }
 
+/** Legacy patch scripts marked off and minimal unsupported for gpt-6.1-sol. The SDK maps minimal to low,
+ * so this narrow catalog transform keeps the preserved settings contract. Other models are untouched. */
+function withLegacyThinkingRestrictions(provider: Provider): Provider {
+  if (provider.id !== 'openai-codex') return provider;
+  const restrict = <T extends { id: string; thinkingLevelMap?: unknown }>(models: readonly T[]): T[] => models.map(model => model.id === 'gpt-6.1-sol'
+    ? { ...model, thinkingLevelMap: { ...(record(model.thinkingLevelMap) ? model.thinkingLevelMap : {}), off: null, minimal: null } }
+    : model);
+  const getModels = provider.getModels.bind(provider), getAllModels = provider.getAllModels?.bind(provider);
+  return { ...provider, getModels: () => restrict(getModels()), ...(getAllModels ? { getAllModels: () => restrict(getAllModels()) } : {}) };
+}
+
 export interface NativeProviderSettings { version: 1; account: string; provider: string; modelId: string; thinkingLevel: ModelThinkingLevel; modelIds?: string[] }
 export async function createNativeProvider(options: { credentialPath: string; settingsPath: string; account: string; provider?: Provider; credentialFormat?: "pi-auth" | "native" }) {
   const settings = await privateJson(await canonicalFile(options.settingsPath));
@@ -169,6 +180,7 @@ export async function createNativeProvider(options: { credentialPath: string; se
     if (!ids.includes(settings.modelId)) throw new Error('Active model is outside the selected model list');
     provider = { ...provider, getModels: () => selected, getAllModels: () => selected };
   }
+  provider = withLegacyThinkingRestrictions(provider);
   const credentials = await ScopedCredentialStore.open(options.credentialPath, options.account, 30_000, options.credentialFormat);
   try {
     if (!await credentials.read(provider.id)) throw new Error('Selected account has no stored provider credential');

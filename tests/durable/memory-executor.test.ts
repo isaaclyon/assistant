@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMarkdownMemoryExecutor, prepareMemoryIntent, type MemoryView, type PrepareMemoryIntentInput } from '../../src/durable/memory-executor.js';
 import type { MemoryOperation } from '../../src/durable/operations.js';
+import { executeMemoryOperation } from '../../.pi/skills/personal-memory/scripts/memory.mjs';
 
 const dirs: string[] = [];
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
@@ -71,6 +72,33 @@ test('create, update, append, share and delete use deterministic intents and exa
   expect(removal.postRevision).toBeNull();
   expect((await executor.execute(operation(removal), control)).revision).toBeNull();
   await expect(noteRaw(root, noteId)).rejects.toThrow();
+});
+
+test('legacy and native writers share one vault lock and reject the stale legacy revision',async()=>{
+ const root=await vault(),id=await create(root);
+ const {intent}=await prepareMemoryIntent({root,view:isaac},{action:'append',noteId:id,append:'native-tail\n'});
+ let entered!:()=>void,release!:()=>void;
+ const held=new Promise<void>(resolve=>{entered=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;});
+ const native=createMarkdownMemoryExecutor({root,hooks:{afterReceipt:async()=>{entered();await gate;}}}).execute(operation(intent),control);
+ await held;
+ let settled=false;
+ const legacy=executeMemoryOperation('update',{id,ifRevision:intent.preRevision,patch:{title:'Legacy change'}},{env:{PI_TELEGRAM_PRINCIPAL:'isaac',PI_TELEGRAM_MEMORY_VIEW:'owner-and-household',PI_TELEGRAM_MEMORY_DIR:root,PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT:'0'},cwd:process.cwd()}).then(value=>{settled=true;return value;},error=>{settled=true;throw error;});
+ // Catch immediately so an assertion cannot produce an unhandled rejection.
+ const outcome=legacy.then(value=>({value,error:null}),error=>({value:null,error}));
+ let blocked=false;
+ try{await new Promise(resolve=>setTimeout(resolve,50));blocked=!settled;}finally{release();}
+ await native;expect(blocked).toBe(true);
+ expect((await outcome).error).toMatchObject({code:'REVISION_CONFLICT'});
+ expect(await noteRaw(root,id)).toContain('native-tail');expect(await noteRaw(root,id)).not.toContain('Legacy change');
+});
+
+test('a legacy mutation invalidates a prepared native intent before a native receipt or effect',async()=>{
+ const root=await vault(),id=await create(root);
+ const {intent}=await prepareMemoryIntent({root,view:isaac},{action:'append',noteId:id,append:'native-tail\n'});
+ await executeMemoryOperation('update',{id,ifRevision:intent.preRevision,patch:{title:'Legacy change'}},{env:{PI_TELEGRAM_PRINCIPAL:'isaac',PI_TELEGRAM_MEMORY_VIEW:'owner-and-household',PI_TELEGRAM_MEMORY_DIR:root,PI_TELEGRAM_MEMORY_GIT_AUTOCOMMIT:'0'},cwd:process.cwd()});
+ const before=await noteRaw(root,id),count=(await readdir(join(root,'.operations'))).length;
+ await expect(createMarkdownMemoryExecutor({root}).execute(operation(intent),control)).rejects.toMatchObject({definitelyNotApplied:true});
+ expect(await noteRaw(root,id)).toBe(before);expect(before).toContain('Legacy change');expect(before).not.toContain('native-tail');expect(await readdir(join(root,'.operations'))).toHaveLength(count);
 });
 
 test('SIGKILL after Markdown rename and before the native result is recognized without repeating append', async () => {

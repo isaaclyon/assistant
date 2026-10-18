@@ -89,8 +89,17 @@ The child offline validation gate passed. See the [child guide](docs/pi-durable-
 [C5 recipient](docs/pi-durable-c5-jobs.md),
 [coordinator](docs/pi-durable-c5-coordinator.md) and
 [schedule](docs/pi-durable-c5-schedules.md) guides.
-Live provider/browser/CLI/platform acceptance and privileged builder/deployment
-coverage remain at C6.
+C6 adds frozen-copy migration inventory/preservation and explicit staged runtime
+activation. The offline migration output always remains held; it never imports
+legacy task stacks or authorizes resubmission. The administrator adapter reuses
+the mixed-manager hold/checkpoint/startup barrier, retains every peer's approved
+release, and keeps the broker release independent. Root-owned observations bind
+native scheduled completion and a controlled restart before deliberate
+advancement. The separate immutable release builder uses reviewed full commits
+and an external allowlist. See [ADR-0054](docs/adr/0054-stage-native-activation-with-retained-evidence.md)
+and the [C6 rehearsal guide](docs/pi-durable-c6-rehearsal.md).
+Live provider/browser/CLI acceptance and production activation remain separate
+from disposable synthetic rehearsal evidence.
 
 The sections below describe the deployed legacy architecture. Its package,
 source patches and service path remain in the legacy release tree until the

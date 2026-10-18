@@ -198,3 +198,94 @@ test('recipient watch overflow and unreadable source authority keep proactive pa
  expect(s.stream.update.mock.calls.map(call=>call[2])).toEqual(['Human']);
  await s.visible.close();
 });
+
+function withActivity(s: ReturnType<typeof setup>, intervalMs = 1000) {
+  const log: string[] = [];
+  const activity = {
+    send: vi.fn(async (_t: unknown, text: string) => { log.push(`send:${text}`); return 77; }),
+    edit: vi.fn(async (_t: unknown, id: number, text: string) => { log.push(`edit:${id}:${text}`); }),
+    remove: vi.fn(async (_t: unknown, id: number) => { log.push(`remove:${id}`); }),
+  };
+  const real = createVisibleEvents({ host: () => s.host, config: s.config, stream: s.stream, debug: s.debug, activity, cwd: '/repo', activityIntervalMs: intervalMs });
+  return { ...real, attach: (cid: string) => real.attach(cid as never), activity, log };
+}
+const toolStart = (id: string, toolName: string, args: any) => ({ type: 'tool_execution_start', toolCallId: id, toolName, args });
+const toolEnd = (id: string, toolName: string, isError = false) => ({ type: 'tool_execution_end', toolCallId: id, toolName, entry: { message: { isError } } });
+
+test('native tool events show friendly labels, coalesce edits per second and remove the message at run end', async () => {
+  reset(); vi.useFakeTimers();
+  try {
+    const s = setup(); const v = withActivity(s);
+    await v.attach('c1');
+    await s.emit(0, { type: 'run_start', inputs: [] }, toolStart('a', 'read', { path: '/repo/src/host.ts' }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(v.activity.send).toHaveBeenCalledTimes(1);
+    expect(v.log[0]).toContain('⏳ Read src/host.ts');
+    await s.emit(0, toolEnd('a', 'read'), toolStart('b', 'bash', { command: 'deploy --token extremely-secret' }), { type: 'tool_execution_update', toolCallId: 'b', toolName: 'bash', output: { set: 'RAW OUTPUT' } });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(v.activity.edit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(v.activity.edit).toHaveBeenCalledTimes(1);
+    const text = v.log.join('\n');
+    expect(text).toContain('▸ Read src/host.ts'); expect(text).toContain('⏳ Ran command'); expect(text).toContain('2 tools');
+    for (const bad of ['extremely-secret', 'RAW OUTPUT', 'deploy']) expect(text).not.toContain(bad);
+    await s.emit(0, toolEnd('b', 'bash', true), { type: 'run_end', inputs: [] });
+    expect(v.activity.remove).toHaveBeenCalledWith({ chatId: expect.anything() }, 77);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(v.activity.edit).toHaveBeenCalledTimes(1);
+    await v.close();
+  } finally { vi.useRealTimers(); }
+});
+
+test('tool activity follows preview authority: proactive runs stay hidden and nested calls are ignored', async () => {
+  reset();
+  snapshots.c1 = { type: 'snapshot', entries: [], tools: [], run: { inputs: ['job'] } };
+  const s = setup(); s.config.jobsRole = 'recipient';
+  (s.state as any).sources = { job: { proactive: true }, human: { proactive: false } };
+  s.host.runtime.harness.submission = async (id: string) => ({ status: async () => ({ requestId: id }) });
+  const v = withActivity(s);
+  await v.attach('c1');
+  s.live.run = { inputs: ['job'] };
+  await s.emit(0, { type: 'run_start', inputs: ['job'] }, toolStart('x', 'read', { path: 'a' }));
+  expect(v.activity.send).not.toHaveBeenCalled();
+  s.live.run = { inputs: ['human'] };
+  await s.emit(0, { type: 'run_end', inputs: ['job'] }, { type: 'run_start', inputs: ['human'] }, toolStart('p/nested', 'read', { path: 'a' }));
+  expect(v.activity.send).not.toHaveBeenCalled();
+  await s.emit(0, toolStart('y', 'web_search', { query: 'private query' }));
+  await vi.waitFor(() => expect(v.log[0]).toContain('Searched the web'));
+  expect(v.log.join('')).not.toContain('private query');
+  await v.close();
+});
+
+test('activity port failure never affects text previews; epoch change and finish remove the message', async () => {
+  reset();
+  const s = setup({ epoch: 1, epochs: { '1': 'c1' } }); const v = withActivity(s);
+  v.activity.send.mockRejectedValueOnce(new Error('network'));
+  await v.attach('c1');
+  await s.emit(0, toolStart('a', 'ls', { path: '/repo/src' }), { type: 'turn_start' }, { type: 'message_start', message: asst([{ type: 'text', text: 'Still streams' }]) });
+  await vi.waitFor(() => expect(v.activity.send).toHaveBeenCalled());
+  expect(s.stream.update.mock.calls.map(c => c[2])).toEqual(['Still streams']);
+  await s.emit(0, toolStart('b', 'ls', { path: '/repo' }));
+  await v.close();
+  // A new epoch replaces the observer and cleans the old activity message.
+  reset(); const s2 = setup({ epoch: 1, epochs: { '1': 'c1' } }); const v2 = withActivity(s2);
+  await v2.attach('c1');
+  await s2.emit(0, toolStart('a', 'read', { path: 'a.ts' }));
+  await vi.waitFor(() => expect(v2.activity.send).toHaveBeenCalled());
+  s2.state.epoch = 2; s2.state.epochs['2'] = 'c2';
+  await v2.attach('c2');
+  expect(v2.activity.remove).toHaveBeenCalledWith(expect.anything(), 77);
+  await v2.close();
+});
+
+test('full profiles keep child completion previews and activity hidden when scheduled jobs are disabled', async () => {
+ reset(); snapshots.c1={type:'snapshot',entries:[],tools:[],run:{inputs:['child']},generation:{message:asst([{type:'text',text:'CHILD PARTIAL'}])}};
+ const s=setup();s.config.jobsRole='disabled';s.config.capabilityProfile='durable-personal-emma';
+ (s.state as any).sources={child:{proactive:true},human:{proactive:false}};
+ s.host.runtime.harness.submission=async(id:string)=>({status:async()=>({requestId:id})});
+ const v=withActivity(s);await v.attach('c1');s.live.run={inputs:['child']};
+ await s.emit(0,{type:'run_start',inputs:['child']},toolStart('x','bash',{command:'npm test'}),{type:'message_start',message:asst([{type:'text',text:'CHILD'}])});
+ expect(s.stream.update).not.toHaveBeenCalled();expect(v.activity.send).not.toHaveBeenCalled();
+ s.live.run={inputs:['human']};await s.emit(0,{type:'run_end',inputs:['child']},{type:'run_start',inputs:['human']},{type:'message_start',message:asst([{type:'text',text:'HUMAN'}])});
+ expect(s.stream.update.mock.calls.map(call=>call[2])).toEqual(['HUMAN']);await v.close();
+});

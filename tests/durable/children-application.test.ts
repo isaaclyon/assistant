@@ -18,7 +18,7 @@ test('child selection is additive and requires the same explicit schedule and pr
  const manifest=JSON.parse(await readFile(join(s.config.resourceRoot,'.pi/capabilities.json'),'utf8'));
  const old=manifest.profiles.find((p:any)=>p.id==='durable-jobs-schedules-test'),selected=manifest.profiles.find((p:any)=>p.id==='durable-jobs-children-test');
  expect(selected.extensions).toEqual([...old.extensions,'native-background-children']);expect(selected.skills).toEqual(old.skills);
- expect(manifest.profiles.filter((p:any)=>p.extensions.includes('native-background-children')).map((p:any)=>p.id)).toEqual(['durable-jobs-children-test']);
+ expect(manifest.profiles.filter((p:any)=>p.extensions.includes('native-background-children')).map((p:any)=>p.id)).toEqual(['durable-jobs-children-test','durable-personal-isaac','durable-personal-emma','durable-household-shared','durable-builder']);
  expect((await loadCapabilityProfile(s.config.resourceRoot,selected.id)).extensionPaths.some(p=>p.endsWith('background-children.mjs'))).toBe(true);
 });
 

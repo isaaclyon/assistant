@@ -1,6 +1,39 @@
 # Keeping Pi current
 
-## GPT-6.1 Sol support
+## Native release gate
+
+The native branch pins `@earendil-works/pi-durable`, `pi-ai`, `chord` and
+`pi-codemode` together at exactly 1.3.0. Its compiled Telegram fork remains a
+separate full-commit pin. The sections below describe the retained legacy release
+and its install patches. Do not run legacy postinstall patches against the native
+dependency tree or load both host SDKs into one process.
+
+Native upgrades require a clean `npm ci`, `npm run check:changed`, and
+`npm run build`. Review pending-task schema changes and migrations before opening
+an existing store. Missing definitions, missing migrations and throwing migrations
+must refuse startup before transport, coordinator or execution. Keep the
+`tests/durable/upgrade-recovery.test.ts` acceptance cases and the writer-lease,
+crash, delivery-ambiguity, authority and mixed-runtime handoff suites.
+
+The native build also emits the administrator deployment and recovery helpers.
+Run the [C6 rehearsal](pi-durable-c6-rehearsal.md) when changing those boundaries.
+Test frozen-copy preservation separately from staged activation. Verify required
+helper entrypoints and each unit's native configuration digest pin before startup.
+A changed isolated configuration needs administrator review and a new unit pin.
+Synthetic
+provider/broker fixtures do not prove live authorization or production readiness.
+No dependency upgrade permits automatic task replay, receipt retirement or
+checkpoint rewind after candidate startup. Keep immutable old releases and
+matching evidence until reconciliation no longer needs them.
+
+The native GPT-6.1 Sol catalog uses SDK 1.3.0's 500K context window and 128K
+output limit. A narrow provider transform preserves off/minimal rejection and
+low-through-max selection. Offline tests exercise real native request
+serialization with fake OAuth and fetch. Native per-instance settings replace
+the old settings-path override; native Responses serialization replaces the
+legacy Responses Lite wrapper. Other model catalogs remain unchanged.
+
+## Legacy GPT-6.1 Sol support
 
 The guarded Codex conversion install patch backports GPT-6.1 Sol's catalog
 entry and GPT-6 request-path recognition from upstream 3.0.40 into our pinned

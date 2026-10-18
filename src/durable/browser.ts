@@ -2,6 +2,8 @@ import { StringEnum, Type } from '@earendil-works/pi-ai';
 import { defineTool, type ToolRegistration } from '@earendil-works/pi-durable';
 import type { Context } from '@earendil-works/chord/context';
 import type { NativeConfig } from './config.js';
+import { chatIdOf } from './surface.js';
+import { profilePolicy } from './profiles.js';
 import { nativeGoogleRuntime } from './google-read.js';
 import { textToolResult, type NativeBundle } from './registry.js';
 import { runPrivateBrowserInput } from '../private-browser-input.js';
@@ -38,10 +40,10 @@ async function findCandidates(origin:string,signal:AbortSignal):Promise<unknown>
  if(!response.ok)throw new Error('Saved logins unavailable');return response.json();
 }
 export function createNativeBrowser(config:NativeConfig,services:NativeBrowserServices={input:runPrivateBrowserInput,takeover:runBrowserTakeover}) {
- if(!['durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test','durable-jobs-children-test'].includes(config.capabilityProfile)||config.principal!=='isaac'||!config.browser||!config.google)throw new Error('Native browser selection is unavailable');
+ if(!profilePolicy(config.capabilityProfile)?.browser||!config.browser||(profilePolicy(config.capabilityProfile)?.google&&!config.google))throw new Error('Native browser selection is unavailable');
  const selected=config.browser;
  const domain:PrivateBrowserConfig={instanceId:config.instanceId,executionInstanceId:config.instanceId,telegramSurface:{type:'private'},agentDir:selected.agentDir,
-  telegramProfile:selected.telegramProfile,resourceRoot:config.resourceRoot,credentialScope:selected.credentialScope,emailCodeEnabled:true,googleRuntime:nativeGoogleRuntime(config)};
+  telegramProfile:selected.telegramProfile,resourceRoot:config.resourceRoot,credentialScope:selected.credentialScope,...(config.google?{emailCodeEnabled:true,googleRuntime:nativeGoogleRuntime(config)}:{emailCodeEnabled:false})};
  let closed=false;
  const active=new Set<AbortController>(),pending=new Set<Promise<unknown>>();
  async function identity(){
@@ -59,7 +61,7 @@ export function createNativeBrowser(config:NativeConfig,services:NativeBrowserSe
     if('fields' in request)validateProtectedRequest(request);
     else if('pageUrl' in request)validatePrivateLoginRequest(request);
     else validateTakeoverRequest(request);
-    const common={config:domain,chatId:config.transport.allowedUserId,signal,notifyWaiting:()=>{}};
+    const common={config:domain,chatId:chatIdOf(config),signal,notifyWaiting:()=>{}};
     const result='fields' in request?await services.input({...common,request}):await services.takeover({...common,request,...('pageUrl' in request?{login:request}:{})});
     return textToolResult(browserOutcome(result));
    }catch{return unavailable();}

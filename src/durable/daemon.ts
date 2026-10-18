@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { bindProcessShutdownSignals, createShutdownLatch, SHUTDOWN_DISPOSAL_TIMEOUT_MS } from '../lifecycle.js';
 import { createRuntimeMetadata, writeRuntimeMetadata, type BridgeRuntimeStatus } from '../runtime-metadata.js';
 import { createNativeApplication } from './application.js';
-import { loadNativeConfig, type NativeConfig } from './config.js';
+import { loadPinnedNativeConfig, type NativeConfig } from './config.js';
 
 /** Process-level watchdog also covers a tool that never cooperates with cancellation. */
 export async function runNativeDaemon(config:NativeConfig):Promise<void> {
@@ -18,7 +18,7 @@ export async function runNativeDaemon(config:NativeConfig):Promise<void> {
  const unbind=bindProcessShutdownSignals(latch);
  const keepAlive=setInterval(()=>{},60_000);
  let application:Awaited<ReturnType<typeof createNativeApplication>>|undefined;
- const status=async(value:BridgeRuntimeStatus)=>writeRuntimeMetadata(config.runtimeMetadataPath,createRuntimeMetadata({instanceId:config.instanceId,releaseSha:config.releaseSha,pid:process.pid,status:value,principal:config.principal,telegramSurface:'private',workspaceCwd:config.workspaceCwd,resourceRoot:config.resourceRoot}));
+ const status=async(value:BridgeRuntimeStatus)=>writeRuntimeMetadata(config.runtimeMetadataPath,createRuntimeMetadata({instanceId:config.instanceId,releaseSha:config.releaseSha,pid:process.pid,status:value,principal:config.principal,telegramSurface:config.group?'household-group':'private',workspaceCwd:config.workspaceCwd,resourceRoot:config.resourceRoot}));
  try {
   process.chdir(config.workspaceCwd);
   await status('starting');
@@ -50,7 +50,7 @@ async function main() {
  process.umask(0o077);
  const path=process.env.PI_DURABLE_CONFIG;
  if(!path)throw new Error('PI_DURABLE_CONFIG must name the private native instance configuration');
- const config=await loadNativeConfig(path);
+ const config=await loadPinnedNativeConfig(path);
  const releaseRoot=await realpath(resolve(import.meta.dirname,'../../..'));
  if(config.resourceRoot!==releaseRoot)throw new Error('Native entrypoint and resource release differ');
  const expected=process.env.PI_TELEGRAM_BRIDGE_RELEASE_SHA;

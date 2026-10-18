@@ -14,7 +14,7 @@ const KEY = /^[A-Za-z0-9_-]{8,56}$/;
 
 /** Slash commands. Controls go through durable host controls; the rest through the UI controller. */
 export const CONTROL_COMMANDS = ['new', 'abort', 'stop', 'compact'] as const;
-export const UI_COMMANDS = ['menu', 'model', 'thinking', 'skills', 'debug', 'reload', 'restart', 'place_rankings', 'fast', 'usage'] as const;
+export const UI_COMMANDS = ['menu', 'model', 'thinking', 'skills', 'debug', 'reload', 'restart', 'place_rankings', 'fast', 'usage', 'deploy'] as const;
 export type ControlCommand = (typeof CONTROL_COMMANDS)[number];
 export type UiCommandName = (typeof UI_COMMANDS)[number];
 export type ParsedText =
@@ -42,7 +42,7 @@ export function parseCommandText(text: string, enabled?: ReadonlySet<string>): P
 /** Callback data grammar (all <= 64 bytes):
  *  m:<menu|model|thinking|skills|place_rankings> · mp:<page> · mc:<model id> · tl:<level>
  *  k:<new|compact|abort|stop> (durable controls) · cf:<a|d>:<confirmation key>
- *  pp:<32 lowercase hex opaque places key> */
+ *  pp:<32 lowercase hex opaque places key> · ng:<a|d>:<group /new confirmation key> */
 export type CallbackAction =
   | { type: 'menu'; name: 'menu' | 'model' | 'thinking' | 'skills' | 'place_rankings' }
   | { type: 'modelPage'; page: number }
@@ -51,7 +51,8 @@ export type CallbackAction =
   | { type: 'control'; name: ControlCommand }
   | { type: 'places'; key: string }
   | { type: 'calendar'; key: string }
-  | { type: 'confirmation'; key: string; choice: 'approve' | 'deny' };
+  | { type: 'confirmation'; key: string; choice: 'approve' | 'deny' }
+  | { type: 'groupNew'; key: string; choice: 'approve' | 'deny' };
 export function parseCallbackData(data: unknown): CallbackAction | undefined {
   if (typeof data !== 'string' || bytes(data) > 64) return undefined;
   const [kind, ...rest] = data.split(':');
@@ -68,8 +69,18 @@ export function parseCallbackData(data: unknown): CallbackAction | undefined {
       const [choice, key, ...extra] = rest;
       return extra.length === 0 && (choice === 'a' || choice === 'd') && key !== undefined && KEY.test(key) ? { type: 'confirmation', key, choice: choice === 'a' ? 'approve' : 'deny' } : undefined;
     }
+    case 'ng': {
+      const [choice, key, ...extra] = rest;
+      return extra.length === 0 && (choice === 'a' || choice === 'd') && key !== undefined && KEY.test(key) ? { type: 'groupNew', key, choice: choice === 'a' ? 'approve' : 'deny' } : undefined;
+    }
     default: return undefined;
   }
+}
+
+/** Shared-session confirmation in the household group. */
+export function groupNewPresentation(key: string): Presentation {
+  if (!KEY.test(key)) throw new Error('Invalid confirmation key');
+  return { text: 'Start a new shared session? The current shared conversation will end.', buttons: [[{ text: 'Start shared session', callback: `ng:a:${key}` }, { text: 'Cancel', callback: `ng:d:${key}` }]] };
 }
 
 /** Approve/deny presentation for a durable memory confirmation. `key` is an opaque

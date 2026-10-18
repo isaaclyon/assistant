@@ -1,13 +1,21 @@
 import { LiveDoc, watchEvents, type AgentEvent, type AgentEventStream, type ConversationId, type MessageChange, type SubmissionId } from '@earendil-works/pi-durable';
 import type { NativeConfig } from './config.js';
 import type { DurableHost } from './host.js';
+import { profilePolicy } from './profiles.js';
+import { chatIdOf } from './surface.js';
 import { Bindings, context, type Target } from './ingress.js';
+import { createToolActivity, type ToolActivity, type ToolActivityPort } from './tool-activity.js';
 
 type Block = { type?: string; text?: unknown };
 export interface VisibleEventsOptions {
   host: () => DurableHost;
   config: NativeConfig;
   stream: { update(target: Target, turn: string, text: string): void; finish(target: Target, turn: string): Promise<void> };
+  /** Optional friendly tool-activity message port, bound to the private target. Same preview authority as text. */
+  activity?: ToolActivityPort;
+  /** Working directory used to shorten paths in activity labels. */
+  cwd?: string;
+  activityIntervalMs?: number;
   /** Receives fixed lifecycle labels only; the caller gates it to the originating target. */
   debug: (title: string, value: unknown) => void;
 }
@@ -22,9 +30,9 @@ const textOf = (blocks: unknown): Map<number, string> => {
 
 /** Best-effort observer: errors never reach the caller and never affect durable state. */
 export function createVisibleEvents(options: VisibleEventsOptions) {
-  const target: Target = { chatId: options.config.transport.allowedUserId };
+  const target: Target = { chatId: chatIdOf(options.config) };
   let chain: Promise<unknown> = Promise.resolve();
-  let observer: { id: number; cid: ConversationId; watch: AgentEventStream; turns: Set<string>; settle: () => Promise<void> } | undefined;
+  let observer: { id: number; cid: ConversationId; watch: AgentEventStream; turns: Set<string>; activity?: ToolActivity | undefined; settle: () => Promise<void> } | undefined;
   let nextObserver = 0, closed = false;
   let lastConversation: ConversationId | undefined;
   const safeDebug = (title: string, value: unknown) => { try { options.debug(title, value); } catch { /* diagnostics are optional */ } };
@@ -39,10 +47,13 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
   async function stop(current: NonNullable<typeof observer>) {
     if (observer === current) observer = undefined;
     await current.watch.stop().catch(() => undefined);
+    await current.activity?.finish().catch(() => undefined);
   }
 
+  const requiresSourceBinding = () => ['recipient', 'coordinator'].includes(options.config.jobsRole) || profilePolicy(options.config.capabilityProfile)?.children === true;
+
   async function previewInputs(inputs: readonly SubmissionId[] = []): Promise<boolean> {
-    if (!['recipient', 'coordinator'].includes(options.config.jobsRole)) return true;
+    if (!requiresSourceBinding()) return true;
     if (!inputs.length) return false;
     try {
       const host = options.host();
@@ -57,11 +68,12 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
   }
 
   async function start(cid: ConversationId, watch: AgentEventStream) {
-    const me = { id: ++nextObserver, cid, watch, turns: new Set<string>(), settle: async () => {} };
+    const me: NonNullable<typeof observer> = { id: ++nextObserver, cid, watch, turns: new Set<string>(), settle: async () => {} };
+    if (options.activity) me.activity = createToolActivity({ port: options.activity, target, ...(options.cwd ? { cwd: options.cwd } : {}), ...(options.activityIntervalMs ? { intervalMs: options.activityIntervalMs } : {}) });
     observer = me; lastConversation = cid;
     let preview = await previewInputs(watch.snapshot.run?.inputs);
     const refreshPreview = async () => {
-      if (!['recipient', 'coordinator'].includes(options.config.jobsRole) || !preview) return;
+      if (!requiresSourceBinding() || !preview) return;
       // A run can gain inputs at a tool boundary without another run_start.
       // The attach snapshot is fixed. Read public live state before publishing
       // the next turn and keep suppression sticky until the next run.
@@ -89,11 +101,12 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
       if (observer !== me) return;
       switch (event.type) {
         case 'snapshot':
+          await me.activity?.finish(); // Overflow may have dropped tool ends.
           // Watch overflow replaces queued events with a new atomic snapshot.
           preview = false; preview = await previewInputs(event.run?.inputs);
           await refreshPreview(); newTurn(); texts = textOf(event.generation?.message?.content); publish(); break;
         case 'run_start': preview = false; preview = await previewInputs(event.inputs); safeDebug('durable run', { event: 'run_start', inputs: event.inputs.length }); break;
-        case 'run_end': preview = !['recipient', 'coordinator'].includes(options.config.jobsRole); safeDebug('durable run', { event: 'run_end', inputs: event.inputs.length }); break;
+        case 'run_end': await me.activity?.finish(); preview = !requiresSourceBinding(); safeDebug('durable run', { event: 'run_end', inputs: event.inputs.length }); break;
         case 'turn_start': await refreshPreview(); newTurn(); safeDebug('durable turn', { event: 'turn_start' }); break;
         case 'turn_end': safeDebug('durable turn', { event: 'turn_end' }); break;
         case 'message_start': {
@@ -102,8 +115,16 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
           break;
         }
         case 'message_update': ensureTurn(); for (const c of event.changes) change(c); publish(); break;
-        case 'tool_execution_start': safeDebug('durable tool', { event: 'start', tool: toolLabel(event.toolName) }); break;
-        case 'tool_execution_end': safeDebug('durable tool', { event: 'end', tool: toolLabel(event.toolName) }); break;
+        case 'tool_execution_start':
+          safeDebug('durable tool', { event: 'start', tool: toolLabel(event.toolName) });
+          if (me.activity && !event.toolCallId.includes('/')) { await refreshPreview(); if (preview && observer === me) me.activity.start(event.toolCallId, event.toolName, event.args); }
+          break;
+        case 'tool_execution_end': {
+          safeDebug('durable tool', { event: 'end', tool: toolLabel(event.toolName) });
+          const ended = event as { entry?: { message?: { isError?: boolean } }; result?: { isError?: boolean } };
+          if (me.activity) me.activity.end(event.toolCallId, !ended.entry && !ended.result ? true : ended.entry?.message?.isError === true || ended.result?.isError === true);
+          break;
+        }
         case 'auto_retry_start': safeDebug('durable retry', { event: 'retry', attempt: event.attempt }); break;
         case 'compaction_start': safeDebug('durable compaction', { event: 'start' }); break;
         case 'compaction_end': safeDebug('durable compaction', { event: 'end', failed: event.error !== undefined }); break;
@@ -116,6 +137,7 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
     if (partial) { newTurn(); texts = textOf(partial.content); publish(); }
     me.settle = async () => {
       finished = true; // Late events of this turn are dropped until the next turn or message starts.
+      await me.activity?.finish().catch(() => undefined);
       const turns = [...me.turns]; me.turns.clear();
       for (const t of turns) await options.stream.finish(target, t).catch(() => undefined);
     };

@@ -128,8 +128,14 @@ npm ci
 npm run check:changed
 npm run build
 PI_DURABLE_CONFIG=/absolute/private/native-instance.json \
+PI_DURABLE_CONFIG_SHA256=<administrator-reviewed-config-sha256> \
 PI_TELEGRAM_BRIDGE_RELEASE_SHA=<reviewed-full-sha> npm start
 ```
+
+C6 requires `PI_DURABLE_CONFIG_SHA256` for broker configurations. The daemon
+and inspector verify these exact configuration bytes on every start. Staged
+units receive the administrator-reviewed pin; a changed file requires a new
+administrator review. Ordinary dedicated user configurations can omit the pin.
 
 The daemon verifies the entrypoint's release root, changes to the configured
 workspace, and writes existing instance/SHA/PID readiness metadata. It does not
@@ -173,7 +179,8 @@ receive manual weekly review alongside the default branch's grouped legacy PRs.
 Stop the writer before inspecting its store. With the same private configuration:
 
 ```sh
-PI_DURABLE_CONFIG=/absolute/private/native-instance.json npm run inspect
+PI_DURABLE_CONFIG=/absolute/private/native-instance.json \
+PI_DURABLE_CONFIG_SHA256=<administrator-reviewed-config-sha256> npm run inspect
 ```
 
 The inspector does not resume tasks or start polling. It reports pending input,

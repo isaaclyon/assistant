@@ -28,3 +28,10 @@ describe("isolated runtime networking", () => {
     }
   });
 });
+
+it('accepts empty iproute2 namespace output and rejects malformed inventories', async()=>{
+  const {parseNamespaceNames}=await import('../src/isolation-network.js');
+  expect(parseNamespaceNames('')).toEqual([]);expect(parseNamespaceNames('  \n')).toEqual([]);
+  expect(parseNamespaceNames('[{"name":"pi-synthetic"}]')).toEqual(['pi-synthetic']);
+  for(const invalid of ['{','{}','[null]','[{"name":42}]'])expect(()=>parseNamespaceNames(invalid)).toThrow();
+});

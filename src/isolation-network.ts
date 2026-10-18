@@ -89,3 +89,11 @@ export function isolationNetworkCleanup(config: IsolationNetworkConfig): Isolati
     ...firewall.map(args => ({ binary: "iptables" as const, args: ["--wait", "5", ...args] })),
     { binary: "ip", args: ["link", "delete", host] }, { binary: "ip", args: ["netns", "delete", config.namespace] }];
 }
+
+/** iproute2 can emit no bytes for an empty namespace list. Other malformed
+ * output remains an error before any provisioning mutation. */
+export function parseNamespaceNames(stdout:string):string[] {
+  const entries:unknown=stdout.trim()===''?[]:JSON.parse(stdout);
+  if(!Array.isArray(entries)||entries.some(entry=>!entry||typeof entry!=='object'||typeof entry.name!=='string'))throw new Error('Invalid network namespace inventory');
+  return entries.map(entry=>entry.name);
+}

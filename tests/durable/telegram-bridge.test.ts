@@ -1,7 +1,7 @@
 import { expect, test, vi } from 'vitest';
 import type { NativeConfig } from '../../src/durable/config.js';
 import { assertNativeControl, assertNativeEnvelope, bridgeTelegram, normalizeTelegramUpdate, UiRejectedError, type NativeUiController } from '../../src/durable/telegram-bridge.js';
-const config={instanceId:'test',principal:'isaac',transport:{mode:'broker',botId:123,allowedUserId:42,socketPath:'/tmp/synthetic.sock'}} as NativeConfig;
+const config={instanceId:'test',principal:'isaac',capabilityProfile:'durable-chat-memory-test',jobsRole:'disabled',transport:{mode:'broker',botId:123,allowedUserId:42,socketPath:'/tmp/synthetic.sock'}} as NativeConfig;
 const update={update_id:7,message:{message_id:99,date:123456,from:{id:42},chat:{id:42,type:'private'},text:'hello'}};
 test('normalizes authenticated source time and identity without trusting actor text',()=>{
  const item=normalizeTelegramUpdate(config,update); expect(item).toEqual({type:'input',envelope:{instance:'test',principal:'isaac',bot:'123',chatId:42,messageIds:[99],originalAt:123456000,content:'hello'}});
@@ -150,4 +150,18 @@ test('only exact private bot quotes carry a prompt reference to places capture',
  for(const reply of [{...quoted,from:{id:42,is_bot:false}},{...quoted,from:{id:124,is_bot:true}},{...quoted,chat:{id:43,type:'private'}},{...quoted,chat:{id:42,type:'group'}}]){
   await accept(reply);expect(placesInput.mock.calls.at(-1)?.[0]).not.toHaveProperty('trustedPromptText');
  }
+});
+
+test('tool activity port is silent, private-target-only and absent for households',async()=>{
+ const call=vi.fn(async(method:string)=>({status:200,payload:{ok:true,result:method==='sendMessage'?{message_id:9}:true}}));
+ const raw={start:async()=>'ready' as const,stop:async()=>{},deliver:async()=>1,answerCallback:async()=>true,media:{call}} as any;
+ const {activity}=bridgeTelegram(config,raw,vi.fn());
+ expect(await activity.send({chatId:42},'Working')).toBe(9);
+ expect(call).toHaveBeenCalledWith('sendMessage',{chat_id:42,text:'Working',disable_notification:true});
+ await activity.edit({chatId:42},9,'More');await activity.remove({chatId:42},9);
+ expect(call.mock.calls.map(c=>c[0])).toEqual(['sendMessage','editMessageText','deleteMessage']);
+ call.mockClear();
+ expect(await activity.send({chatId:43},'x')).toBeUndefined();expect(await activity.send({chatId:42,threadId:1},'x')).toBeUndefined();
+ const group=bridgeTelegram({...config,group:{} } as any,raw,vi.fn()).activity;
+ expect(await group.send({chatId:42},'x')).toBeUndefined();expect(call).not.toHaveBeenCalled();
 });

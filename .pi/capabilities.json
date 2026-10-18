@@ -239,6 +239,10 @@
       {"id":"telegram-parity-test","path":".pi/telegram/parity-test.md","enabled":true},
       {"id":"telegram-provider-test","path":".pi/telegram/provider-test.md","enabled":true},
       {"id":"telegram-browser-test","path":".pi/telegram/browser-test.md","enabled":true},
+      {"id":"telegram-durable-personal-isaac","path":".pi/telegram/personal-isaac.md","enabled":true},
+      {"id":"telegram-durable-personal-emma","path":".pi/telegram/personal-emma.md","enabled":true},
+      {"id":"telegram-durable-household-shared","path":".pi/telegram/household-shared.md","enabled":true},
+      {"id":"telegram-durable-builder","path":".pi/telegram/builder.md","enabled":true},
       {
         "id": "telegram-mutations-test",
         "path": ".pi/telegram/mutations-test.md",
@@ -689,6 +693,126 @@
         "track-improvement-ideas"
       ],
       "instructions": "telegram-default"
+    },
+    {
+      "id": "durable-personal-isaac",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-mutations",
+        "native-places",
+        "native-private-browser",
+        "native-fast",
+        "native-usage",
+        "native-web-run",
+        "native-background-children"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-mutations",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "google-calendar",
+        "agent-browser",
+        "plan-weekend",
+        "native-reserve-restaurant",
+        "schedule-reminders-and-jobs",
+        "watch-prices"
+      ],
+      "instructions": "telegram-durable-personal-isaac"
+    },
+    {
+      "id": "durable-personal-emma",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-private-browser",
+        "native-fast",
+        "native-usage",
+        "native-web-run",
+        "native-background-children"
+      ],
+      "skills": [
+        "personal-memory",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "agent-browser",
+        "plan-weekend",
+        "schedule-reminders-and-jobs",
+        "watch-prices"
+      ],
+      "instructions": "telegram-durable-personal-emma"
+    },
+    {
+      "id": "durable-household-shared",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-fast",
+        "native-usage",
+        "native-web-run",
+        "native-background-children"
+      ],
+      "skills": [
+        "personal-memory",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "agent-browser",
+        "plan-weekend",
+        "schedule-reminders-and-jobs",
+        "watch-prices"
+      ],
+      "instructions": "telegram-durable-household-shared"
+    },
+    {
+      "id": "durable-builder",
+      "extensions": [
+        "native-search",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-private-browser",
+        "native-fast",
+        "native-usage",
+        "native-web-run",
+        "native-background-children"
+      ],
+      "skills": [
+        "agent-browser",
+        "check-weather",
+        "extend-this-agent",
+        "schedule-reminders-and-jobs",
+        "watch-prices",
+        "track-improvement-ideas"
+      ],
+      "instructions": "telegram-durable-builder"
     }
   ]
 }
