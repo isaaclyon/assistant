@@ -11,7 +11,7 @@
     "check": "npm run typecheck && npm test",
     "check:changed": "npm run check",
     "typecheck": "tsc -p tsconfig.native.json --noEmit",
-    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.native-build.json && node --input-type=module -e \"await Promise.all(['durable/application', 'jobs-cli', 'price-watches', 'checkers/web-page-items', 'checkers/retail-product-price', 'checkers/gmail-inbox', 'checkers/ynab-unapproved'].map(name => import('./dist/src/' + name + '.js')))\"",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.native-build.json && node --input-type=module -e \"await Promise.all(['durable/application', 'durable/child-worker', 'jobs-cli', 'price-watches', 'checkers/web-page-items', 'checkers/retail-product-price', 'checkers/gmail-inbox', 'checkers/ynab-unapproved'].map(name => import('./dist/src/' + name + '.js')))\"",
     "test": "vitest run --config vitest.native.config.ts",
     "test:pilot": "vitest run --config prototypes/durable-c1/vitest.config.ts",
     "start": "node dist/src/durable/daemon.js",

@@ -24,11 +24,11 @@ export function createNativeExecutionEnvironment(config:NativeConfig) {
   PI_TELEGRAM_BRIDGE_INSTANCE_ID:config.instanceId,
   PI_TELEGRAM_PRINCIPAL:config.principal,
  });
- if(['durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test'].includes(config.capabilityProfile)&&config.cli?.messagesBaseUrl) {
+ if(['durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test','durable-jobs-children-test'].includes(config.capabilityProfile)&&config.cli?.messagesBaseUrl) {
   shellEnv.PI_TELEGRAM_MESSAGES_BASE_URL=config.cli.messagesBaseUrl;
  }
- if(['durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test'].includes(config.capabilityProfile)){for(const [key,value] of Object.entries(nativeBrowserEnvironment(config))){if(value!==undefined)shellEnv[key]=value;}}
- if(config.capabilityProfile==='durable-jobs-schedules-test'&&config.jobsRole==='coordinator'&&config.coordinator?.schedules){
+ if(['durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test','durable-jobs-children-test'].includes(config.capabilityProfile)){for(const [key,value] of Object.entries(nativeBrowserEnvironment(config))){if(value!==undefined)shellEnv[key]=value;}}
+ if(['durable-jobs-schedules-test','durable-jobs-children-test'].includes(config.capabilityProfile)&&config.jobsRole==='coordinator'&&config.coordinator?.schedules){
   shellEnv.PI_TELEGRAM_JOBS_DIR=config.coordinator.coordinatorStateDir;
   shellEnv.PI_TELEGRAM_BRIDGE_STATE_ROOT=config.coordinator.stateRoot;
  }

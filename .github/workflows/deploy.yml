@@ -26,6 +26,8 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: Install repository inspection prerequisite
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends ripgrep
       - run: npm ci --no-audit --no-fund
       - name: Check native types, compatibility, recovery, and behavior
         run: npm run check:changed
