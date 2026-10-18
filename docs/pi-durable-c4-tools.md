@@ -1,7 +1,9 @@
-# C4 general tools and public web
+# C4 general tools, public web and Google reads
 
 Status: **first slice implemented and locally validated on `feat/durable-c4`;
-C4 remains in progress.** C3 is accepted. This slice restores general file,
+a second Google-read slice is implemented and locally validated on
+`feat/durable-c4-reads`;
+C4 remains in progress.** C3 is accepted. The first slice restores general file,
 shell and bounded public-web tools in a separate selected profile. Production
 continues using its legacy release. The legacy planning checkout retains this
 guide as checkpoint evidence.
@@ -83,7 +85,7 @@ These tools are a bounded provider-neutral first slice. They do not establish
 legacy `web_run` or provider-specific search parity. Authenticated browser
 workflows retain their separate C4 acceptance boundary.
 
-## Validation and limits
+## First-slice validation and limits
 
 Under Node 24, `npm run check:changed` passed all 293 tests in 32 files, and
 `npm run build` passed, including the compiled application import.
@@ -113,5 +115,117 @@ loads that wrapper rather than adding authority only around a test handler.
 No live bot, credential copy, production service or private-state migration was
 needed for this slice. Linux/systemd and full integration acceptance remain later
 gates. The [roadmap](pi-durable-migration-plan.md#c4--remaining-integrations-and-protected-browser-workflows)
-keeps C4 open for read-oriented integrations, direct places UI, guarded mutations,
+keeps C4 open for remaining CLI-backed skills, direct places UI, guarded mutations,
 protected browser workflows and provider/operator parity. C5–C7 remain pending.
+
+
+## Google read integration slice
+
+`durable-read-integrations-test` selects the general-tools surface plus the
+native `google-reads` bundle, a focused Google-read skill and the existing
+`check-weather` skill. It offers twelve `google_workspace` operations:
+`account_status`, `calendar_list`, `calendar_events`, `calendar_search`,
+`calendar_availability`, `calendar_event`, `gmail_search`, `gmail_thread`,
+`contacts_search`, `places_search`, `places_search_candidates`, `places_details`.
+The foundation, accepted C3 and first C4 profiles retain their selections and
+compatibility signatures. Use a separate private native store for this profile.
+
+The provider sees a flat, closed object schema. The adapter validates the exact
+operation branch before transport, including required fields, cross-operation
+fields and branch-specific limits. The native bundle reuses pure Google
+normalizers, the bounded gog/HTTPS transports, the guarded single-event read,
+and the existing Places SQLite gateway. It does not import the legacy Pi
+extension or its registration/confirmation lifecycle.
+
+### Explicit private configuration
+
+Use the C2/C3 private instance configuration with
+`capabilityProfile: "durable-read-integrations-test"` and an explicit `google`
+object. This synthetic example shows the complete optional configuration:
+
+```json
+{
+  "google": {
+    "account": "reader@example.com",
+    "gog": {
+      "binary": "/opt/google/bin/gog",
+      "passwordFile": "/private/native/google-password",
+      "home": "/private/native/gog-home"
+    },
+    "calendarTargets": {
+      "account": "reader@example.com",
+      "personal": "stable-personal-calendar-id",
+      "thingsToDo": "stable-things-calendar-id"
+    },
+    "places": {
+      "apiKeyFile": "/private/native/places-key",
+      "searchMonthlyLimit": 20,
+      "detailsMonthlyLimit": 20,
+      "candidatesMonthlyLimit": 10
+    }
+  }
+}
+```
+
+The native adapter takes these paths and limits from private instance JSON;
+it does not resolve legacy Google environment variables. Paths must be absolute.
+Passwords and API keys stay in separate current-user-owned mode-0600 files,
+read just in time. OAuth clients/tokens stay in the isolated gog home. An empty
+`google: {}` is valid and reports unavailable configuration when needed.
+Missing sections disable their corresponding transport. Limits are required
+when selecting Places, accept integers from zero to one million, and cannot be
+overridden by tool arguments. Google configuration is rejected for other native
+profiles; this profile requires the same memory principal/authority as C3.
+Changing its Google configuration blocks reopening an incompatible store.
+
+Single-event reads preserve the existing stricter Calendar boundary: explicit
+stable Personal/Things to Do IDs, the configured email account, full Calendar
+authorization and editor/owner access. They issue only `calendarList.get` and
+`events.get`. The other Calendar reads use bounded account/calendar/window
+selection. This profile exposes no Calendar mutations.
+
+### Bounds and recovery
+
+Workspace commands use absolute gog execution without a shell, fixed read-only,
+noninteractive and no-send flags, a minimal child environment, a ten-second
+transport deadline and 64-KiB output caps. The native adapter adds a 30-second
+operation signal and propagates caller cancellation. POSIX cancellation kills
+the process group. Contacts limits results to ten, Gmail search to fifty,
+calendar windows to 366 days and availability to 31 days/eight accounts.
+Normalized remote text remains untrusted and failures omit raw provider errors.
+
+The model-visible dispatcher is replay-safe; ordinary Workspace reads may run
+again after the production registry rechecks current principal/chat/epoch.
+Places runs as an internal `google_places_read` nested task, callable only by
+other tools, with replay **unsafe**. Its durable intent prevents an interrupted
+lookup from automatically repeating an uncertain outbound attempt. A completed
+nested result can return to the dispatcher after restart. An interrupted result
+reports that an attempt may already be counted; a new explicit lookup follows
+the usual cache and metering rules. Both task boundaries use production authorization and handler signatures.
+
+Places keeps the existing `<stateDir>/google-places.db` transaction, cache keys,
+UTC-month accounting and SKU limits. Reservation occurs before outbound fetch;
+failed attempts remain counted. Identity text/candidate searches cache for 24
+hours and identity details for 30 days. Rich details are uncached, retain review
+author/source links and use a separate SKU with its own copy of the details
+limit. Identity and rich details can therefore consume twice the numeric details
+setting. Local metering is conservative; it does not prove provider billing.
+
+### Read-slice validation
+
+Under Node 24, `npm run check:changed` passed 395 tests in 37 files and
+`npm run build` passed, including the compiled application import.
+Validation uses synthetic providers and private fictional credential fixtures;
+it makes no real Google requests. Production composition exercises the default
+gog subprocess and default Places HTTPS path with fake network responses,
+normalization, fixed masks, cache hits, monthly blocks, uncached attributed
+reviews, authorization, actual child termination and nested HTTPS cancellation
+on abort. Schema/branch and
+config tests cover invalid requests before I/O and incompatible configuration.
+Subprocess SIGKILL tests cover Workspace retry after effect, epoch rejection,
+and a Places fetch/reservation with no duplicate after recovery. Shared transport
+and gateway suites remain in the ordinary native test gate.
+
+Live Google/OAuth compatibility, Linux/systemd and the remaining full C4
+integration gates remain unverified. CLI-backed skills, direct places UI,
+guarded mutations, protected browser and provider/operator parity remain open.

@@ -4,11 +4,15 @@
 
 Production still uses the legacy boundaries below. The isolated
 `feat/durable-c4` release tree extends the native foundation and accepted
-chat-and-memory profile with selected general tools and bounded public web with its own package, tests and explicit test-instance
-entrypoint. See [ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md),
+chat-and-memory profile with selected general tools and bounded public web.
+`feat/durable-c4-reads` adds a separate Google-read profile with explicit private
+configuration, bounded transports and existing Places cache/attempt accounting.
+Workspace reads can replay after authority checks; uncertain Places attempts
+stay interrupted through an internal replay-unsafe task. Both branches use
+the native package, tests and explicit test-instance entrypoint. See [ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md),
 [ADR-0053](docs/adr/0053-native-chat-memory-and-evidence.md), and the
 [C3 evidence](docs/pi-durable-c3-chat-memory.md) and
-[C4 first-slice guide](docs/pi-durable-c4-tools.md). C3 passed its dedicated live
+[C4 tools and reads guide](docs/pi-durable-c4-tools.md). C3 passed its dedicated live
 user checkpoint. C4 integrations remain in progress; production activation
 remains C6/C7.
 
@@ -426,6 +430,6 @@ Inbound turns are crash-durable through the bridge inbox, but outbound Telegram 
 
 The [pi-durable migration plan](docs/pi-durable-migration-plan.md) records the
 approved target architecture and C0–C7 checkpoints. C0–C3 passed. The isolated
-C4 branch adds locally validated general tools and bounded public web; the
+C4 branches add general tools, bounded public web and Google reads; the
 remaining C4 integrations are pending. The runtime described above continues serving legacy production.
 Production activation remains C7.
