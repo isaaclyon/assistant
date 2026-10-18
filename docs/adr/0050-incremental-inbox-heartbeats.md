@@ -51,3 +51,12 @@ and operational failures stop advancement rather than silently dropping a page.
 Truncated text can miss evidence; assistant review can recover context for
 positives but cannot recover Jev false negatives. Prompt handoff retries preserve
 the existing delivery contract; this does not claim exactly-once Telegram delivery.
+
+## Native schedule integration
+
+The separate `durable-jobs-schedules-test` profile runs Gmail through its selected
+Google transport and selects a schedule-specific judge key. No memory key or
+ambient provider configuration supplies implicit authorization. Native recovery
+retains the existing cursor/pending-event commit boundary. The
+[schedule guide](../pi-durable-c5-schedules.md) records mixed-runtime admission,
+publication crash evidence and the limits of those synthetic fixtures.

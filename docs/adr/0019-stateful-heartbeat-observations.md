@@ -77,3 +77,12 @@ Model a heartbeat as `trigger -> checker -> rule -> onTrigger`.
 - Existing external version-1 files without heartbeats continue to run unchanged
   and should become version 2 on their next normal edit. Legacy heartbeats require
   an explicit checker/rule rewrite before deployment.
+
+## Native schedule integration
+
+The separate `durable-jobs-schedules-test` profile reuses this rule/state contract
+with an explicit compiled-checker selection. Checker environments exclude ambient
+provider settings; the existing host still owns baselines, pending events and
+publication retries. Earlier native profiles and legacy defaults remain unchanged.
+The [schedule guide](../pi-durable-c5-schedules.md) records configuration,
+compiled entrypoints and offline evidence.
