@@ -1,6 +1,6 @@
 # Pi-durable migration plan
 
-Status: approved architecture and checkpoint sequence; C0–C3 passed. C3 chat and memory are implemented on isolated `feat/durable-c3`, with local validation, independent review and dedicated live user acceptance complete; see the [C3 guide](pi-durable-c3-chat-memory.md). C4's [first slice](pi-durable-c4-tools.md) adds locally validated general tools and bounded public web on `feat/durable-c4`; the Google-read slice on `feat/durable-c4-reads` adds Calendar/Gmail/Contacts/Places with bounded transports and metered recovery. Full C4 remains in progress. Production remains on the legacy release; no production deployment or private-state migration ran.
+Status: approved architecture and checkpoint sequence; C0–C3 passed. C3 chat and memory are implemented on isolated `feat/durable-c3`, with local validation, independent review and dedicated live user acceptance complete; see the [C3 guide](pi-durable-c3-chat-memory.md). C4's [first slice](pi-durable-c4-tools.md) adds locally validated general tools and bounded public web on `feat/durable-c4`; the Google-read slice on `feat/durable-c4-reads` adds Calendar/Gmail/Contacts/Places with bounded transports and metered recovery. The CLI slice on `feat/durable-c4-cli` selects the existing YNAB and editable Messages skills through the replay-unsafe shell, with explicit optional Messages configuration and synthetic recovery coverage. Full C4 remains in progress. Production remains on the legacy release; no production deployment or private-state migration ran.
 
 The user approved the durable-only extension strategy, chat-and-memory MVP, retained hosting and Telegram experience, target architecture, and C0–C7 sequence. This plan records intended work; it does not describe implemented behavior or supersede existing ADRs until their replacements are accepted.
 
@@ -185,9 +185,13 @@ The Google-read slice on `feat/durable-c4-reads` adds a separate explicit
 read profile, private Google configuration, existing cache/metering, and
 operation-specific recovery: Workspace reads can replay; uncertain Places
 attempts cannot repeat automatically. The original C3 and first C4 profiles
-remain selected separately. This is local implementation
-acceptance for these slices, not the complete C4 pass gate; remaining CLI skills,
-protected browser workflows and full provider/operator parity remain pending.
+remain selected separately. The CLI slice on `feat/durable-c4-cli` adds a separate
+profile selecting YNAB and editable Messages-link skills, release-root helper
+paths and an explicit optional private Messages origin. Interrupted CLI commands
+stay interrupted; unknown financial outcomes require read-only reconciliation.
+This is local implementation acceptance for these slices, not the complete C4
+pass gate; direct places UI, guarded mutations, protected browser workflows and
+full provider/operator parity remain pending.
 
 Restore general file/shell/public-web tools with operation-specific replay policies as part of C4. The C3 profile deliberately selects only typed memory/history tools.
 

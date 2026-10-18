@@ -8,8 +8,10 @@ chat-and-memory profile with selected general tools and bounded public web.
 `feat/durable-c4-reads` adds a separate Google-read profile with explicit private
 configuration, bounded transports and existing Places cache/attempt accounting.
 Workspace reads can replay after authority checks; uncertain Places attempts
-stay interrupted through an internal replay-unsafe task. Both branches use
-the native package, tests and explicit test-instance entrypoint. See [ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md),
+stay interrupted through an internal replay-unsafe task. `feat/durable-c4-cli`
+adds a separate YNAB/Messages-link skill profile through the replay-unsafe shell,
+with release-root helper paths and an optional private Messages HTTPS origin.
+These branches use the native package, tests and explicit test-instance entrypoint. See [ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md),
 [ADR-0053](docs/adr/0053-native-chat-memory-and-evidence.md), and the
 [C3 evidence](docs/pi-durable-c3-chat-memory.md) and
 [C4 tools and reads guide](docs/pi-durable-c4-tools.md). C3 passed its dedicated live
