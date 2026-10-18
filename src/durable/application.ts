@@ -29,7 +29,8 @@ const confirmationKey=(cid:ConversationId,id:string)=>createHash('sha256').updat
 export async function createNativeApplication(config:NativeConfig,options:NativeApplicationOptions) {
  await loadCapabilityProfile(config.resourceRoot,config.capabilityProfile);
  const enabled=isNativeMemoryProfile(config.capabilityProfile);
- const placesEnabled=config.capabilityProfile==='durable-places-test';
+ const mutationsEnabled=config.capabilityProfile==='durable-mutations-test';
+ const placesEnabled=config.capabilityProfile==='durable-places-test'||mutationsEnabled;
  if(placesEnabled&&config.principal!=='isaac')throw new Error('Places profile requires the Isaac principal');
  const cliEnabled=config.capabilityProfile==='durable-cli-integrations-test'||placesEnabled;
  const googleEnabled=config.capabilityProfile==='durable-read-integrations-test'||cliEnabled;
@@ -55,6 +56,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  let generalFactory:(()=>NativeBundle)|undefined;
  let publicWebFactory:(()=>NativeBundle)|undefined;
  let places:ReturnType<typeof import('./places.js')['createNativePlaces']>|undefined;
+ let calendar:ReturnType<typeof import('./calendar.js')['createNativeCalendar']>|undefined;
  let googleFactory:(()=>NativeBundle)|undefined;
  let debugEnabled=false;
  const debugCommands=new Set<string>();
@@ -64,7 +66,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  const close=()=>closing??=(async()=>{
   debugEnabled=false;
   const failures:unknown[]=[];
-  for(const cleanup of [()=>visible?.close(),()=>host?.close(),()=>places?.close(),()=>executionEnvironment?.cleanup(context),()=>resources?.close(),()=>search?.close(),()=>provider.close()]){
+  for(const cleanup of [()=>visible?.close(),()=>host?.close(),()=>places?.close(),()=>calendar?.close(),()=>executionEnvironment?.cleanup(context),()=>resources?.close(),()=>search?.close(),()=>provider.close()]){
    try{await cleanup();}catch(error){failures.push(error);}
   }
   if(failures.length)throw new AggregateError(failures,'Native application cleanup failed');
@@ -90,7 +92,10 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    publicWebFactory=(await import('./public-web.js')).createPublicWebBundle;
    executionEnvironment=tools.createNativeExecutionEnvironment(config);
   }
-  if(googleEnabled){
+  if(mutationsEnabled){
+   const module=await import('./calendar.js');calendar=module.createNativeCalendar({config,host:requireHost,present:async(destination,presentation)=>{if(!transport)throw new Error('Telegram presenter unavailable');return transport.presenter.present(destination,presentation);}});
+  }
+  if(googleEnabled&&!mutationsEnabled){
    const google=await import('./google-read.js');googleFactory=()=>google.createGoogleReadBundle(config);
   }
   if(placesEnabled){
@@ -162,7 +167,8 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    if(!enabled)throw new Error('Native domain bundles are unavailable for this profile');
    if(generalEnabled&&name==='general-tools')return generalFactory!();
    if(generalEnabled&&name==='public-web')return publicWebFactory!();
-   if(googleEnabled&&name==='google-reads')return googleFactory!();
+   if(mutationsEnabled&&name==='google-mutations')return {...calendar!.bundle(),close:async()=>{}};
+   if(googleEnabled&&!mutationsEnabled&&name==='google-reads')return googleFactory!();
    if(placesEnabled&&name==='places')return {...places!.bundle(),close:async()=>{}}; // Application owns the shared domain lifetime across reloads.
    if(name==='memory')return {name,version:1,tools:[memoryTool!],close:async()=>{}};
    if(name==='search')return searchFactory!();
@@ -180,6 +186,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   const controls=createNativeControls({config,host:requireHost,models:provider.models,requestRestart:()=>options.requestRestart?.(),
    invalidate:async()=>{
     await places?.invalidate();
+    await calendar?.invalidate();
     const current=requireHost();
     await current.runtime.root.commit(async tx=>{const state=await tx.doc(Bindings,current.runtime.root.id);for(const cid of Object.values(state.epochs)){
      if(memoryModule)await memoryModule.invalidateMemoryState(tx,operations,cid,String(state.epoch),'reload');
@@ -217,6 +224,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
      }
     }catch(error){if(error instanceof HostControlRejectedError)throw new UiRejectedError(error.message);throw error;}
    },
+   ...(calendar?{calendar:(request)=>calendar!.callback(request)}:{}),
    ...(places?{places:(request)=>places!.callback(request),placesInput:(request)=>places!.input(request)}: {}),
    confirmation:async request=>{
     if(!memoryModule)throw new UiRejectedError('This action is unavailable.');
@@ -252,7 +260,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    onEpochChange:async(tx,previous,nextEpoch)=>{for(const id of previous){if(memoryModule)await memoryModule.invalidateMemoryState(tx,operations,id,String(nextEpoch),'new');else await operations.invalidate(tx,id,String(nextEpoch),'new');}},
    onConversation:async cid=>{await visible?.attach(cid);},
    ...(config.idleHours>0?{idleMs:config.idleHours*3_600_000}:{}),
-   transport:{start:bridge.start,stop:async()=>{await bridge.stop();await places?.close();},sendFinal:async request=>{await visible?.finish();return bridge.sendFinal(request);}},
+   transport:{start:bridge.start,stop:async()=>{await Promise.all([bridge.stop(),places?.close(),calendar?.close()]);},sendFinal:async request=>{await visible?.finish();return bridge.sendFinal(request);}},
    policy:envelope=>assertNativeEnvelope(config,envelope),controlPolicy:control=>assertNativeControl(config,control),onFatal:options.onFatal,
   });
   const runtime=host;

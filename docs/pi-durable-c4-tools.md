@@ -1,10 +1,11 @@
-# C4 tools, reads, CLI skills and direct places
+# C4 tools, reads, CLI skills, places and guarded changes
 
 Status: **first slice implemented and locally validated on `feat/durable-c4`;
 a second Google-read slice is implemented and locally validated on
 `feat/durable-c4-reads`; a CLI skill slice is implemented on
 `feat/durable-c4-cli`; direct private places are implemented and locally validated on
-`feat/durable-c4-places` (validation below);
+`feat/durable-c4-places`; guarded Calendar and places mutations are implemented on
+`feat/durable-c4-mutations` (validation below).
 C4 remains in progress.** C3 is accepted. The first slice restores general file,
 shell and bounded public-web tools in a separate selected profile. Production
 continues using its legacy release. The legacy planning checkout retains this
@@ -407,3 +408,76 @@ would admit old private replies to the model.
 No live Telegram bot, real provider account, private rankings or production
 service was used. Real ordinary/broker delivery, Linux service behavior and
 legacy-to-native state migration remain later acceptance gates.
+
+
+## Guarded mutation integration slice
+
+`durable-mutations-test` extends the direct places profile with Calendar
+create/update/delete and user-only places cancel/delete/undo confirmations.
+It selects a separate native Google bundle and Calendar guidance. Use a new
+private native store with the same scoped memory/Google configuration and
+optional Messages origin. Only the Isaac private principal can select this
+combined places profile. Earlier profile resource selections remain unchanged.
+
+Calendar writes require `google.gog` and explicit `google.calendarTargets` with
+the exact account and stable Personal/Things to Do IDs shown in the read-slice
+configuration. Empty `google: {}` remains valid when Google is unconfigured.
+Full Calendar OAuth access and editor/owner permission are still checked by
+the shared domain adapter. Gmail and Contacts remain read-only. The existing
+Calendar restrictions on attendees, invitations, recurrence, special event
+types, explicit offsets/time zones and exclusive all-day ends remain in force.
+
+Clear Calendar creates/edits act through typed tool operations. Creation reuses
+one operation key and its domain-owned event ID. Updates send only requested
+fields and require the exact event etag. Calendar deletion and all destructive
+places actions show direct Confirm/Cancel buttons. Model arguments and chat
+text cannot approve them; the model never receives the approval handle.
+
+Pending confirmations bind the authenticated principal, actor, private chat,
+message, conversation epoch and ten-minute expiry. Ordinary restart preserves
+valid previews; `/new` and `/reload` invalidate them. An unacknowledged preview
+cannot authorize an effect. The native claim precedes mutation, so an unknown
+result cannot automatically repeat the write. Domain revision/snapshot checks
+use the originally previewed version. See
+[ADR-0036](adr/0036-guarded-calendar-writes.md) for Calendar's existing best-effort
+revision check: the client cannot make the read/write pair atomic against an
+external editor.
+
+Calendar call receipts remain retained so replaying an old Harness task cannot
+turn a pruned claim into a fresh write. Completed receipts discard their input;
+C6 must measure storage growth and prove safe retirement together with task
+history. Active Google transports share a 30-second deadline with verification
+reads. Shutdown cancels them and drains the native operation before closing the
+Harness. Reload also revokes claimed confirmations waiting to start transport.
+
+### Guarded-slice validation
+
+Under Node 24, `npm run check:changed` passed all 635 tests in 54 files and
+`npm run build` passed, including the compiled application import. Static
+comparison confirmed all pre-existing capability resource/profile objects are
+unchanged. Changed documentation links and `git diff --check` also passed.
+
+Tests use the selected production application and registry, a faux provider,
+the real bounded gog subprocess over a persisted fictional Calendar, recording
+Telegram transport and real places SQLite. They cover typed reads/changes, stable create keys, repeated provider
+call IDs, exact preview versions, wrong actor/chat/message, expiry, restart,
+reset/reload, concurrent Confirm/Cancel and redelivery. Old profiles retain their
+catalogs, tool versions and unavailable destructive actions.
+
+SIGKILL fixtures pause before and after Calendar create/update/delete transport
+effects and places deletion. The host is killed before its paused transport so
+it cannot settle the lost result. Recovery first reuses the original task or
+callback identity, then delivers another update: no claimed mutation repeats. Recovery
+uses only Calendar reads or reports an interrupted places change. Changed epochs
+reject stale callbacks. Kill points surround transport/domain effects; they do
+not model arbitrary instruction-level failures or a real Telegram network send.
+
+Independent read-only reviews covered places authority and the combined runtime.
+Review findings and follow-up regressions addressed shutdown ordering, reused
+provider IDs, claim retention, reload between claim and transport, read-only
+recovery after cancellation and concurrent confirmation presentation. C6 retains
+the receipt-storage and safe-retirement measurement gate.
+
+Live Google/OAuth, Telegram delivery, private rankings and Linux/systemd remain
+separate acceptance gates. This slice does not close C4's protected browser or
+provider/operator parity gates.

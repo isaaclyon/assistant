@@ -7,6 +7,14 @@ type Run = (runtime: GoogleRuntime, args: string[], signal?: AbortSignal) => Pro
 type Json = Record<string, unknown>;
 interface Target { runtime: GoogleRuntime; account: string; calendarId: string; calendar: string }
 interface Pending { target: Target; event: Json; expires: number; chatId?: number }
+/** Exact event version a person approved for deletion. Plain JSON so a caller can persist it. */
+export type PreparedDelete = { account: string; calendar: "personal" | "things_to_do"; calendarId: string; eventId: string; etag: string };
+/** Optional guard checked after all asynchronous permission and version reads, immediately before a write. A rejection cancels the write. */
+export interface WriteHooks { assertAuthority?: () => Promise<void> }
+export type Reconciliation = { status: "applied"; event: Json } | { status: "not_applied" } | { status: "unknown" };
+export type ReconcileIntent =
+  | { operation: "calendar_create" | "calendar_update"; input: Json }
+  | { operation: "calendar_request_delete"; prepared: PreparedDelete };
 const TTL = 10 * 60_000;
 export const CALENDAR_WRITE_OPERATIONS = new Set(["calendar_event", "calendar_create", "calendar_update", "calendar_request_delete"]);
 
@@ -194,7 +202,83 @@ export class CalendarWrites {
   private unresolved(): never {
     throw new CalendarWriteError("CALENDAR_WRITE_UNRESOLVED", "The Calendar change could not be verified. Check the event and Calendar authorization before retrying; reuse the same operation_key for a creation");
   }
-  async execute(runtime: GoogleRuntime, input: Json, signal?: AbortSignal): Promise<Json> {
+  private async guard(hooks: WriteHooks | undefined, generation: number, signal?: AbortSignal) {
+    try { await hooks?.assertAuthority?.(); } catch { throw new CalendarWriteError("CALENDAR_CANCELLED", "Calendar change cancelled before submission"); }
+    this.current(generation, signal);
+  }
+  /** Validates and reads the event for a deletion preview without registering an in-memory token. */
+  async prepareDelete(runtime: GoogleRuntime, input: Json, signal?: AbortSignal): Promise<{ event: Json; prepared: PreparedDelete }> {
+    if (input.operation !== "calendar_request_delete") invalid();
+    keys(input, ["operation", "account", "calendar", "event_id", "if_etag"]);
+    const target = this.target(runtime, input);
+    const id = eventId(input.event_id);
+    const generation = this.generation;
+    return this.locked(async () => {
+      this.current(generation, signal);
+      await this.permission(target, signal);
+      const event = await this.read(target, id, signal);
+      editable(event); version(event, input.if_etag);
+      return { event: normalized(event, target), prepared: { account: target.account, calendar: target.calendar as PreparedDelete["calendar"], calendarId: target.calendarId, eventId: id, etag: String(event.etag) } };
+    });
+  }
+  private preparedTarget(runtime: GoogleRuntime, prepared: PreparedDelete): Target {
+    const target = this.target(runtime, { account: prepared.account, calendar: prepared.calendar });
+    if (target.calendarId !== prepared.calendarId) throw new CalendarWriteError("CALENDAR_WRITE_FORBIDDEN", "Calendar writes are enabled only for the configured calendars");
+    return target;
+  }
+  /** Deletes the exact approved version. Does not ask for or create another confirmation. */
+  async executePreparedDelete(runtime: GoogleRuntime, prepared: PreparedDelete, signal?: AbortSignal, hooks?: WriteHooks): Promise<{ deleted: true }> {
+    const target = this.preparedTarget(runtime, prepared);
+    const generation = this.generation;
+    return this.locked(() => this.deleteApproved(target, eventId(prepared.eventId), prepared.etag, generation, signal, hooks));
+  }
+  private async deleteApproved(target: Target, id: string, etag: unknown, generation: number, signal?: AbortSignal, hooks?: WriteHooks): Promise<{ deleted: true }> {
+    await this.permission(target, signal);
+    const current = await this.read(target, id, signal);
+    editable(current); version(current, etag);
+    await this.guard(hooks, generation, signal);
+    try {
+      await this.api(target, "events.delete", id, undefined, signal);
+      return { deleted: true };
+    } catch (error) {
+      throwDefiniteRejection(error);
+      // A returned tombstone proves deletion. A generic read error does not.
+      try { if ((await this.read(target, id, signal)).status === "cancelled") return { deleted: true }; } catch { /* unresolved */ }
+      return this.unresolved();
+    }
+  }
+  /** Read-only inspection of a write whose result was not recorded. Never writes. */
+  async reconcile(runtime: GoogleRuntime, intent: ReconcileIntent, signal?: AbortSignal): Promise<Reconciliation> {
+    try {
+      if (intent.operation === "calendar_request_delete") {
+        const target = this.preparedTarget(runtime, intent.prepared);
+        const event = await this.read(target, eventId(intent.prepared.eventId), signal);
+        if (event.status === "cancelled") {
+          let shown: Json;
+          try { shown = normalized(event, target); } catch { shown = { id: event.id, status: "cancelled", calendar: target.calendar, untrusted: true }; }
+          return { status: "applied", event: shown };
+        }
+        return event.etag === intent.prepared.etag ? { status: "not_applied" } : { status: "unknown" };
+      }
+      const input = intent.input;
+      const target = this.target(runtime, input);
+      if (intent.operation === "calendar_create") {
+        const patch = fields(input.event, true);
+        const id = `a${hash(`${target.account}\0${target.calendarId}\0${string(input.operation_key, 128)}`)}`;
+        let event: Json;
+        try { event = await this.read(target, id, signal); }
+        catch (error) { return error instanceof GoogleCommandError && error.code === "NOT_FOUND" ? { status: "not_applied" } : { status: "unknown" }; }
+        const props = event.extendedProperties as { private?: Json } | undefined;
+        return props?.private?.assistantDraft === hash(JSON.stringify(patch)) && matches(event, patch) ? { status: "applied", event: normalized(event, target) } : { status: "unknown" };
+      }
+      const patch = fields(input.patch, false);
+      const event = await this.read(target, eventId(input.event_id), signal);
+      if (event.status === "cancelled") return { status: "unknown" };
+      if (matches(event, patch)) return { status: "applied", event: normalized(event, target) };
+      return event.etag === input.if_etag ? { status: "not_applied" } : { status: "unknown" };
+    } catch { return { status: "unknown" }; }
+  }
+  async execute(runtime: GoogleRuntime, input: Json, signal?: AbortSignal, hooks?: WriteHooks): Promise<Json> {
     const operation = input.operation;
     if (!CALENDAR_WRITE_OPERATIONS.has(String(operation))) invalid();
     keys(input, ["operation", "account", "calendar", ...(operation === "calendar_create" ? ["operation_key", "event"] : ["event_id", ...(operation === "calendar_event" ? [] : ["if_etag"]), ...(operation === "calendar_update" ? ["patch"] : [])])]);
@@ -217,11 +301,11 @@ export class CalendarWrites {
           return { operation, event: normalized(event, target) };
         };
         if (existing) return verify(existing);
-        this.current(generation, signal);
+        await this.guard(hooks, generation, signal);
         try { await this.api(target, "events.insert", undefined, { ...patch, id, extendedProperties: { private: { assistantDraft: fingerprint } } }, signal); }
         catch (error) { throwDefiniteRejection(error); /* Reconcile a lost response; never invent a new ID. */ }
         let saved: Json;
-        try { saved = await this.read(target, id); } catch { return this.unresolved(); }
+        try { saved = await this.read(target, id, signal); } catch { return this.unresolved(); }
         return verify(saved);
       }
       const event = await this.read(target, id, signal);
@@ -236,10 +320,10 @@ export class CalendarWrites {
         return { token, event: normalized(event, target) };
       }
       validateInterval(object(patch!.start ?? event.start), object(patch!.end ?? event.end));
-      this.current(generation, signal);
+      await this.guard(hooks, generation, signal);
       try { await this.api(target, "events.patch", id, patch, signal); } catch (error) { throwDefiniteRejection(error); /* Read back once; do not blindly replay a patch. */ }
       let saved: Json;
-      try { saved = await this.read(target, id); } catch { return this.unresolved(); }
+      try { saved = await this.read(target, id, signal); } catch { return this.unresolved(); }
       if (!matches(saved, patch!)) return this.unresolved();
       return { operation, event: normalized(saved, target) };
     });
@@ -247,22 +331,6 @@ export class CalendarWrites {
   async confirm(token: string, chatId: number): Promise<{ deleted: true }> {
     const pending = this.consume(token, chatId);
     const generation = this.generation;
-    return this.locked(async () => {
-      const { target, event } = pending;
-      await this.permission(target);
-      const id = eventId(event.id);
-      const current = await this.read(target, id);
-      editable(current); version(current, event.etag);
-      this.current(generation);
-      try {
-        await this.api(target, "events.delete", id);
-        return { deleted: true };
-      } catch (error) {
-        throwDefiniteRejection(error);
-        // A returned tombstone proves deletion. A generic read error does not.
-        try { if ((await this.read(target, id)).status === "cancelled") return { deleted: true }; } catch { /* unresolved */ }
-        return this.unresolved();
-      }
-    });
+    return this.locked(() => this.deleteApproved(pending.target, eventId(pending.event.id), pending.event.etag, generation));
   }
 }

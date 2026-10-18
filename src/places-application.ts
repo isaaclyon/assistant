@@ -22,6 +22,16 @@ export interface PlacesCommand {
   confirmation_token?: string;
 }
 
+/** A destructive request prepared before approval. The snapshot is taken once, at preview time. */
+export interface PreparedConfirmation {
+  operation: ConfirmationOperation;
+  insertionId?: string;
+  revision?: number;
+  placeId?: string;
+  categoryId?: string;
+  snapshot?: PlaceDeletionSnapshot;
+}
+
 type Confirmation = { operation: ConfirmationOperation; target: string; expiresAt: number; snapshot?: PlaceDeletionSnapshot };
 
 export class PlacesApplication {
@@ -34,6 +44,43 @@ export class PlacesApplication {
   execute(params: PlacesCommand & { action: "ranking" }): Extract<PlacesApplicationResult, { places: unknown[] }>;
   execute(params: PlacesCommand): PlacesApplicationResult;
   execute(params: PlacesCommand): PlacesApplicationResult { return this.dispatch(params); }
+
+  /**
+   * Validates a destructive request and captures its deletion snapshot without minting a token.
+   * A host that owns durable approval stores the result and later passes it to `confirmPrepared`.
+   */
+  prepareConfirmation(params: PlacesCommand & { confirmation_operation: ConfirmationOperation }): PreparedConfirmation {
+    const operation = params.confirmation_operation;
+    confirmationTarget(operation, params);
+    switch (operation) {
+      case "cancel": return { operation, insertionId: params.insertion_id!, revision: params.revision! };
+      case "undo_addition": return { operation, insertionId: params.insertion_id! };
+      case "delete_place": return { operation, placeId: params.place_id!, snapshot: this.service.deletionSnapshot("place", params.place_id!) };
+      case "delete_category": return { operation, categoryId: params.category_id!, snapshot: this.service.deletionSnapshot("category", params.category_id!) };
+    }
+  }
+
+  /** Runs a prepared destructive request. The domain re-checks the stored snapshot or revision. */
+  confirmPrepared(prepared: PreparedConfirmation): void {
+    switch (prepared.operation) {
+      case "cancel":
+        if (!prepared.insertionId || prepared.revision === undefined) throw invalid("cancel requires insertion_id and revision");
+        this.service.cancel(prepared.insertionId, prepared.revision);
+        return;
+      case "undo_addition":
+        if (!prepared.insertionId) throw invalid("undo_addition requires insertion_id");
+        this.service.undoAddition(prepared.insertionId);
+        return;
+      case "delete_place":
+        if (!prepared.placeId || !prepared.snapshot) throw invalid("delete_place requires a preview snapshot");
+        this.service.deletePlace(prepared.placeId, prepared.snapshot);
+        return;
+      case "delete_category":
+        if (!prepared.categoryId || !prepared.snapshot) throw invalid("delete_category requires a preview snapshot");
+        this.service.deleteCategory(prepared.categoryId, prepared.snapshot);
+        return;
+    }
+  }
 
   private dispatch(params: PlacesCommand) {
     if (params.notes !== undefined && params.notes.length > 4000) throw invalid("Notes must be at most 4000 characters");

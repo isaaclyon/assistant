@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { StringEnum, Type, validateToolArguments } from '@earendil-works/pi-ai';
 import { defineDoc, defineTool, type ConversationId, type Tx } from '@earendil-works/pi-durable';
 import type { Context } from '@earendil-works/chord/context';
-import { PlacesApplication, type PlacesCommand } from '../places-application.js';
+import { PlacesApplication, type ConfirmationOperation, type PlacesCommand, type PreparedConfirmation } from '../places-application.js';
 import { PlacesService, PlacesServiceError } from '../places-service.js';
 import { normalizePlaceName, openPlacesStore, type PlacesStore } from '../places-store.js';
 import type { NativeConfig } from './config.js';
@@ -64,7 +64,7 @@ export interface NativePlacesOptions {
 export type PlacesCallbackRequest = UiOrigin & { messageId: number; key: string };
 export type PlacesInputRequest = UiOrigin & { messageId: number; replyToMessageId: number; text: string; trustedPromptText?: string };
 
-const READ_OPS = new Set(['menu', 'categories', 'cancelInput', 'summaries', 'rank', 'place', 'manage', 'move', 'rerank', 'manageCategories', 'manageCategory', 'resume', 'ask']);
+const READ_OPS = new Set(['menu', 'categories', 'cancelInput', 'summaries', 'rank', 'place', 'manage', 'move', 'rerank', 'manageCategories', 'manageCategory', 'resume', 'ask', 'confirmAsk', 'confirmCancel']);
 const PROMPT_KINDS: Record<string, string> = {
   add: 'the place name', newCategory: 'the new category name', renameCategory: 'the new category name',
   notes: 'the notes for this place', renamePlace: 'the new place name',
@@ -74,7 +74,9 @@ type Sentiment = (typeof SENTIMENTS)[number];
 
 // ---- Tool schema -----------------------------------------------------------
 const ACTIONS = ['menu', 'categories', 'category_summaries', 'create_category', 'rename_category', 'delete_category', 'start', 'place', 'edit_place', 'delete_place', 'reposition', 'undo_addition', 'request_confirmation', 'resume', 'answer', 'back', 'cancel', 'ranking'] as const;
-const UNAVAILABLE_ACTIONS = new Set<string>(['delete_category', 'delete_place', 'undo_addition', 'request_confirmation', 'cancel']);
+/** The model can only ask for a confirmation prompt; the user's Confirm button is the only approval. */
+const DESTRUCTIVE_ACTIONS = new Set<string>(['delete_category', 'delete_place', 'undo_addition', 'cancel']);
+const OPERATIONS = ['cancel', 'delete_place', 'delete_category', 'undo_addition'] as const;
 export const placesToolParameters = Type.Object({
   action: StringEnum(ACTIONS),
   name: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
@@ -91,17 +93,19 @@ export const placesToolParameters = Type.Object({
   confirmation_operation: Type.Optional(StringEnum(['cancel', 'delete_place', 'delete_category', 'undo_addition'] as const)),
   confirmation_token: Type.Optional(Type.String({ maxLength: 200 })),
 }, { additionalProperties: false });
-export const PLACES_TOOL_DESCRIPTION = "Maintain the user's private restaurant, coffee-shop, bar, and other place rankings. Supports categories, adding a place, durable pairwise comparisons, resume, and paginated rankings. Deleting, undoing, cancelling and confirmation requests are unavailable in this migration slice.";
+export const PLACES_TOOL_DESCRIPTION = "Maintain the user's private restaurant, coffee-shop, bar, and other place rankings. Supports categories, adding a place, durable pairwise comparisons, resume, and paginated rankings. Deleting a place or category, undoing an addition and cancelling a ranking happen only after the user presses Confirm in Telegram. Use request_confirmation to show that prompt; it returns no approval token.";
 export const PLACES_TOOL_GUIDELINES = [
   'Use rank_places whenever the user asks to add, rank, compare, resume, or list restaurants, coffee shops, bars, or other saved places.',
   'When adding a place, collect its name, then call rank_places with action categories and that name; Telegram then shows direct category, sentiment and comparison buttons to the user. Do not repeat or invent those buttons.',
-  'Deleting a place or category, undoing an addition, cancelling a ranking and confirmation requests are unavailable until the guarded-mutation slice.',
+  'To delete a place or category, undo an addition or cancel a ranking, call request_confirmation with confirmation_operation and the target. Telegram then shows the user direct Confirm and Cancel buttons. Never call delete_place, delete_category, undo_addition or cancel yourself, never ask for or invent a confirmation token, and do not repeat the buttons.',
 ];
 
 const escapeError = (error: unknown): string => error instanceof PlacesServiceError ? error.message : 'Unable to finish that action. Open /place_rankings to inspect the current state.';
 
 export function createNativePlaces(options: NativePlacesOptions) {
   const { config } = options;
+  const mutationsEnabled = config.capabilityProfile === 'durable-mutations-test';
+  const description = mutationsEnabled ? PLACES_TOOL_DESCRIPTION : "Maintain the user's private restaurant, coffee-shop, bar, and other place rankings. Supports categories, adding a place, durable pairwise comparisons, resume, and paginated rankings. Deleting, undoing, cancelling and confirmation requests are unavailable in this migration slice.";
   const now = options.now ?? Date.now;
   const randomKey = options.randomKey ?? (() => randomUUID().replaceAll('-', ''));
   const allowed = config.transport.allowedUserId;
@@ -112,6 +116,7 @@ export function createNativePlaces(options: NativePlacesOptions) {
   let domain: { store: PlacesStore; app: PlacesApplication } | undefined;
   const inflight = new Set<Promise<unknown>>();
   let lock: Promise<unknown> = Promise.resolve();
+  const delivering = new Map<string, Promise<void>>();
 
   const track = <T>(work: Promise<T>): Promise<T> => {
     inflight.add(work);
@@ -173,6 +178,25 @@ export function createNativePlaces(options: NativePlacesOptions) {
     ctx.keys.push(key);
     return { text: clean(text, 64), callback: `pp:${key}` };
   }
+  /** Preview with direct Confirm/Cancel buttons. The snapshot taken here is stored in the Confirm capability. */
+  function confirmView(ctx: Ctx, prepared: PreparedConfirmation, label?: string): Presentation {
+    const group = randomKey();
+    const args: Args = { operation: prepared.operation, grp: group };
+    if (prepared.insertionId !== undefined) args.insertionId = prepared.insertionId;
+    if (prepared.revision !== undefined) args.revision = prepared.revision;
+    if (prepared.placeId !== undefined) args.placeId = prepared.placeId;
+    if (prepared.categoryId !== undefined) args.categoryId = prepared.categoryId;
+    if (prepared.snapshot) { args.snapCategoryId = prepared.snapshot.categoryId; args.snapRevision = prepared.snapshot.revision; }
+    const what = {
+      cancel: 'Cancel this unfinished ranking? The place being added is not saved.',
+      undo_addition: label ? `Undo adding ${label}? It is removed from your ranking.` : 'Undo this addition? The place is removed from your ranking.',
+      delete_place: label ? `Delete ${label}? This cannot be undone.` : 'Delete this place? This cannot be undone.',
+      delete_category: label ? `Delete the empty category ${label}? This cannot be undone.` : 'Delete this empty category? This cannot be undone.',
+    }[prepared.operation];
+    const confirm = mint(ctx, 'Confirm', 'confirm', args);
+    const cancel = mint(ctx, 'Cancel', 'confirmCancel', { grp: group });
+    return { text: `Confirm\n\n${what}\nThis request expires in 10 minutes.`, buttons: [[confirm, cancel]] };
+  }
   const deliveryOf = (ctx: Ctx, view: Presentation): Delivery => ({ text: view.text, buttons: (view.buttons ?? []) as Delivery['buttons'], keys: ctx.keys, promptId: ctx.promptId, presented: false });
 
   // ---- Views ---------------------------------------------------------------
@@ -223,6 +247,7 @@ export function createNativePlaces(options: NativePlacesOptions) {
         mint(ctx, value.existingPlace.name, 'answer', { insertionId: value.insertionId, revision: value.revision, existingPlaceId: value.existingPlace.id, winner: 'existing' }),
       ]];
       if (value.revision > 0) buttons.push([mint(ctx, 'Back', 'back', { insertionId: value.insertionId, revision: value.revision })]);
+      if (mutationsEnabled) buttons.push([mint(ctx, 'Cancel ranking', 'confirmAsk', { operation: 'cancel', insertionId: value.insertionId, revision: value.revision })]);
       return { text: `Which is better?\n\n${value.candidate.name} or ${value.existingPlace.name}?`, buttons };
     }
     if (value.kind === 'complete') {
@@ -232,6 +257,7 @@ export function createNativePlaces(options: NativePlacesOptions) {
           [mint(ctx, 'Add notes', 'ask', { kind: 'notes', targetId: value.place.id })],
           [mint(ctx, 'View ranking', 'rank', { categoryId: value.category.id, offset: 0 })],
           [mint(ctx, 'Add another', 'ask', { kind: 'add' })],
+          ...(mutationsEnabled && value.undoInsertionId ? [[mint(ctx, 'Undo addition', 'confirmAsk', { operation: 'undo_addition', insertionId: value.undoInsertionId, label: clean(value.place.name, 80) })]] : []),
         ],
       };
     }
@@ -282,6 +308,7 @@ export function createNativePlaces(options: NativePlacesOptions) {
         ...(place.notes ? [[mint(ctx, 'Clear notes', 'clearNotes', { placeId: place.id })]] : []),
         [mint(ctx, 'Move category', 'move', { placeId: place.id })],
         [mint(ctx, 'Re-rank', 'rerank', { placeId: place.id })],
+        ...(mutationsEnabled ? [[mint(ctx, 'Delete place', 'confirmAsk', { operation: 'delete_place', placeId: place.id, label: clean(place.name, 80) })]] : []),
       ],
     };
   }
@@ -339,7 +366,35 @@ export function createNativePlaces(options: NativePlacesOptions) {
         return { view: { text: 'Choose your overall impression.', buttons: SENTIMENTS.map(sentiment => [mint(ctx, sentiment, 'reposition', { placeId: place.id, sentiment })]) } };
       }
       case 'manageCategories': return { view: categoryPage(ctx, service, 'Choose a category to manage.', 0, false) };
-      case 'manageCategory': return { view: { text: 'Rename this category.', buttons: [[mint(ctx, 'Rename', 'ask', { kind: 'renameCategory', targetId: text('categoryId') })]] } };
+      case 'manageCategory': {
+        const category = (service.execute({ action: 'categories' }).categories as Category[]).find(entry => entry.id === text('categoryId'));
+        if (!category) throw new PlacesServiceError('NOT_FOUND', 'That category no longer exists.');
+        return { view: { text: 'Rename this category.', buttons: [
+          [mint(ctx, 'Rename', 'ask', { kind: 'renameCategory', targetId: category.id })],
+          ...(mutationsEnabled ? [[mint(ctx, 'Delete category', 'confirmAsk', { operation: 'delete_category', categoryId: category.id, label: clean(category.name, 80) })]] : []),
+        ] } };
+      }
+      case 'confirmAsk': {
+        const operation = text('operation') as ConfirmationOperation;
+        if (!OPERATIONS.includes(operation)) throw new PlacesServiceError('INVALID_ACTION', 'That action is unavailable.');
+        const prepared = service.prepareConfirmation({ action: 'request_confirmation', confirmation_operation: operation,
+          ...(args.insertionId !== undefined ? { insertion_id: text('insertionId') } : {}), ...(args.revision !== undefined ? { revision: Number(args.revision) } : {}),
+          ...(args.placeId !== undefined ? { place_id: text('placeId') } : {}), ...(args.categoryId !== undefined ? { category_id: text('categoryId') } : {}) });
+        return { view: confirmView(ctx, prepared, args.label === undefined ? undefined : text('label')) };
+      }
+      case 'confirmCancel': return { notice: 'Cancelled. Nothing was changed.', view: homeView(ctx, service) };
+      case 'confirm': {
+        const operation = text('operation') as ConfirmationOperation;
+        if (!OPERATIONS.includes(operation)) throw new PlacesServiceError('INVALID_ACTION', 'That action is unavailable.');
+        service.confirmPrepared({
+          operation,
+          ...(args.insertionId !== undefined ? { insertionId: text('insertionId') } : {}), ...(args.revision !== undefined ? { revision: Number(args.revision) } : {}),
+          ...(args.placeId !== undefined ? { placeId: text('placeId') } : {}), ...(args.categoryId !== undefined ? { categoryId: text('categoryId') } : {}),
+          ...(args.snapCategoryId !== undefined ? { snapshot: { categoryId: text('snapCategoryId'), revision: Number(args.snapRevision) } } : {}),
+        });
+        const notice = { cancel: 'Ranking cancelled.', undo_addition: 'Addition undone.', delete_place: 'Place deleted.', delete_category: 'Category deleted.' }[operation];
+        return { notice, view: homeView(ctx, service) };
+      }
       case 'ask': return { view: ask(ctx, service, text('kind'), args.targetId === undefined ? null : text('targetId')) };
       case 'draftCategory': {
         const draft = ctx.state.draft;
@@ -454,6 +509,8 @@ export function createNativePlaces(options: NativePlacesOptions) {
       if (record.state !== 'issued' || record.messageId === null || record.messageId !== request.messageId || record.expiresAt <= now()) return unavailable;
       if (!authorityNow || record.epoch !== authorityNow.epoch) return unavailable;
       if (record.draftGen !== null && record.draftGen !== state.draft?.gen) return { kind: 'reject', message: 'This add step expired. Open /place_rankings to continue.' } satisfies Claim;
+      const group = record.args.grp;
+      if (typeof group === 'string') for (const other of Object.values(state.actions)) if (other.key !== key && other.args.grp === group && other.state === 'issued') other.state = 'expired';
       record.state = 'claimed';
       record.commandId = request.commandId;
       return { kind: 'run', op: record.op, args: plain(record.args) } satisfies Claim;
@@ -473,8 +530,14 @@ export function createNativePlaces(options: NativePlacesOptions) {
       delivery = await effectCommit(key, request, claim.op, claim.args, service, false);
     }
     if (!delivery) throw new UiRejectedError('This button expired. Open /place_rankings again.');
-    try { await track(deliver({ action: key }, delivery)); }
+    // One in-flight presentation per capability: a concurrent exact redelivery waits instead of sending a second message.
+    const running = delivering.get(key);
+    if (running) { try { await running; return { toast: 'Already applied' }; } catch { /* The first attempt failed; try again below. */ } }
+    const sending = track(deliver({ action: key }, delivery));
+    delivering.set(key, sending);
+    try { await sending; }
     catch { return { toast: 'Could not send the next step. Open /place_rankings.' }; }
+    finally { if (delivering.get(key) === sending) delivering.delete(key); }
     return {};
   }
 
@@ -572,7 +635,8 @@ export function createNativePlaces(options: NativePlacesOptions) {
     let params: PlacesCommand;
     try { params = validateToolArguments({ name: 'rank_places', description: PLACES_TOOL_DESCRIPTION, parameters: placesToolParameters }, { type: 'toolCall', id: 'validation', name: 'rank_places', arguments: raw as Record<string, never> }) as PlacesCommand; }
     catch { return fail('INVALID_ACTION', 'Invalid places action'); }
-    if (UNAVAILABLE_ACTIONS.has(params.action)) return fail('UNAVAILABLE', 'That change is unavailable until the guarded-mutation slice. Nothing was changed.');
+    if (!mutationsEnabled && (DESTRUCTIVE_ACTIONS.has(params.action) || params.action === 'request_confirmation')) return fail('UNAVAILABLE', 'That change is unavailable until the guarded-mutation slice. Nothing was changed.');
+    if (DESTRUCTIVE_ACTIONS.has(params.action)) return fail('CONFIRMATION_REQUIRED', 'Only the user can approve this change. Call request_confirmation to show them Confirm and Cancel buttons. Nothing was changed.');
     let service: PlacesApplication;
     try { service = app(); } catch { return fail('UNAVAILABLE', 'Places is unavailable outside the configured bridge runtime.'); }
     const present = params.action === 'start' || params.action === 'answer' || params.action === 'back' || params.action === 'reposition' || params.action === 'resume' || params.action === 'menu'
@@ -586,7 +650,19 @@ export function createNativePlaces(options: NativePlacesOptions) {
       const ctx: Ctx = { state, epoch: authorityNow.epoch, keys: [], promptId: null };
       let result: unknown;
       let stale = false;
-      try { result = service.execute(params); }
+      try {
+        if (params.action === 'request_confirmation') {
+          if (!params.confirmation_operation) throw new PlacesServiceError('INVALID_ACTION', 'request_confirmation requires confirmation_operation');
+          const prepared = service.prepareConfirmation({ ...params, confirmation_operation: params.confirmation_operation });
+          let label: string | undefined;
+          if (prepared.placeId) label = service.execute({ action: 'place', place_id: prepared.placeId }).place.name;
+          if (prepared.categoryId) label = (service.execute({ action: 'categories' }).categories as Category[]).find(entry => entry.id === prepared.categoryId)?.name;
+          cancelPending(state);
+          const delivery = deliveryOf(ctx, confirmView(ctx, prepared, label === undefined ? undefined : clean(label, 80)));
+          return { kind: 'ok', result: { kind: 'confirmation_requested', operation: prepared.operation }, delivery } satisfies Outcome2;
+        }
+        result = service.execute(params);
+      }
       catch (error) {
         const safe = error instanceof PlacesServiceError ? error : new PlacesServiceError('INVALID_ACTION', error instanceof Error ? error.message : 'Invalid places action');
         if ((safe.code === 'STALE_ACTION' || safe.code === 'NO_ACTIVE_INSERTION') && (params.action === 'answer' || params.action === 'back')) {
@@ -624,6 +700,7 @@ export function createNativePlaces(options: NativePlacesOptions) {
     if (outcome.delivery) {
       try { await track(deliver(null, outcome.delivery)); presented = true; } catch { presented = false; }
     }
+    if (params.action === 'request_confirmation' && !presented) return fail('PRESENTATION_FAILED', 'The confirmation prompt could not be delivered to the user. Nothing was changed.');
     const result = outcome.stale ? { kind: 'stale', message: 'That ranking action is stale. Resume the current comparison and try again.', current: outcome.result, restartRequired: outcome.result === null } : outcome.result;
     return { details: { ok: true, result, presented }, terminate: presented, isError: false };
   }
@@ -631,9 +708,9 @@ export function createNativePlaces(options: NativePlacesOptions) {
   function bundle(): NativeBundle {
     if (config.principal !== 'isaac') throw new Error('Places is available only to the isaac principal');
     return {
-      name: 'places', version: 1,
-      tools: [{ version: 1, tool: defineTool({
-        name: 'rank_places', description: PLACES_TOOL_DESCRIPTION, parameters: placesToolParameters, replay: 'unsafe',
+      name: 'places', version: mutationsEnabled ? 2 : 1,
+      tools: [{ version: mutationsEnabled ? 2 : 1, tool: defineTool({
+        name: 'rank_places', description, parameters: placesToolParameters, replay: 'unsafe',
         execute: async (raw, api) => {
           const { details, terminate, isError } = await track(runTool(raw, api as never));
           return { ...textToolResult(details as never, isError), ...(terminate ? { control: { terminate: true as const } } : {}) };

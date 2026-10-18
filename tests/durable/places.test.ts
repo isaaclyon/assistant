@@ -22,7 +22,7 @@ async function setup(options: { principal?: NativeConfig['principal'] } = {}) {
   const config = {
     version: 1, runtime: 'pi-durable', instanceId: 'test', principal: options.principal ?? 'isaac', releaseSha: 'a'.repeat(40),
     resourceRoot: join(dir, 'release'), workspaceCwd: join(dir, 'work'), stateDir,
-    capabilityProfile: 'durable-places-test', account: 'test', credentialPath: '/x', settingsPath: '/x', jobsRole: 'disabled', idleHours: 0,
+    capabilityProfile: 'durable-mutations-test', account: 'test', credentialPath: '/x', settingsPath: '/x', jobsRole: 'disabled', idleHours: 0,
     transport: { mode: 'broker', socketPath: '/x.sock', botId: 1, allowedUserId: 2 },
     historyDir: join(stateDir, 'durable'), inboxPath: join(stateDir, 'inbox.db'), runtimeMetadataPath: join(stateDir, 'runtime.json'),
   } as NativeConfig;
@@ -155,7 +155,7 @@ describe('add, compare and browse', () => {
     expect(fx.last().text).toContain('Ranked Alpha');
     await addPlace('Beta', 'Pizza', 'Liked');
     expect(fx.last().text).toContain('Which is better?');
-    expect(fx.labels()).toEqual(['Beta', 'Alpha']);
+    expect(fx.labels()).toEqual(['Beta', 'Alpha', 'Cancel ranking']);
     await fx.press('Beta');
     expect(fx.last().text).toContain('Ranked Beta');
     expect(fx.last().text).toContain('#1 of 2');
@@ -169,7 +169,7 @@ describe('add, compare and browse', () => {
     await fx.reply('Great crust');
     expect(fx.last().text).toContain('Notes: Great crust');
     await fx.press('Manage');
-    expect(fx.labels()).toEqual(['Edit name', 'Edit notes', 'Clear notes', 'Move category', 'Re-rank']);
+    expect(fx.labels()).toEqual(['Edit name', 'Edit notes', 'Clear notes', 'Move category', 'Re-rank', 'Delete place']);
     await fx.press('Clear notes');
     expect(fx.last().text).not.toContain('Notes:');
   });
@@ -195,7 +195,8 @@ describe('add, compare and browse', () => {
     await addPlace('Beta', 'Pizza');
     await fx.places.command(fx.origin());
     expect(fx.last().text).toContain('Which is better?');
-    for (const message of fx.sent) for (const label of fx.labels(message)) expect(label).not.toMatch(/cancel ranking|delete|undo/i);
+    expect(fx.labels(fx.sent[0]!)).not.toEqual(expect.arrayContaining(['Delete place']));
+    expect(fx.labels()).toContain('Cancel ranking');
   });
 
   test('duplicate names and failed domain effects show a notice and the recovery view', async () => {
@@ -449,15 +450,13 @@ describe('rank_places tool', () => {
     expect(registration.parameters.anyOf).toBeUndefined();
   });
 
-  test('destructive and confirmation actions are unavailable and cause no effect or message', async () => {
+  test('direct destructive model actions are refused without effect or message', async () => {
     const before = fx.control.commits;
     for (const args of [
       { action: 'delete_place', place_id: 'x', confirmation_token: 't' }, { action: 'delete_category', category_id: 'x' },
       { action: 'undo_addition', insertion_id: 'x' }, { action: 'cancel', insertion_id: 'x', revision: 0 },
-      { action: 'request_confirmation', confirmation_operation: 'delete_place', place_id: 'x' },
     ]) {
-      const result = await tool(args);
-      expect(result).toMatchObject({ ok: false, isError: true, error: { code: 'UNAVAILABLE' } });
+      expect(await tool(args)).toMatchObject({ ok: false, isError: true, error: { code: 'CONFIRMATION_REQUIRED' } });
     }
     expect(fx.control.commits).toBe(before);
     expect(fx.sent).toHaveLength(0);

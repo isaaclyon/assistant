@@ -14,11 +14,11 @@ import type { Presentation } from '../../src/durable/telegram-ui.js';
 
 const cleanup:Array<()=>Promise<unknown>>=[];
 afterEach(async()=>{for(const close of cleanup.splice(0).reverse())await close();});
-async function setup(seed=3) {
+async function setup(seed=3,profile='durable-places-test') {
  const directory=await mkdtemp(join(tmpdir(),'native-places-app-'));cleanup.push(()=>rm(directory,{recursive:true,force:true}));
  const stateDir=join(directory,'state'),workspaceCwd=join(directory,'workspace'),vaultRoot=join(directory,'vault');
  await Promise.all([stateDir,workspaceCwd,vaultRoot].map(path=>mkdir(path,{recursive:true,mode:0o700})));
- const config:NativeConfig={version:1,runtime:'pi-durable',instanceId:'test',principal:'isaac',releaseSha:'a'.repeat(40),resourceRoot:resolve(import.meta.dirname,'../..'),workspaceCwd,stateDir,capabilityProfile:'durable-places-test',account:'test',credentialPath:join(directory,'unused-auth'),settingsPath:join(directory,'unused-settings'),jobsRole:'disabled',idleHours:0,transport:{mode:'broker',socketPath:join(directory,'unused.sock'),botId:123,allowedUserId:42},historyDir:join(stateDir,'durable'),inboxPath:join(stateDir,'inbox.db'),runtimeMetadataPath:join(stateDir,'runtime.json'),memory:{vaultRoot,gitAutocommit:false,legacySessionRoots:[],timeZone:'UTC',recall:'off',semantic:'off'},google:{}};
+ const config:NativeConfig={version:1,runtime:'pi-durable',instanceId:'test',principal:'isaac',releaseSha:'a'.repeat(40),resourceRoot:resolve(import.meta.dirname,'../..'),workspaceCwd,stateDir,capabilityProfile:profile,account:'test',credentialPath:join(directory,'unused-auth'),settingsPath:join(directory,'unused-settings'),jobsRole:'disabled',idleHours:0,transport:{mode:'broker',socketPath:join(directory,'unused.sock'),botId:123,allowedUserId:42},historyDir:join(stateDir,'durable'),inboxPath:join(stateDir,'inbox.db'),runtimeMetadataPath:join(stateDir,'runtime.json'),memory:{vaultRoot,gitAutocommit:false,legacySessionRoots:[],timeZone:'UTC',recall:'off',semantic:'off'},google:{}};
  const ownerKey='instance:test:principal:isaac';let categoryId='';
  const domain=()=>{const store=openPlacesStore(join(stateDir,'places.db'));return {store,service:new PlacesService(store,{ownerKey})};};
  const initial=domain();try{categoryId=initial.service.listCategories()[0]!.id;for(let i=0;i<seed;i++){let step=initial.service.start({name:`Seed ${i}`,categoryId,sentiment:'liked'});while(step.kind==='compare')step=initial.service.answer({insertionId:step.insertionId,revision:step.revision,existingPlaceId:step.existingPlace.id,winner:'existing'});}}finally{initial.store.close();}
@@ -126,4 +126,35 @@ test('application shutdown drains direct places work before closing the Harness'
  const closing=s.close().then(()=>{finished=true;});
  await vi.waitFor(()=>expect(s.stopped()).toBe(true));expect(closeHarness).not.toHaveBeenCalled();expect(finished).toBe(false);
  gate.resolve();await callback;await closing;expect(closeHarness).toHaveBeenCalledTimes(1);expect(s.fatal).not.toHaveBeenCalled();
+});
+
+
+test('guarded places model preview binds direct deletion through restart and cannot pass its own token',async()=>{
+ const s=await setup(3,'durable-mutations-test');const initial=s.domain();let placeId:string;try{placeId=initial.service.listRanking(s.categoryId)[0]!.id;}finally{initial.store.close();}
+ const app=await s.open([call({action:'request_confirmation',confirmation_operation:'delete_place',place_id:placeId}),()=>fauxAssistantMessage('PREVIEWED')]);
+ await s.accept('Delete the synthetic ranked place.');await vi.waitFor(()=>expect(s.presentations).toHaveLength(1),{timeout:6000});await vi.waitFor(async()=>expect((await app.controls.status()).busy).toBe(false));
+ const preview=s.latest(),confirm=s.button(/^confirm/i,preview);expect(JSON.stringify(s.requests.slice(1))).not.toContain(confirm.split(':')[1]);await s.close();await s.open();
+ await Promise.all([s.callback(preview.messageId,confirm,{},800),s.callback(preview.messageId,confirm,{},800)]);await s.callback(preview.messageId,confirm,{},801);
+ const saved=s.domain();try{expect(saved.service.listRanking(s.categoryId)).toHaveLength(2);}finally{saved.store.close();}expect(s.fatal).not.toHaveBeenCalled();
+});
+
+test('guarded places direct destructive tool call stays refused with model-selected confirmation data',async()=>{
+ const s=await setup(3,'durable-mutations-test');const initial=s.domain();let placeId:string;try{placeId=initial.service.listRanking(s.categoryId)[0]!.id;}finally{initial.store.close();}
+ await s.open([call({action:'delete_place',place_id:placeId,confirmation_token:'model-made-token'}),(r:any)=>{expect(text(toolResult(r))).toMatch(/confirm|direct|button|unavailable/i);return fauxAssistantMessage('REFUSED');}]);
+ await s.accept('Try a fabricated confirmation.');await vi.waitFor(()=>expect(s.finals).toContain('REFUSED'),{timeout:6000});const saved=s.domain();try{expect(saved.service.listRanking(s.categoryId)).toHaveLength(3);}finally{saved.store.close();}
+});
+
+test('legacy places profile preserves its catalog and hides guarded management buttons',async()=>{
+ const s=await setup();const app=await s.open([call({action:'request_confirmation',confirmation_operation:'delete_place',place_id:'synthetic'}),(r:any)=>{
+  expect(text(toolResult(r))).toContain('UNAVAILABLE');
+  const tool=r.messages.flatMap((message:any)=>message.toolsAdded??[]).find((tool:any)=>tool.name==='rank_places');
+  expect(tool.description).toBe("Maintain the user's private restaurant, coffee-shop, bar, and other place rankings. Supports categories, adding a place, durable pairwise comparisons, resume, and paginated rankings. Deleting, undoing, cancelling and confirmation requests are unavailable in this migration slice.");
+  return fauxAssistantMessage('LEGACY_REFUSED');
+ }]);
+ await s.accept('Request a guarded change');await vi.waitFor(()=>expect(s.finals).toContain('LEGACY_REFUSED'),{timeout:6000});
+ await s.accept('/place_rankings');for(const label of [/View rankings/i,/Restaurants/i,/Seed 0/,/^Manage$/])await s.callback(s.latest().messageId,s.button(label));
+ expect(s.latest().value.buttons?.flat().map(button=>button.text)).not.toContain('Delete place');
+ await s.accept('/place_rankings');await s.callback(s.latest().messageId,s.button(/Manage categories/i));await s.callback(s.latest().messageId,s.button(/Restaurants/i));
+ expect(s.latest().value.buttons?.flat().map(button=>button.text)).not.toContain('Delete category');
+ expect((await app.controls.status()).busy).toBe(false);
 });

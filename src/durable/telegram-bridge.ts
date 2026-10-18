@@ -32,6 +32,7 @@ export interface NativeUiController {
   command(request:UiCommandRequest):Promise<UiResult>;
   /** Resolve `key` to the persisted memory approval and decide with principal/target/messageId taken from this request, never from the key. */
   confirmation(request:UiConfirmationRequest):Promise<UiResult>;
+  calendar?(request:UiOrigin&{messageId:number;key:string}):Promise<UiResult>;
   places?(request:UiOrigin&{messageId:number;key:string}):Promise<UiResult>;
   /** Exact private reply capture; true consumes the input before model admission. */
   placesInput?(request:UiOrigin&{messageId:number;replyToMessageId:number;text:string;trustedPromptText?:string}):Promise<boolean>;
@@ -162,8 +163,8 @@ export function bridgeTelegram(config:NativeConfig,raw:RawTransport,onTransportF
     if(result)await showMenu(origin);   // Selection returns to the status menu.
     return;
    }
-   case 'places':{
-    const handler=options.ui?.places;if(!handler){await answer(item.id,'Unavailable');return;}
+   case 'calendar':case 'places':{
+    const handler=action.type==='calendar'?options.ui?.calendar:options.ui?.places;if(!handler){await answer(item.id,'Unavailable');return;}
     try{const result=await handler({...origin,messageId:item.messageId,key:action.key});await answer(item.id,result.toast);}
     catch(error){if(error instanceof UiRejectedError){await answer(item.id,error.message);return;}throw error;}
     return;

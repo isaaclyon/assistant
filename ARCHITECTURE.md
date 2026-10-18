@@ -35,8 +35,12 @@ The Harness owns drafts, prompt bindings and one-use, message/epoch-bound
 callback claims; the existing private places SQLite store owns ranking and
 comparison progress. A claimed write with an unknown result never repeats its
 domain effect; recovery may repeat read commands. Direct Telegram menus and model handoffs use the same application
-service. Destructive places actions await the guarded-mutation slice. Full C4
-integration and provider parity remain pending.
+service. The separate `durable-mutations-test` profile adds Calendar create/update
+and direct deletion confirmations, plus direct places cancel/delete/undo approvals.
+Native durable records own confirmation identity and presentation; domain code
+owns event validation, stable create IDs, revision/snapshot checks and read-only
+reconciliation. Unknown effects never authorize an automatic repeated mutation.
+Full C4 integration and provider parity remain pending.
 
 The sections below describe the deployed legacy architecture. Its package,
 source patches and service path remain in the legacy release tree until the
@@ -457,5 +461,7 @@ Inbound turns are crash-durable through the bridge inbox, but outbound Telegram 
 The [pi-durable migration plan](docs/pi-durable-migration-plan.md) records the
 approved target architecture and C0–C7 checkpoints. C0–C3 passed. C4 general
 file/shell/public-web tools, Google reads, CLI-backed YNAB/Messages skills and
-direct private places flows are implemented on isolated native branches; remaining C4 integrations are pending. The sections above the migration note describe legacy production,
+direct private places flows and guarded Calendar/places mutations are implemented
+on isolated native branches; protected browser and provider/operator parity remain
+pending. The sections above the migration note describe legacy production,
 except for the explicit native branch overview. Production activation remains C7.

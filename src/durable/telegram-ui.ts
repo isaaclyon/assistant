@@ -49,6 +49,7 @@ export type CallbackAction =
   | { type: 'thinking'; level: ThinkingLevel }
   | { type: 'control'; name: ControlCommand }
   | { type: 'places'; key: string }
+  | { type: 'calendar'; key: string }
   | { type: 'confirmation'; key: string; choice: 'approve' | 'deny' };
 export function parseCallbackData(data: unknown): CallbackAction | undefined {
   if (typeof data !== 'string' || bytes(data) > 64) return undefined;
@@ -60,6 +61,7 @@ export function parseCallbackData(data: unknown): CallbackAction | undefined {
     case 'mc': return ID.test(arg) ? { type: 'model', id: arg } : undefined;
     case 'tl': return (THINKING_LEVELS as readonly string[]).includes(arg) ? { type: 'thinking', level: arg as ThinkingLevel } : undefined;
     case 'k': return (CONTROL_COMMANDS as readonly string[]).includes(arg) ? { type: 'control', name: arg as ControlCommand } : undefined;
+    case 'gc': return /^[a-f0-9]{32}$/.test(arg) ? { type: 'calendar', key: arg } : undefined;
     case 'pp': return /^[a-f0-9]{32}$/.test(arg) ? { type: 'places', key: arg } : undefined;
     case 'cf': {
       const [choice, key, ...extra] = rest;

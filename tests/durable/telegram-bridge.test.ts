@@ -116,13 +116,15 @@ test('presenter and stream only serve the instance private target',async()=>{
  expect(h.raw.preview).not.toHaveBeenCalled();
 });
 
-test('places callbacks carry authenticated message identity through a dedicated bounded grammar',async()=>{
- const places=vi.fn(async()=>({toast:'Saved'}));const h=harness({places});const hooks=await h.start();
- const key='a'.repeat(32);await hooks.accept(callbackUpdate(`pp:${key}`));
- expect(places).toHaveBeenCalledWith({commandId:'telegram-callback:123:20',principal:'isaac',actorId:42,target:{chatId:42},messageId:300,key});
- for(const data of ['pp:unsafe','pp:'+key+':extra','pp:'+key.toUpperCase()])await hooks.accept(callbackUpdate(data));
- await hooks.accept(callbackUpdate(`pp:${key}`,{from:{id:99}}));await hooks.accept(callbackUpdate(`pp:${key}`,{message:{message_id:300,chat:{id:43,type:'private'}}}));
- expect(places).toHaveBeenCalledTimes(1);
+test.each([['places','pp'],['calendar','gc']] as const)('%s callbacks carry authenticated message identity through a bounded grammar',async(name,prefix)=>{
+ const handler=vi.fn(async()=>({toast:'Saved'}));const h=harness({[name]:handler});const hooks=await h.start();
+ const key='a'.repeat(32);await hooks.accept(callbackUpdate(`${prefix}:${key}`));
+ expect(handler).toHaveBeenCalledWith({commandId:'telegram-callback:123:20',principal:'isaac',actorId:42,target:{chatId:42},messageId:300,key});
+ for(const data of [`${prefix}:unsafe`,`${prefix}:${key}:extra`,`${prefix}:${key.toUpperCase()}`])await hooks.accept(callbackUpdate(data));
+ await hooks.accept(callbackUpdate(`${prefix}:${key}`,{from:{id:99}}));await hooks.accept(callbackUpdate(`${prefix}:${key}`,{message:{message_id:300,chat:{id:43,type:'private'}}}));
+ expect(handler).toHaveBeenCalledTimes(1);
+ const failing=harness({[name]:async()=>{throw new Error('storage');}});const failed=await failing.start();
+ await expect(failed.accept(callbackUpdate(`${prefix}:${key}`))).rejects.toThrow('storage');
 });
 
 test('places exact reply capture consumes handled input and never admits it to the model',async()=>{
