@@ -29,7 +29,8 @@ const confirmationKey=(cid:ConversationId,id:string)=>createHash('sha256').updat
 export async function createNativeApplication(config:NativeConfig,options:NativeApplicationOptions) {
  await loadCapabilityProfile(config.resourceRoot,config.capabilityProfile);
  const enabled=isNativeMemoryProfile(config.capabilityProfile);
- const googleEnabled=config.capabilityProfile==='durable-read-integrations-test';
+ const cliEnabled=config.capabilityProfile==='durable-cli-integrations-test';
+ const googleEnabled=config.capabilityProfile==='durable-read-integrations-test'||cliEnabled;
  const generalEnabled=config.capabilityProfile==='durable-tools-test'||googleEnabled;
  if(googleEnabled&&!config.google)throw new Error('Google reads require explicit instance configuration');
  if(enabled&&(!config.memory||config.principal==='engineering'))throw new Error('Chat-memory profile requires scoped memory configuration');
@@ -231,7 +232,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   const raw=options.transport??createNativeTelegramTransport(config.transport.mode==='ordinary'?{...config.transport,cwd:config.workspaceCwd}:{mode:'restricted',socketPath:config.transport.socketPath,botId:config.transport.botId,allowedUserId:config.transport.allowedUserId});
   transport=bridgeTelegram(config,raw,options.onTransportFailure,{...(enabled?{ui}:{}),commands:enabled?['menu','model','thinking','new','abort','stop','compact','reload','restart','skills','debug']:['new','abort','stop','compact']});
   const bridge=transport;
-  const signature=createHash('sha256').update(JSON.stringify({registry:resources.signature,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,memory:config.memory??null,...(googleEnabled?{google:config.google}:{} )})).digest('hex');
+  const signature=createHash('sha256').update(JSON.stringify({registry:resources.signature,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,memory:config.memory??null,...(googleEnabled?{google:config.google}:{} ),...(cliEnabled?{cli:config.cli??{}}:{})})).digest('hex');
   // The reader delegates to the active registry after a safe idle reload.
   const registry={snapshot:()=>resources!.registry.snapshot(),subscribe:(listener:()=>void)=>{registryListeners.add(listener);return()=>{registryListeners.delete(listener);};}};
   host=await DurableHost.create({stateDir:config.historyDir,inboxPath:config.inboxPath,models:provider.models,registry,

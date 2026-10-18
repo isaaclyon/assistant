@@ -24,8 +24,13 @@ The separate `durable-read-integrations-test` profile adds typed Calendar,
 Gmail, Contacts and Places reads with explicit private Google configuration.
 Workspace reads can replay after current authority checks. Metered Places calls
 run in an internal replay-unsafe nested task; the existing cache and attempt
-accounting remain domain-owned. Full C4 integration and provider parity remain
-pending.
+accounting remain domain-owned. `durable-cli-integrations-test` adds the existing
+YNAB and editable Messages-link skills through the replay-unsafe shell. Helpers
+resolve from the release while relative work stays in the workspace. An optional
+private Messages origin enters only this profile's shell environment and recovery
+signature; YNAB authentication remains under the runtime's OS identity. Unknown
+financial outcomes require read-only inspection before another attempt. Full C4
+integration and provider parity remain pending.
 
 The sections below describe the deployed legacy architecture. Its package,
 source patches and service path remain in the legacy release tree until the
@@ -445,6 +450,6 @@ Inbound turns are crash-durable through the bridge inbox, but outbound Telegram 
 
 The [pi-durable migration plan](docs/pi-durable-migration-plan.md) records the
 approved target architecture and C0–C7 checkpoints. C0–C3 passed. C4 general
-file/shell/public-web tools and Google reads are implemented on isolated native
-branches; remaining C4 integrations are pending. The sections above the migration note describe legacy production,
+file/shell/public-web tools, Google reads and CLI-backed YNAB/Messages skills are
+implemented on isolated native branches; remaining C4 integrations are pending. The sections above the migration note describe legacy production,
 except for the explicit native branch overview. Production activation remains C7.

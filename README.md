@@ -1,8 +1,8 @@
 # Pi Telegram Bridge Host
 
-> This `feat/durable-c4-reads` branch extends the accepted native chat-and-memory
-> MVP with general tools, bounded public web and typed Google reads in separate
-> test profiles. Start with the [C4 guide](docs/pi-durable-c4-tools.md) for
+> This `feat/durable-c4-cli` branch extends the accepted native chat-and-memory
+> MVP with general tools, bounded public web, typed Google reads and the YNAB/
+> editable Messages-link skills in separate test profiles. Start with the [C4 guide](docs/pi-durable-c4-tools.md) for
 > selection, private configuration, recovery and validation. C4 remains open.
 > Root scripts build and test `src/durable/` and shared domain contracts. C1
 > remains prototype evidence. The description below documents the legacy fleet.

@@ -1,8 +1,9 @@
-# C4 general tools, public web and Google reads
+# C4 general tools, Google reads and CLI skills
 
 Status: **first slice implemented and locally validated on `feat/durable-c4`;
 a second Google-read slice is implemented and locally validated on
-`feat/durable-c4-reads`;
+`feat/durable-c4-reads`; a CLI skill slice is implemented on
+`feat/durable-c4-cli` (validation below);
 C4 remains in progress.** C3 is accepted. The first slice restores general file,
 shell and bounded public-web tools in a separate selected profile. Production
 continues using its legacy release. The legacy planning checkout retains this
@@ -115,7 +116,7 @@ loads that wrapper rather than adding authority only around a test handler.
 No live bot, credential copy, production service or private-state migration was
 needed for this slice. Linux/systemd and full integration acceptance remain later
 gates. The [roadmap](pi-durable-migration-plan.md#c4--remaining-integrations-and-protected-browser-workflows)
-keeps C4 open for remaining CLI-backed skills, direct places UI, guarded mutations,
+keeps C4 open for direct places UI, guarded mutations,
 protected browser workflows and provider/operator parity. C5–C7 remain pending.
 
 
@@ -175,7 +176,8 @@ read just in time. OAuth clients/tokens stay in the isolated gog home. An empty
 Missing sections disable their corresponding transport. Limits are required
 when selecting Places, accept integers from zero to one million, and cannot be
 overridden by tool arguments. Google configuration is rejected for other native
-profiles; this profile requires the same memory principal/authority as C3.
+profiles except the CLI-integrations profile, which inherits these reads. Both
+require the same memory principal/authority as C3.
 Changing its Google configuration blocks reopening an incompatible store.
 
 Single-event reads preserve the existing stricter Calendar boundary: explicit
@@ -227,5 +229,95 @@ and a Places fetch/reservation with no duplicate after recovery. Shared transpor
 and gateway suites remain in the ordinary native test gate.
 
 Live Google/OAuth compatibility, Linux/systemd and the remaining full C4
-integration gates remain unverified. CLI-backed skills, direct places UI,
-guarded mutations, protected browser and provider/operator parity remain open.
+integration gates remain unverified. Direct places UI, guarded mutations,
+protected browser and provider/operator parity remain open.
+
+## CLI skill integration slice
+
+The separate `durable-cli-integrations-test` profile selects the Google-read
+profile's bundles plus memory, weather, `manage-ynab` and `message-link` skills.
+A `google-read-tools` skill supplies the same Google-read rules while allowing
+selected workflows to compose contact lookup with Messages drafting. The prior
+read profile keeps its own narrower skill and unchanged compatibility identity. It adds no tool or CLI adapter. Calls use the existing bounded,
+sequential, replay-unsafe `bash` tool. Prior native profiles keep their selected
+resources and compatibility signatures. Select this profile with a new private
+native store, the same C3 memory configuration and explicit `google` object
+(`{}` is valid when Google is not configured).
+
+### Configuration and operation
+
+An optional private native configuration field sets the Messages HTTPS origin:
+
+```json
+{
+  "capabilityProfile": "durable-cli-integrations-test",
+  "cli": {
+    "messagesBaseUrl": "https://synthetic-node.example.ts.net:8443/"
+  }
+}
+```
+
+This is a synthetic configuration fragment; retain the other required C2/C3
+fields. The origin must use HTTPS without credentials, a non-root path, query or
+fragment. Unknown CLI fields and CLI configuration on other profiles fail
+validation. The selected origin becomes `PI_TELEGRAM_MESSAGES_BASE_URL` only in
+this profile's child shell environment. Ambient values are excluded. Omitting
+`cli` or its origin retains the helper's bounded local Tailscale hostname
+discovery. CLI configuration is part of this profile's recovery signature;
+changing it blocks incompatible store reopening.
+
+Both skills resolve tracked helpers from `PI_TELEGRAM_BRIDGE_RESOURCE_ROOT`,
+with the existing cwd fallback for ordinary repo sessions. They work when the
+mutable workspace differs from the release. User values require shell quoting;
+Messages draft JSON enters on stdin. The helper encodes recipient, label and
+body only in the URL fragment. Generating a link does not verify that the
+private endpoint is deployed or reachable. Opening Messages and sending remain
+separate user actions. Tailscale Serve deployment remains the existing
+[ADR-0028 procedure](adr/0028-serve-private-editable-messages-links.md).
+
+YNAB uses the runtime's OS identity and existing CLI-owned authentication.
+Tokens are not selected through model arguments or copied into native config.
+Budget/account defaults remain private `~/.config/pi-telegram-bridge/ynab.json`;
+the skill asks the user to choose missing or invalid defaults. CLI discovery and
+read helpers prefer `ynab` on PATH, then `~/.bun/bin/ynab` only when the
+executable is missing. Auth, command and transport failures do not select a
+second installation or silently repeat the call. Existing helper subprocess
+bounds remain 30 seconds and 1 MiB; shell tool output/deadlines remain bounded
+as described above.
+
+The full YNAB skill retains its user-authorization rules for transaction changes,
+receipt previews and destructive actions. Those rules are model guidance; this
+slice does not add a trusted financial approval service or domain receipts.
+All CLI calls, including reads, inherit replay-unsafe shell recovery. A lost
+write result may mean the transaction succeeded. Inspect the exact transaction
+with a read-only command and reconcile it before proposing another attempt;
+never automatically repeat an uncertain create, update, delete or split.
+
+### CLI-slice validation and limits
+
+Validation uses synthetic providers, a disposable HOME and fake YNAB/Tailscale
+executables through the actual selected application and real shell environment.
+Tests cover private defaults, normalized helper output, PATH preference, Bun
+fallback, no fallback after a command failure, release/workspace separation,
+explicit Messages origin and hostname discovery, fragment-only draft values,
+a synthetic write result, actor rejection, profile selection and config-change
+compatibility rejection. Existing YNAB normalization and Messages page/helper
+unit suites now run in the ordinary native gate.
+
+SIGKILL tests stop the process after a fake CLI write succeeds but before its
+tool result commits. Recovery keeps one effect and one invocation, returns an
+interrupted tool error, and does not rerun the command after an epoch change.
+The fixture uses the production selected registry and authority wrapper; replay
+unsafe recovery itself skips execution rather than invoking authorization again.
+
+Under Node 24, `npm run check:changed` passed 438 tests in 40 files and
+`npm run build` passed, including the compiled application import. Independent
+read-only review found no critical/high defects. Its receipt-capability mismatch
+was corrected with explicit text-only guidance; recovery assertions were also
+tightened. The CLI profile uses Google-read guidance compatible with Messages
+drafting while preserving the prior profile's narrower selection.
+No real YNAB account, keychain, receipt upload, Google account, Telegram bot or
+Tailscale endpoint was used. Live CLI/auth compatibility, private endpoint
+health, media/receipt handling and Linux service behavior remain later acceptance
+work. This completes the selected CLI skill migration slice; it does not close
+C4's places, guarded-mutation, browser or provider/operator gates.

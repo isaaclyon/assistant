@@ -64,8 +64,8 @@ For transaction-review and categorization suggestions, prefer the bounded
 read-only helpers instead of repeatedly reshaping raw CLI output:
 
 ```bash
-node .pi/skills/manage-ynab/scripts/list-ynab-categories.mjs
-node .pi/skills/manage-ynab/scripts/ynab-transaction-context.mjs <transaction-id>
+node "${PI_TELEGRAM_BRIDGE_RESOURCE_ROOT:-$PWD}/.pi/skills/manage-ynab/scripts/list-ynab-categories.mjs"
+node "${PI_TELEGRAM_BRIDGE_RESOURCE_ROOT:-$PWD}/.pi/skills/manage-ynab/scripts/ynab-transaction-context.mjs" <transaction-id>
 ```
 
 Call `list-ynab-categories.mjs` once per review batch. It returns active
@@ -183,4 +183,4 @@ Build JSON with a JSON serializer, not manual string concatenation. Verify both 
 
 ## Errors and output
 
-On CLI failure, summarize the actionable error and do not claim the budget changed. Never expose environment variables, keychain contents, tokens, or full raw error objects that may contain request headers. On success, provide a short human-readable result rather than the entire API payload.
+On CLI failure, summarize the actionable error and do not claim the budget changed. An interrupted or timed-out write may have succeeded: use read-only transaction inspection to reconcile it before proposing another attempt. Never automatically repeat an uncertain write. Never expose environment variables, keychain contents, tokens, or full raw error objects that may contain request headers. On success, provide a short human-readable result rather than the entire API payload.

@@ -125,6 +125,11 @@
     ],
     "skills": [
       {
+        "id": "native-google-read-tools",
+        "path": ".pi/skills/google-read-tools/SKILL.md",
+        "enabled": true
+      },
+      {
         "id": "native-google-reads",
         "path": ".pi/skills/google-reads/SKILL.md",
         "enabled": true
@@ -207,6 +212,11 @@
     ],
     "instructions": [
       {
+        "id": "telegram-cli-integrations-test",
+        "path": ".pi/telegram/cli-integrations-test.md",
+        "enabled": true
+      },
+      {
         "id": "telegram-read-integrations-test",
         "path": ".pi/telegram/read-integrations-test.md",
         "enabled": true
@@ -234,6 +244,29 @@
     ]
   },
   "profiles": [
+    {
+      "id": "durable-cli-integrations-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-reads"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-read-tools",
+        "check-weather",
+        "manage-ynab",
+        "message-link"
+      ],
+      "instructions": "telegram-cli-integrations-test"
+    },
     {
       "id": "durable-read-integrations-test",
       "extensions": [

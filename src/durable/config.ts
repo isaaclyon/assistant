@@ -11,7 +11,7 @@ export interface NativeMemoryConfig {
  judgeKeyFile?: string;
  embeddingKeyFile?: string;
 }
-export const isNativeMemoryProfile=(profile:string)=>['durable-chat-memory-test','durable-tools-test','durable-read-integrations-test'].includes(profile);
+export const isNativeMemoryProfile=(profile:string)=>['durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test'].includes(profile);
 export interface NativeGoogleConfig {
  account?:string;
  gog?:{binary:string;passwordFile:string;home:string};
@@ -26,6 +26,7 @@ export interface NativeConfig {
    | { mode:'broker'; socketPath:string; botId:number; allowedUserId:number };
  memory?: NativeMemoryConfig;
  google?: NativeGoogleConfig;
+ cli?: { messagesBaseUrl?: string };
  historyDir: string; inboxPath: string; runtimeMetadataPath: string;
 }
 const record=(value:unknown,label:string):Record<string,unknown>=>{
@@ -56,7 +57,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
  if((stat.mode&0o077)!==0 || (process.getuid && stat.uid!==process.getuid())) throw new Error('Configuration must be private and owned by this runtime');
  let raw:unknown; try{raw=JSON.parse(await readFile(path,'utf8'));}catch{throw new Error('Invalid native configuration JSON');}
  const value=record(raw,'Native configuration');
- fields(value,['version','runtime','instanceId','principal','releaseSha','resourceRoot','workspaceCwd','stateDir','capabilityProfile','account','credentialPath','settingsPath','jobsRole','idleHours','transport','memory','google'],'Native configuration');
+ fields(value,['version','runtime','instanceId','principal','releaseSha','resourceRoot','workspaceCwd','stateDir','capabilityProfile','account','credentialPath','settingsPath','jobsRole','idleHours','transport','memory','google','cli'],'Native configuration');
  if(value.version!==1||value.runtime!=='pi-durable') throw new Error('Unsupported native runtime or configuration version');
  if(value.jobsRole!=='disabled') throw new Error('Native test profiles require jobsRole disabled');
  const idleHours=value.idleHours??0;
@@ -64,7 +65,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
  const principal=text(value.principal,'principal');
  if(!['isaac','emma','household','engineering'].includes(principal)) throw new Error('Invalid principal');
  const capabilityProfile=text(value.capabilityProfile,'capability profile');
- if(!['durable-foundation-test','durable-chat-memory-test','durable-tools-test','durable-read-integrations-test'].includes(capabilityProfile)) throw new Error('Unsupported native capability profile');
+ if(!['durable-foundation-test','durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test'].includes(capabilityProfile)) throw new Error('Unsupported native capability profile');
  const resourceRoot=await realpath(absolute(value.resourceRoot,'resourceRoot'));
  const workspaceCwd=await realpath(absolute(value.workspaceCwd,'workspaceCwd'));
  const stateDir=await realpath(absolute(value.stateDir,'stateDir'));
@@ -98,7 +99,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
   if (memory.semantic === 'on' && !memory.embeddingKeyFile) throw new Error('Enabled semantic search requires explicit provider authorization');
  } else if (value.memory !== undefined) throw new Error('Foundation profile cannot select memory configuration');
  let google:NativeGoogleConfig|undefined;
- if(capabilityProfile==='durable-read-integrations-test'){
+ if(['durable-read-integrations-test','durable-cli-integrations-test'].includes(capabilityProfile)){
   const selected=record(value.google,'google');fields(selected,['account','gog','places','calendarTargets'],'google');google={};
   if(selected.account!==undefined)google.account=text(selected.account,'Google account');
   if(google.account&&(google.account.length>254||/[\0\r\n]/.test(google.account)))throw new Error('Invalid Google account');
@@ -118,6 +119,16 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
    google.calendarTargets={account,personal,thingsToDo};
   }
  }else if(value.google!==undefined)throw new Error('Google configuration requires the read-integrations profile');
+ let cli:NativeConfig['cli'];
+ if(value.cli!==undefined){
+  if(capabilityProfile!=='durable-cli-integrations-test')throw new Error('CLI configuration requires the CLI-integrations profile');
+  const selected=record(value.cli,'cli');fields(selected,['messagesBaseUrl'],'cli');cli={};
+  if(selected.messagesBaseUrl!==undefined){
+   let url:URL;try{url=new URL(text(selected.messagesBaseUrl,'Messages base URL'));}catch{throw new Error('Invalid Messages base URL');}
+   if(url.protocol!=='https:'||url.username||url.password||url.pathname!=='/'||url.search||url.hash)throw new Error('Messages base URL must be a credential-free HTTPS origin');
+   cli.messagesBaseUrl=url.href;
+  }
+ }
  const rawTransport=record(value.transport,'transport');
  const botId=positive(rawTransport.botId,'botId'), allowedUserId=positive(rawTransport.allowedUserId,'allowedUserId');
  let transport:NativeConfig['transport'];
@@ -128,5 +139,5 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
   fields(rawTransport,['mode','profile','configPath','locksPath','botId','allowedUserId'],'Ordinary transport');
   transport={mode:'ordinary',profile:text(rawTransport.profile,'profile',/^[a-z0-9-]+$/),configPath:absolute(rawTransport.configPath,'configPath'),locksPath:absolute(rawTransport.locksPath,'locksPath'),botId,allowedUserId};
  } else throw new Error('Unsupported transport mode');
- return {version:1,runtime:'pi-durable',instanceId:text(value.instanceId,'instanceId',/^[a-z0-9][a-z0-9-]{0,63}$/),principal:principal as NativeConfig['principal'],releaseSha:text(value.releaseSha,'releaseSha',/^[a-f0-9]{40}$/),resourceRoot,workspaceCwd,stateDir,capabilityProfile,account:text(value.account,'account',/^[a-zA-Z0-9._-]{1,128}$/),credentialPath:absolute(value.credentialPath,'credentialPath'),settingsPath:absolute(value.settingsPath,'settingsPath'),jobsRole:'disabled',idleHours,transport,...(memory ? { memory } : {}),...(google?{google}:{}),historyDir:join(stateDir,'durable'),inboxPath:join(stateDir,'inbox.db'),runtimeMetadataPath:join(stateDir,'runtime.json')};
+ return {version:1,runtime:'pi-durable',instanceId:text(value.instanceId,'instanceId',/^[a-z0-9][a-z0-9-]{0,63}$/),principal:principal as NativeConfig['principal'],releaseSha:text(value.releaseSha,'releaseSha',/^[a-f0-9]{40}$/),resourceRoot,workspaceCwd,stateDir,capabilityProfile,account:text(value.account,'account',/^[a-zA-Z0-9._-]{1,128}$/),credentialPath:absolute(value.credentialPath,'credentialPath'),settingsPath:absolute(value.settingsPath,'settingsPath'),jobsRole:'disabled',idleHours,transport,...(memory ? { memory } : {}),...(google?{google}:{}),...(cli?{cli}:{}),historyDir:join(stateDir,'durable'),inboxPath:join(stateDir,'inbox.db'),runtimeMetadataPath:join(stateDir,'runtime.json')};
 }

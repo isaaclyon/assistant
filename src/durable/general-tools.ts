@@ -23,6 +23,9 @@ export function createNativeExecutionEnvironment(config:NativeConfig) {
   PI_TELEGRAM_BRIDGE_INSTANCE_ID:config.instanceId,
   PI_TELEGRAM_PRINCIPAL:config.principal,
  });
+ if(config.capabilityProfile==='durable-cli-integrations-test'&&config.cli?.messagesBaseUrl) {
+  shellEnv.PI_TELEGRAM_MESSAGES_BASE_URL=config.cli.messagesBaseUrl;
+ }
  const env=new NodeExecutionEnv({cwd:config.workspaceCwd});
  const execute=env.exec.bind(env);
  // SDK shellEnv overlays process.env; inheritEnv:false is required to exclude it.
