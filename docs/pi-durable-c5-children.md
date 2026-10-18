@@ -151,6 +151,14 @@ retained that cap and declined a longer run. Scoped passing tests do not replace
 the full gate; this slice remains unmerged until complete validation and required
 CI/review pass.
 
+The first exact-head GitHub CI run completed with 1,167 tests passing, two
+inspection tests failing because the Ubuntu runner lacked ripgrep, and three
+skipped tests. Its build step was skipped. The native workflow now installs
+ripgrep before validation; this supplies the existing inspection prerequisite
+without changing the tools or skipping tests. Native typechecking, all seven
+existing general-tool tests and the build passed together in a bounded ten-second
+local run with ripgrep available. A passing full run is still required.
+
 Independent read-only source review found no material correctness defect in
 report deduplication, retention recovery, active synthesis protection or early
 disconnect. Test review identified the prepared-directory assertion and missing
