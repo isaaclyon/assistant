@@ -261,11 +261,22 @@ one-use checks still constrain each confirmation.
 Focused tests cover frozen-copy preservation, held legacy ambiguity, tamper
 rejection, startup guards, pending-schema upgrades, shared-vault concurrency,
 release building and staged activation ordering. `npm run check:changed` and
-`npm run build` pass on Node 24: 149 test files pass, with 1,362 tests passing
-and 39 platform/browser tests skipped. The latest inbox, deployment, network and
+`npm run build` pass on Node 24 after the provider cleanup fix: 150 test files
+pass, with 1,366 tests passing and 39 platform/browser tests skipped. The latest inbox, deployment, network and
 unit checks also pass: type checking, 45 tests across six files, and a fresh
 build. A subsequent four-test inbox check also passes with type checking. It
 verifies that selected asset migration cannot bypass the empty-inbox gate.
+
+[Linux CI](https://github.com/isaaclyon/assistant/actions/runs/39159662779) also
+passes on `ef836d43`: 151 test files pass and one file is skipped, with 1,398
+tests passing and four tests skipped. The run completes in 6 minutes 12 seconds.
+A separate Linux run on the same source commit passes all 43 tests across the
+five protected-browser, private-login, takeover, stock-Chrome and credential-worker
+suites, without skips. This includes the two headed observer tests, the real
+noVNC takeover test and Linux worker cancellation. That run uses Node 24.13.0,
+Chrome 144.0.7559.59 and agent-browser 0.32.2. A first observer run fails because
+its temporary socket path exceeds the Unix socket limit. A rerun with a short
+`AGENT_BROWSER_SOCKET_DIR` passes. The temporary socket directory is removed.
 
 All four disposable Linux modes pass individually: `builder` (10 seconds),
 `happy` (72 seconds), `fail-ready` (65 seconds) and the extended `fail-install`
@@ -291,6 +302,39 @@ native configuration loader. The native configuration tests separately verify
 required digest pins, changed bytes and restart checks. Production state, real
 credentials, live bot polling and C7 rollout are outside this rehearsal.
 
+### Live integration evidence
+
+A dedicated full-builder instance uses the real Codex OAuth provider, a separate
+native store and ordinary Telegram polling. It delivers three replies and
+completes one hosted web request with HTTP 200. It reports no unfinished work or
+transport failure at shutdown. The access-only OAuth copy has refresh disabled;
+both credential copies are removed after the check. This run does not establish
+`/usage` or priority-tier behavior.
+
+The native execution environment also runs the real YNAB CLI through the skill's
+`~/.bun/bin` fallback. The CLI reports no authentication and refuses a budget
+read with HTTP 401. Authenticated CLI acceptance remains open. A separate Messages
+check uses the CLI integration test profile, a synthetic recipient and the real
+private static page. The draft helper preserves the recipient and body in the
+URL fragment, and a clean-page request returns HTTP 200. No message is sent.
+This check does not execute the page's JavaScript.
+
+The ordinary provider check exposes a shutdown limit: application cleanup
+returns and removes the credential copies, but cached provider sockets keep the
+process alive until its outer timeout. The fix tracks the SDK session IDs used
+by each native provider. Closing that provider releases only its own session
+resources and always closes its credential store, including after cleanup errors.
+Regression tests cover both streaming APIs, separate instances, sessionless calls,
+repeated close and cleanup failure. An independent source review finds no material
+issue. A separate real Codex request creates one WebSocket without SSE fallback;
+provider close returns and the process exits naturally with code 0 in six seconds.
+Its credential copies are removed. Real broker, Mini App and credential
+approval/copy acceptance remain open.
+
+Check `tailscale serve status --json` before choosing a private test endpoint.
+The text status can omit foreground configurations. The occupied-port guard
+refuses the existing foreground mappings before any network change.
+
 ### Repeat the offline checks
 
 1. Run `npm run check:changed` and confirm that the check passes.
@@ -301,5 +345,6 @@ credentials, live bot polling and C7 rollout are outside this rehearsal.
 
 Each Linux mode requires Docker and Node 24. The containers use only synthetic
 data and repository build output. Run the modes separately within their bounded
-execution times. Skipped browser/platform tests and live provider, browser, CLI
-and broker acceptance remain separate C6 gates.
+execution times. The separate Linux browser run closes its 43 selected platform
+checks. Remaining end-to-end provider, browser, authenticated CLI and broker
+acceptance remain separate C6 gates.

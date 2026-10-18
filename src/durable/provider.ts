@@ -3,7 +3,7 @@ import { mkdir, open, realpath, rename, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, join, basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createModels, getSupportedThinkingLevels, type Credential, type CredentialStore, type AuthOperationOptions, type Provider, type ModelThinkingLevel } from '@earendil-works/pi-ai';
+import { cleanupSessionResources, createModels, getSupportedThinkingLevels, type Credential, type CredentialStore, type AuthOperationOptions, type Provider, type ModelThinkingLevel } from '@earendil-works/pi-ai';
 import lockfile from 'proper-lockfile';
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
@@ -161,6 +161,23 @@ function withLegacyThinkingRestrictions(provider: Provider): Provider {
   return { ...provider, getModels: () => restrict(getModels()), ...(getAllModels ? { getAllModels: () => restrict(getAllModels()) } : {}) };
 }
 
+/** Remember the session IDs this provider instance passes to the SDK, so close() can release only those cached resources. */
+function withOwnedSessionTracking(provider: Provider, owned: Set<string>): Provider {
+  const track = (options: unknown): void => {
+    if (record(options) && typeof options.sessionId === 'string' && options.sessionId.length > 0) owned.add(options.sessionId);
+  };
+  const wrapped: Record<string, unknown> = { ...provider };
+  for (const name of ['stream', 'streamSimple'] as const) {
+    const original = (provider as unknown as Record<string, unknown>)[name];
+    if (typeof original !== 'function') continue;
+    wrapped[name] = function (this: unknown, model: unknown, context: unknown, options?: unknown) {
+      track(options);
+      return Reflect.apply(original, provider, [model, context, options]);
+    };
+  }
+  return wrapped as unknown as Provider;
+}
+
 export interface NativeProviderSettings { version: 1; account: string; provider: string; modelId: string; thinkingLevel: ModelThinkingLevel; modelIds?: string[] }
 export async function createNativeProvider(options: { credentialPath: string; settingsPath: string; account: string; provider?: Provider; credentialFormat?: "pi-auth" | "native" }) {
   const settings = await privateJson(await canonicalFile(options.settingsPath));
@@ -181,6 +198,8 @@ export async function createNativeProvider(options: { credentialPath: string; se
     provider = { ...provider, getModels: () => selected, getAllModels: () => selected };
   }
   provider = withLegacyThinkingRestrictions(provider);
+  const ownedSessions = new Set<string>();
+  provider = withOwnedSessionTracking(provider, ownedSessions);
   const credentials = await ScopedCredentialStore.open(options.credentialPath, options.account, 30_000, options.credentialFormat);
   try {
     if (!await credentials.read(provider.id)) throw new Error('Selected account has no stored provider credential');
@@ -189,6 +208,12 @@ export async function createNativeProvider(options: { credentialPath: string; se
     const model = models.getModel(provider.id, settings.modelId);
     if (!model) throw new Error('Unknown provider model');
     if (!getSupportedThinkingLevels(model).includes(settings.thinkingLevel as ModelThinkingLevel)) throw new Error('Unsupported model thinking level');
-    return { models, provider, model: { provider: provider.id, modelId: model.id }, thinkingLevel: settings.thinkingLevel as ModelThinkingLevel, close: () => credentials.close() };
+    return { models, provider, model: { provider: provider.id, modelId: model.id }, thinkingLevel: settings.thinkingLevel as ModelThinkingLevel, close: () => {
+      const ids = [...ownedSessions]; ownedSessions.clear();
+      const failures: unknown[] = [];
+      for (const id of ids) { try { cleanupSessionResources(id); } catch (error) { failures.push(error); } }
+      credentials.close();
+      if (failures.length > 0) throw new AggregateError(failures, 'Provider session cleanup failed');
+    } };
   } catch (error) { credentials.close(); throw error; }
 }
