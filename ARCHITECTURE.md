@@ -23,6 +23,11 @@ The separate `feat/durable-c4-provider` branch adds native `/fast` and `/usage`
 commands and weekend-planning guidance. Fast preferences persist with replay-safe
 command identities and apply after native work settles. Usage reads only the
 explicitly selected Codex OAuth account under a bounded deadline.
+The separate `feat/durable-c4-parity` branch adds hosted `web_run` with stable
+store/conversation reference identity, unsafe POST recovery, provider retry/stall
+compatibility, integration diagnostics and protected-auth reservation guidance.
+The native Harness owns retry budgets and settlement. Live integration and
+privileged builder/deployment acceptance remain C6 work.
 These branches use the native package, tests and explicit test-instance entrypoint. See [ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md),
 [ADR-0053](docs/adr/0053-native-chat-memory-and-evidence.md), and the
 [C3 evidence](docs/pi-durable-c3-chat-memory.md) and
