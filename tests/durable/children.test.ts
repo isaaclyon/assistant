@@ -169,6 +169,50 @@ test('unfinished main child tasks recover stable IDs and original deadline after
  expect(s.run).toHaveBeenCalledTimes(2);
 });
 
+test('faulted child job reports failure only after its writer stops and remains eligible for expiry',async()=>{
+ const s=await setup();s.run.mockImplementationOnce(async()=>{await s.gate.promise;throw new Error('Synthetic child orchestration fault');});
+ s.responses(call({operation:'launch',tasks:[{task:'Research',model:s.modelKey,thinking:'off'}]}),answer('LAUNCHED'),answer('FAILED_SYNTHESIS'));
+ await s.h.start();await s.receive(1,'Research');await vi.waitFor(()=>expect(s.finals).toHaveLength(1));
+ const b=(await s.batches())[0]!,job=b.jobs[0]!;
+ const writer=await openHostStorage(join(s.artifacts.jobDir(b.id,job.id),'store'));let writerClosed=false;
+ cleanup.push(async()=>{if(!writerClosed){await writer.storage.close(context);writer.release();}});
+ const probe=vi.spyOn(s.service.artifacts,'tryWriterLease');
+ s.gate.resolve();
+ await vi.waitFor(async()=>{const task=await s.h.runtime.harness.getTask(job.taskId!,context);expect(task?.state).toMatchObject({status:'terminal',outcome:{status:'faulted'}});});
+ await vi.waitFor(()=>expect(probe).toHaveBeenCalledWith(b.id,job.id));
+ expect((await s.batches())[0]!.jobs[0]!.status).toBe('running');
+ expect((await s.batches())[0]!.report.status).toBe('pending');
+ expect(s.finals.map(x=>x.text)).toEqual(['LAUNCHED']);
+ await writer.storage.close(context);writer.release();writerClosed=true;
+ await vi.waitFor(async()=>expect((await s.batches())[0]!.report.status).toBe('done'),{timeout:6000});
+ const after=(await s.batches())[0]!;
+ expect(after.jobs[0]).toMatchObject({status:'failed',finishedAt:expect.any(Number)});
+ expect(after.report.text).toContain(`Job ${job.id}: failed`);
+ expect(s.finals.map(x=>x.text)).toEqual(['LAUNCHED','FAILED_SYNTHESIS']);
+ await s.h.reconcile();expect(s.run).toHaveBeenCalledTimes(1);
+ s.clock(b.expiresAt);await s.service.cleanup(true);
+ expect((await s.batches())[0]).toMatchObject({tombstone:true,removed:true});
+ await expect(stat(s.artifacts.batchDir(b.id))).rejects.toMatchObject({code:'ENOENT'});
+});
+
+test('expiry reconciles a faulted child job even when its report task has already faulted',async()=>{
+ const s=await setup();s.run.mockImplementationOnce(async()=>{await s.gate.promise;throw new Error('Synthetic child orchestration fault');});
+ s.responses(call({operation:'launch',tasks:[{task:'Research',model:s.modelKey,thinking:'off'}]}),answer('LAUNCHED'));
+ await s.h.start();await s.receive(1,'Research');await vi.waitFor(()=>expect(s.finals).toHaveLength(1));
+ const b=(await s.batches())[0]!;
+ const lease=vi.spyOn(s.service.artifacts,'tryBatchLease').mockRejectedValueOnce(new Error('Synthetic report gate fault'));
+ s.gate.resolve();
+ await vi.waitFor(async()=>{const task=await s.h.runtime.harness.getTask(b.report.taskId!,context);expect(task?.state).toMatchObject({status:'terminal',outcome:{status:'faulted'}});});
+ lease.mockRestore();
+ expect((await s.batches())[0]!.jobs[0]!.status).toBe('running');
+ const task=await s.h.runtime.harness.getTask(b.jobs[0]!.taskId!,context);
+ expect(task?.state).toMatchObject({status:'terminal',outcome:{status:'faulted'}});
+ s.clock(b.expiresAt);await s.service.cleanup(true);
+ expect((await s.batches())[0]).toMatchObject({tombstone:true,removed:true,report:{status:'retired'},jobs:[{status:'failed'}]});
+ await expect(stat(s.artifacts.batchDir(b.id))).rejects.toMatchObject({code:'ENOENT'});
+ expect(s.run).toHaveBeenCalledTimes(1);expect(s.finals.map(x=>x.text)).toEqual(['LAUNCHED']);
+});
+
 test('failed completion admission expires after the report task stops and does not fail host admission',async()=>{
  const s=await setup();s.responses(call({operation:'launch',tasks:[{task:'Research',model:s.modelKey,thinking:'off'}]}),answer('LAUNCHED'));
  await s.h.start();await s.receive(1,'Research');await vi.waitFor(()=>expect(s.finals).toHaveLength(1));

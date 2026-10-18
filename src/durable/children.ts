@@ -42,6 +42,23 @@ export function createNativeChildren(options:{config:NativeConfig;host:()=>Durab
   if(!sources.length||sources.some(s=>s.principal!==options.config.principal||s.chatId!==options.config.transport.allowedUserId||s.threadId!==null||s.envelope.instance!==options.config.instanceId||s.envelope.bot!==String(options.config.transport.botId)))throw new Error('Child launch authority rejected');
   return {conversationId:cid,epoch:value.epoch,principal:options.config.principal,chatId:options.config.transport.allowedUserId,threadId:null,instance:options.config.instanceId,bot:String(options.config.transport.botId)};
  }
+ // The caller holds the batch control lease. A settled native task cannot resume;
+ // reconcile its missing bridge outcome only after proving the writer has stopped.
+ async function reconcileStoppedJobs(id:string){
+  if(supervisor.active(id))return;
+  const writers:(()=>void)[]=[];
+  try{
+   await change(id,async(b,tx)=>{
+    if(b.tombstone)return;
+    for(const job of b.jobs){
+     if(terminal(job)||!job.taskId)continue;
+     const task=await tx.task(job.taskId);if(task?.state.status!=='terminal')continue;
+     const writer=await artifacts.tryWriterLease(id,job.id);if(!writer)continue;
+     writers.push(writer);job.status='failed';job.finishedAt=now();
+    }
+   });
+  }finally{for(const writer of writers.reverse())writer();}
+ }
  const jobTask=defineTask<{batchId:string;jobId:string},{phase:'run'},null>({name:'bridge.child-job',version:1,initial:()=>({phase:'run'}),phases:{run:async(running,runtime,ctx)=>{
   const {batchId,jobId}=running.input;
   const selected=await batch(batchId),job=selected?.jobs.find(j=>j.id===jobId);
@@ -69,7 +86,15 @@ export function createNativeChildren(options:{config:NativeConfig;host:()=>Durab
   if(!b||b.tombstone||b.report.status==='done'||b.report.status==='retired'){await runtime.commit(()=>settled(),ctx);return;}
   if(b.report.taskId!==runtime.taskId||b.origin.conversationId!==runtime.conversationId)throw new Error('Child report identity conflict');
   await Promise.all(b.jobs.map(j=>runtime.waitForTask(j.taskId!,ctx)));
-  b=await batch(id);if(!b||!b.jobs.every(terminal))throw new Error('Child batch has unsettled outcomes');
+  for(;;){
+   const release=await artifacts.tryBatchLease(id);
+   if(release){
+    try{await reconcileStoppedJobs(id);b=await batch(id);}finally{release();}
+    if(!b||b.tombstone||b.jobs.every(terminal))break;
+   }
+   await runtime.sleep(runtime.now()+250,ctx);
+  }
+  if(!b||b.tombstone){await runtime.commit(()=>settled(),ctx);return;}
   const conversation=await runtime.conversation(b.origin.conversationId,ctx);if(!conversation)throw new Error('Original child conversation unavailable');
   await conversation.waitForIdle(ctx);
   let release=await artifacts.tryBatchLease(id);
@@ -175,8 +200,10 @@ export function createNativeChildren(options:{config:NativeConfig;host:()=>Durab
    const writers:(()=>void)[]=[];
    try{
     release=await artifacts.tryBatchLease(id);if(!release)continue;
+    if(supervisor.active(id))continue;
+    if((await batch(id)))await reconcileStoppedJobs(id);
     const b=await batch(id);
-    if(supervisor.active(id)||b&&(b.removed||now()<b.expiresAt||!b.jobs.every(terminal)))continue;
+    if(b&&(b.removed||now()<b.expiresAt||!b.jobs.every(terminal)))continue;
     await host().runtime.root.commit(async tx=>{
      const doc=await tx.doc(NativeChildren,host().runtime.root.id),value=doc.batches[id];
      if(value){if(!value.jobs.every(terminal)||await reportBusy(tx,value))return false;value.tombstone=true;if(value.report.status!=='done')value.report.status='retired';}

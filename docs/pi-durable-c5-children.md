@@ -87,6 +87,12 @@ The source fingerprint detects changed payloads, and the stable submission
 request ID reconciles admission after a lost acknowledgement. Child completion
 does not update the human-idle clock or select the current conversation.
 
+If a native child job task settles without committing a bridge outcome, the
+report gate and expiry cleanup reconcile its bridge status to `failed`. They
+hold the batch control lease and prove the store has no writer before doing so.
+A busy writer keeps the job unresolved; the terminal native task is never rerun.
+This lets the parent report orchestration failures and retire their artifacts.
+
 The inline report is sufficient for synthesis after `/new`; old-conversation
 tools still fail current-epoch authorization. The parent summarizes once without
 further delegation from the completion. Proactive synthesis has final-only
@@ -138,8 +144,8 @@ it settles without spawning an expired child. Cleanup respects a held control
 lease, then removes SQLite/WAL/SHM without recreation. The persistent control
 lease survives removal.
 
-Node 24 strict native typechecking and all **67 tests in seven child suites**
-passed in a 55-second bounded run. This includes orphan inventory failure,
+Node 24 strict native typechecking, all **69 tests in seven child suites** and
+the build passed together in a 53-second bounded run after faulted-job reconciliation. This includes orphan inventory failure,
 post-removal retry and a two-job batch with one busy writer. A separate
 `npm run build` passed, including compiled worker and application imports.
 No general-tools typecheck repair was added after the scope boundary.
@@ -157,13 +163,24 @@ skipped tests. Its build step was skipped. The native workflow now installs
 ripgrep before validation; this supplies the existing inspection prerequisite
 without changing the tools or skipping tests. Native typechecking, all seven
 existing general-tool tests and the build passed together in a bounded ten-second
-local run with ripgrep available. A passing full run is still required.
+local run with ripgrep available. CI on the prerequisite-fix commit `c6022ca`
+then passed 1,169 tests with three skipped, plus typechecking and build. Its test
+phase took 305 seconds. That evidence predates faulted-job reconciliation; passing
+exact-head CI and follow-up review are still required. The older 223-second run
+covered the C4 provider slice with 801 passing tests, so it does not establish that
+the current full local gate fits the retained 285-second cap.
 
 Independent read-only source review found no material correctness defect in
 report deduplication, retention recovery, active synthesis protection or early
 disconnect. Test review identified the prepared-directory assertion and missing
 orphan/multiple-writer coverage; the added ordinary unit tests cover those latter
 paths. Both reviews were static and supply no live acceptance evidence.
+
+A subsequent reviewers-plus-judge workflow identified missing reconciliation for
+faulted native child job tasks. Two focused regression tests reproduced the stuck
+report and blocked-expiry paths before the fix. They now exercise failure
+reporting after writer closure and cleanup when the report task has also faulted.
+A follow-up independent judgment and exact-head CI remain required.
 
 All providers and transports are synthetic. This slice establishes no live
 provider, Telegram, Linux/systemd, physical power-loss or private-state migration
