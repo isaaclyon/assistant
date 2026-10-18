@@ -1,11 +1,12 @@
-# C4 tools, reads, CLI skills, places and guarded changes
+# C4 tools, reads, CLI skills, places, guarded changes and browser
 
 Status: **first slice implemented and locally validated on `feat/durable-c4`;
 a second Google-read slice is implemented and locally validated on
 `feat/durable-c4-reads`; a CLI skill slice is implemented on
 `feat/durable-c4-cli`; direct private places are implemented and locally validated on
 `feat/durable-c4-places`; guarded Calendar and places mutations are implemented on
-`feat/durable-c4-mutations` (validation below).
+`feat/durable-c4-mutations`; protected browser operations are implemented on
+`feat/durable-c4-browser` (validation below).
 C4 remains in progress.** C3 is accepted. The first slice restores general file,
 shell and bounded public-web tools in a separate selected profile. Production
 continues using its legacy release. The legacy planning checkout retains this
@@ -118,8 +119,8 @@ loads that wrapper rather than adding authority only around a test handler.
 No live bot, credential copy, production service or private-state migration was
 needed for this slice. Linux/systemd and full integration acceptance remain later
 gates. The [roadmap](pi-durable-migration-plan.md#c4--remaining-integrations-and-protected-browser-workflows)
-keeps C4 open for direct places UI, guarded mutations,
-protected browser workflows and provider/operator parity. C5–C7 remain pending.
+records subsequent places, guarded-mutation and protected-browser slices below.
+Provider/operator parity and live integration acceptance remain open. C5–C7 remain pending.
 
 
 ## Google read integration slice
@@ -178,8 +179,8 @@ read just in time. OAuth clients/tokens stay in the isolated gog home. An empty
 Missing sections disable their corresponding transport. Limits are required
 when selecting Places, accept integers from zero to one million, and cannot be
 overridden by tool arguments. Google configuration is rejected for other native
-profiles except the CLI-integrations profile, which inherits these reads. Both
-require the same memory principal/authority as C3.
+profiles except the CLI, places, mutations and browser successors, which inherit
+these reads. All require the same memory principal/authority as C3.
 Changing its Google configuration blocks reopening an incompatible store.
 
 Single-event reads preserve the existing stricter Calendar boundary: explicit
@@ -231,8 +232,8 @@ and a Places fetch/reservation with no duplicate after recovery. Shared transpor
 and gateway suites remain in the ordinary native test gate.
 
 Live Google/OAuth compatibility, Linux/systemd and the remaining full C4
-integration gates remain unverified. Direct places UI, guarded mutations,
-protected browser and provider/operator parity remain open.
+integration gates remain unverified. Subsequent sections record local places,
+guarded-mutation and protected-browser implementation evidence.
 
 ## CLI skill integration slice
 
@@ -261,9 +262,9 @@ An optional private native configuration field sets the Messages HTTPS origin:
 
 This is a synthetic configuration fragment; retain the other required C2/C3
 fields. The origin must use HTTPS without credentials, a non-root path, query or
-fragment. Unknown CLI fields and CLI configuration outside the CLI and places profiles fail
-validation. The selected origin becomes `PI_TELEGRAM_MESSAGES_BASE_URL` only in
-the CLI and places profiles' child shell environment. Ambient values are excluded. Omitting
+fragment. Unknown CLI fields and CLI configuration outside the CLI, places,
+mutations and browser profiles fail validation. The selected origin becomes
+`PI_TELEGRAM_MESSAGES_BASE_URL` only in those profiles' child shell environment. Ambient values are excluded. Omitting
 `cli` or its origin retains the helper's bounded local Tailscale hostname
 discovery. CLI configuration is part of this profile's recovery signature;
 changing it blocks incompatible store reopening.
@@ -481,3 +482,120 @@ the receipt-storage and safe-retirement measurement gate.
 Live Google/OAuth, Telegram delivery, private rankings and Linux/systemd remain
 separate acceptance gates. This slice does not close C4's protected browser or
 provider/operator parity gates.
+
+
+## Protected browser slice
+
+`durable-browser-test` extends the Isaac-only guarded-mutations profile with
+`native-private-browser`, the `agent-browser` skill and focused browser
+instructions. Earlier profile/resource objects remain unchanged. Use a separate
+private native store and the existing C2/C3 memory and explicit Google settings;
+`google: {}` leaves email-code lookup unavailable and manual entry intact.
+
+The bundle registers `private_browser_input`, `private_opentable_login`,
+`private_browser_login` and `browser_takeover`. Broker instances also register
+`find_login_candidates`, which returns only titles and opaque source references.
+All five calls are sequential and replay-unsafe. The existing domain services
+own CDP, browser/session mutexes, crash gates, private input, takeover, approved
+credentials and cleanup. The native host supplies configuration and lifetime;
+it imports no legacy extension factory or instance manifest.
+
+### Configuration and authority
+
+Add this synthetic fragment to the private native instance configuration:
+
+```json
+{
+  "capabilityProfile": "durable-browser-test",
+  "browser": {
+    "agentDir": "/private/native/agent",
+    "telegramProfile": "personal-test",
+    "credentialScope": "personal-test",
+    "configRoot": "/private/native/config",
+    "runtimeDir": "/private/native/runtime",
+    "dataDir": "/private/native/data",
+    "endpoints": {
+      "bindAddress": "10.253.250.2",
+      "inputOrigin": "https://synthetic-node.example.ts.net:8446",
+      "takeoverOrigin": "https://synthetic-node.example.ts.net:8447"
+    }
+  }
+}
+```
+
+Provision those absolute paths privately under the selected runtime identity.
+The named `agentDir/telegram.json` profile must pair the configured user and bot.
+Ordinary transport must select that same file and profile. Broker mode requires
+its exact `botId:runtime` surrogate token and provisioned private endpoints;
+requests stay on the selected Unix socket without direct Bot API fallback.
+The trusted broker retains credential approval authority. This fragment does
+not provision proxies, namespaces, Chrome, 1Password, or service identities;
+retain the [isolated deployment procedure](household-fleet.md#isolated-personal-deployment).
+Ordinary instances may omit `endpoints` to use the retained temporary Serve
+ownership checks. Broker instances cannot omit them.
+
+The host leases process-scoped browser path, scope, socket and endpoint settings
+for its entire lifetime, allowing only one native browser instance per process.
+Ordinary mode clears ambient broker routing. Shell helpers receive the same
+selected public paths with `inheritEnv: false`. Configuration participates in
+the compatibility signature. OpenTable's private email-code adapter uses only
+the explicit native Google runtime and configured default inbox; it never
+resolves ambient Google credentials or sends mail/code text to the model.
+
+### Exclusion, cleanup and recovery
+
+The registry-wide guard derives its protected tool names from the loaded browser
+bundle. It wraps authorization, memo and execution for every tool, including
+recovery and reload. Protected entry refuses another in-flight tool; every tool
+refuses entry while protected work is active. The guard stays held until domain
+cleanup finishes. Abort/stop propagate cancellation; `/new` refuses active work
+and epoch changes revoke any remaining operation. Application shutdown drains
+private work before closing the Harness and restoring process environment.
+
+Only fixed terminal status, private/shared mode and validated independent
+credential-copy receipts can enter durable tool output. Errors, browser pages,
+mail, form values, protocol and arbitrary service fields are discarded. Existing
+history filtering excludes protected tool results. A thrown operation or host
+crash can lose the copy receipt even if a credential copy succeeded: inspect the
+destination 1Password vault before repeating an interrupted `credentialItem`
+login. A reported copy is independent of sign-in success.
+
+A killed operation is interrupted, never automatically resumed or repeated.
+The on-disk stock-browser gate remains until verified stop-only recovery.
+A later request returns `browser_blocked` without reconnecting to sensitive
+pages. Uncertain observer/preparation state and failed listener/document cleanup
+also retain the gate. Never delete it manually. A surviving Chrome process or
+`submitted` status does not prove authentication; verify the clean resume page
+under the existing [input](adr/0040-protected-telegram-browser-input.md),
+[takeover](adr/0044-telegram-browser-takeover.md) and
+[login](adr/0045-private-multistep-browser-login.md) contracts.
+
+The guard is cooperative protection under one OS identity. It cannot revoke
+background shell processes started earlier or prevent same-user raw CDP access;
+keep the existing OS/broker isolation and owned-process rules.
+
+### Browser validation and remaining gates
+
+Under Node 24.18.1, `npm run check:changed` passed 778 tests in 73 files;
+38 platform/credential-dependent tests were skipped across four files (three
+entire suites). `npm run build` passed, including the compiled application import.
+An independent read-only boundary review found no blockers. Its guard-name
+maintenance finding was addressed by deriving names from the registered bundle.
+
+Node 24 validation exercises the production application, registry, Harness and
+stock-gate files with synthetic providers and fictional domain effects. Eight
+SIGKILL cases cover each protected tool at gate creation and after an external
+effect, before its result commits. Recovery reports uncertainty, deduplicates
+the original update and preserves the gate; distinct requests exercise the real
+domain wrapper's blocked path. Tests also cover all-tool exclusion, abort and
+shutdown cleanup ordering, authority rejection, fixed output filtering, explicit
+mail runtime, environment ownership and broker candidate/Mini App routing through
+a synthetic Unix server with direct fetch forbidden.
+
+Shared server, UI, protection, credential and email-code suites run in the native
+gate. Linux Chrome/CDP/noVNC suites remain platform-conditional. These tests do
+not prove live Telegram/Mini App/Tailscale, real credential approvals/copies,
+real Gmail login, Linux/systemd path ownership or current Chrome behavior. C6
+must run those gates with the relevant broker/security and operations owners.
+Full C4 remains open for provider/operator parity; production activation and
+private-state migration remain C6/C7 work.

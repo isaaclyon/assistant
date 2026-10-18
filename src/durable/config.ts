@@ -11,12 +11,16 @@ export interface NativeMemoryConfig {
  judgeKeyFile?: string;
  embeddingKeyFile?: string;
 }
-export const isNativeMemoryProfile=(profile:string)=>['durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test'].includes(profile);
+export const isNativeMemoryProfile=(profile:string)=>['durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test'].includes(profile);
 export interface NativeGoogleConfig {
  account?:string;
  gog?:{binary:string;passwordFile:string;home:string};
  places?:{apiKeyFile:string;searchMonthlyLimit:number;detailsMonthlyLimit:number;candidatesMonthlyLimit:number};
  calendarTargets?:{account:string;personal:string;thingsToDo:string};
+}
+export interface NativeBrowserConfig {
+ agentDir:string; telegramProfile:string; credentialScope:string; configRoot:string; runtimeDir:string; dataDir:string;
+ endpoints?:{bindAddress:string;inputOrigin:string;takeoverOrigin:string};
 }
 export interface NativeConfig {
  version: 1; runtime: 'pi-durable'; instanceId: string; principal: 'isaac'|'emma'|'household'|'engineering';
@@ -27,6 +31,7 @@ export interface NativeConfig {
  memory?: NativeMemoryConfig;
  google?: NativeGoogleConfig;
  cli?: { messagesBaseUrl?: string };
+ browser?: NativeBrowserConfig;
  historyDir: string; inboxPath: string; runtimeMetadataPath: string;
 }
 const record=(value:unknown,label:string):Record<string,unknown>=>{
@@ -57,7 +62,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
  if((stat.mode&0o077)!==0 || (process.getuid && stat.uid!==process.getuid())) throw new Error('Configuration must be private and owned by this runtime');
  let raw:unknown; try{raw=JSON.parse(await readFile(path,'utf8'));}catch{throw new Error('Invalid native configuration JSON');}
  const value=record(raw,'Native configuration');
- fields(value,['version','runtime','instanceId','principal','releaseSha','resourceRoot','workspaceCwd','stateDir','capabilityProfile','account','credentialPath','settingsPath','jobsRole','idleHours','transport','memory','google','cli'],'Native configuration');
+ fields(value,['version','runtime','instanceId','principal','releaseSha','resourceRoot','workspaceCwd','stateDir','capabilityProfile','account','credentialPath','settingsPath','jobsRole','idleHours','transport','memory','google','cli','browser'],'Native configuration');
  if(value.version!==1||value.runtime!=='pi-durable') throw new Error('Unsupported native runtime or configuration version');
  if(value.jobsRole!=='disabled') throw new Error('Native test profiles require jobsRole disabled');
  const idleHours=value.idleHours??0;
@@ -65,8 +70,8 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
  const principal=text(value.principal,'principal');
  if(!['isaac','emma','household','engineering'].includes(principal)) throw new Error('Invalid principal');
  const capabilityProfile=text(value.capabilityProfile,'capability profile');
- if(!['durable-foundation-test','durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test'].includes(capabilityProfile)) throw new Error('Unsupported native capability profile');
- if(['durable-places-test','durable-mutations-test'].includes(capabilityProfile)&&principal!=='isaac')throw new Error('Places profile requires the Isaac principal');
+ if(!['durable-foundation-test','durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test'].includes(capabilityProfile)) throw new Error('Unsupported native capability profile');
+ if(['durable-places-test','durable-mutations-test','durable-browser-test'].includes(capabilityProfile)&&principal!=='isaac')throw new Error('Places profile requires the Isaac principal');
  const resourceRoot=await realpath(absolute(value.resourceRoot,'resourceRoot'));
  const workspaceCwd=await realpath(absolute(value.workspaceCwd,'workspaceCwd'));
  const stateDir=await realpath(absolute(value.stateDir,'stateDir'));
@@ -100,7 +105,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
   if (memory.semantic === 'on' && !memory.embeddingKeyFile) throw new Error('Enabled semantic search requires explicit provider authorization');
  } else if (value.memory !== undefined) throw new Error('Foundation profile cannot select memory configuration');
  let google:NativeGoogleConfig|undefined;
- if(['durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test'].includes(capabilityProfile)){
+ if(['durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test'].includes(capabilityProfile)){
   const selected=record(value.google,'google');fields(selected,['account','gog','places','calendarTargets'],'google');google={};
   if(selected.account!==undefined)google.account=text(selected.account,'Google account');
   if(google.account&&(google.account.length>254||/[\0\r\n]/.test(google.account)))throw new Error('Invalid Google account');
@@ -122,7 +127,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
  }else if(value.google!==undefined)throw new Error('Google configuration requires the read-integrations profile');
  let cli:NativeConfig['cli'];
  if(value.cli!==undefined){
-  if(!['durable-cli-integrations-test','durable-places-test','durable-mutations-test'].includes(capabilityProfile))throw new Error('CLI configuration requires the CLI-integrations profile');
+  if(!['durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test'].includes(capabilityProfile))throw new Error('CLI configuration requires the CLI-integrations profile');
   const selected=record(value.cli,'cli');fields(selected,['messagesBaseUrl'],'cli');cli={};
   if(selected.messagesBaseUrl!==undefined){
    let url:URL;try{url=new URL(text(selected.messagesBaseUrl,'Messages base URL'));}catch{throw new Error('Invalid Messages base URL');}
@@ -130,6 +135,17 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
    cli.messagesBaseUrl=url.href;
   }
  }
+ let browser:NativeBrowserConfig|undefined;
+ if(capabilityProfile==='durable-browser-test'){
+  const selected=record(value.browser,'browser');fields(selected,['agentDir','telegramProfile','credentialScope','configRoot','runtimeDir','dataDir','endpoints'],'browser');
+  browser={agentDir:absolute(selected.agentDir,'browser agentDir'),telegramProfile:text(selected.telegramProfile,'browser Telegram profile',/^[a-z0-9-]+$/),credentialScope:text(selected.credentialScope,'credential scope',/^[a-z0-9][a-z0-9-]{0,63}$/),configRoot:absolute(selected.configRoot,'browser configRoot'),runtimeDir:absolute(selected.runtimeDir,'browser runtimeDir'),dataDir:absolute(selected.dataDir,'browser dataDir')};
+  if(selected.endpoints!==undefined){
+   const endpoints=record(selected.endpoints,'browser endpoints');fields(endpoints,['bindAddress','inputOrigin','takeoverOrigin'],'browser endpoints');
+   browser.endpoints={bindAddress:text(endpoints.bindAddress,'browser bind address'),inputOrigin:text(endpoints.inputOrigin,'browser input origin'),takeoverOrigin:text(endpoints.takeoverOrigin,'browser takeover origin')};
+   const {privateBrowserEndpoint}=await import('../private-browser-endpoint.js');
+   privateBrowserEndpoint('input',{PI_PRIVATE_BROWSER_BIND_ADDRESS:browser.endpoints.bindAddress,PI_PRIVATE_INPUT_ORIGIN:browser.endpoints.inputOrigin,PI_PRIVATE_TAKEOVER_ORIGIN:browser.endpoints.takeoverOrigin});
+  }
+ }else if(value.browser!==undefined)throw new Error('Browser configuration requires the browser profile');
  const rawTransport=record(value.transport,'transport');
  const botId=positive(rawTransport.botId,'botId'), allowedUserId=positive(rawTransport.allowedUserId,'allowedUserId');
  let transport:NativeConfig['transport'];
@@ -140,5 +156,10 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
   fields(rawTransport,['mode','profile','configPath','locksPath','botId','allowedUserId'],'Ordinary transport');
   transport={mode:'ordinary',profile:text(rawTransport.profile,'profile',/^[a-z0-9-]+$/),configPath:absolute(rawTransport.configPath,'configPath'),locksPath:absolute(rawTransport.locksPath,'locksPath'),botId,allowedUserId};
  } else throw new Error('Unsupported transport mode');
- return {version:1,runtime:'pi-durable',instanceId:text(value.instanceId,'instanceId',/^[a-z0-9][a-z0-9-]{0,63}$/),principal:principal as NativeConfig['principal'],releaseSha:text(value.releaseSha,'releaseSha',/^[a-f0-9]{40}$/),resourceRoot,workspaceCwd,stateDir,capabilityProfile,account:text(value.account,'account',/^[a-zA-Z0-9._-]{1,128}$/),credentialPath:absolute(value.credentialPath,'credentialPath'),settingsPath:absolute(value.settingsPath,'settingsPath'),jobsRole:'disabled',idleHours,transport,...(memory ? { memory } : {}),...(google?{google}:{}),...(cli?{cli}:{}),historyDir:join(stateDir,'durable'),inboxPath:join(stateDir,'inbox.db'),runtimeMetadataPath:join(stateDir,'runtime.json')};
+ if(browser){
+  if(principal!=='isaac')throw new Error('Browser test profile requires the Isaac principal');
+  if(transport.mode==='broker'&&!browser.endpoints)throw new Error('Broker browser requires provisioned private endpoints');
+  if(transport.mode==='ordinary'&&(resolve(transport.configPath)!==resolve(browser.agentDir,'telegram.json')||transport.profile!==browser.telegramProfile))throw new Error('Browser and native Telegram profiles differ');
+ }
+ return {version:1,runtime:'pi-durable',instanceId:text(value.instanceId,'instanceId',/^[a-z0-9][a-z0-9-]{0,63}$/),principal:principal as NativeConfig['principal'],releaseSha:text(value.releaseSha,'releaseSha',/^[a-f0-9]{40}$/),resourceRoot,workspaceCwd,stateDir,capabilityProfile,account:text(value.account,'account',/^[a-zA-Z0-9._-]{1,128}$/),credentialPath:absolute(value.credentialPath,'credentialPath'),settingsPath:absolute(value.settingsPath,'settingsPath'),jobsRole:'disabled',idleHours,transport,...(memory ? { memory } : {}),...(google?{google}:{}),...(cli?{cli}:{}),...(browser?{browser}:{}),historyDir:join(stateDir,'durable'),inboxPath:join(stateDir,'inbox.db'),runtimeMetadataPath:join(stateDir,'runtime.json')};
 }

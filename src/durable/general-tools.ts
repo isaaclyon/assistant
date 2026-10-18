@@ -5,6 +5,7 @@ import { getOrThrow } from '@earendil-works/pi-durable/env';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { createBashTool, createEditTool, createReadTool, createWriteTool } from '@earendil-works/pi-durable/tools';
 import type { Context } from '@earendil-works/chord/context';
+import { nativeBrowserEnvironment } from './browser-environment.js';
 import type { NativeConfig } from './config.js';
 import { textToolResult, type NativeBundle } from './registry.js';
 
@@ -23,9 +24,10 @@ export function createNativeExecutionEnvironment(config:NativeConfig) {
   PI_TELEGRAM_BRIDGE_INSTANCE_ID:config.instanceId,
   PI_TELEGRAM_PRINCIPAL:config.principal,
  });
- if(['durable-cli-integrations-test','durable-places-test','durable-mutations-test'].includes(config.capabilityProfile)&&config.cli?.messagesBaseUrl) {
+ if(['durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test'].includes(config.capabilityProfile)&&config.cli?.messagesBaseUrl) {
   shellEnv.PI_TELEGRAM_MESSAGES_BASE_URL=config.cli.messagesBaseUrl;
  }
+ if(config.capabilityProfile==='durable-browser-test'){for(const [key,value] of Object.entries(nativeBrowserEnvironment(config))){if(value!==undefined)shellEnv[key]=value;}}
  const env=new NodeExecutionEnv({cwd:config.workspaceCwd});
  const execute=env.exec.bind(env);
  // SDK shellEnv overlays process.env; inheritEnv:false is required to exclude it.

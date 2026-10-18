@@ -1,6 +1,6 @@
 # Pi-durable migration plan
 
-Status: approved architecture and checkpoint sequence; C0–C3 passed. C3 chat and memory are implemented on isolated `feat/durable-c3`, with local validation, independent review and dedicated live user acceptance complete; see the [C3 guide](pi-durable-c3-chat-memory.md). C4's [first slice](pi-durable-c4-tools.md) adds locally validated general tools and bounded public web on `feat/durable-c4`; the Google-read slice on `feat/durable-c4-reads` adds Calendar/Gmail/Contacts/Places with bounded transports and metered recovery. The CLI slice on `feat/durable-c4-cli` selects the existing YNAB and editable Messages skills through the replay-unsafe shell, with explicit optional Messages configuration and synthetic recovery coverage. The direct-places slice on `feat/durable-c4-places` adds native private menus, model handoff and persisted callback claims around the existing ranking store. The guarded-mutation slice on `feat/durable-c4-mutations` adds a separate profile for Calendar changes and direct places delete/cancel/undo confirmations, with claimed-effect recovery. Full C4 remains in progress. Production remains on the legacy release; no production deployment or private-state migration ran.
+Status: approved architecture and checkpoint sequence; C0–C3 passed. C3 chat and memory are implemented on isolated `feat/durable-c3`, with local validation, independent review and dedicated live user acceptance complete; see the [C3 guide](pi-durable-c3-chat-memory.md). C4's [first slice](pi-durable-c4-tools.md) adds locally validated general tools and bounded public web on `feat/durable-c4`; the Google-read slice on `feat/durable-c4-reads` adds Calendar/Gmail/Contacts/Places with bounded transports and metered recovery. The CLI slice on `feat/durable-c4-cli` selects the existing YNAB and editable Messages skills through the replay-unsafe shell, with explicit optional Messages configuration and synthetic recovery coverage. The direct-places slice on `feat/durable-c4-places` adds native private menus, model handoff and persisted callback claims around the existing ranking store. The guarded-mutation slice on `feat/durable-c4-mutations` adds a separate profile for Calendar changes and direct places delete/cancel/undo confirmations, with claimed-effect recovery. The protected-browser slice on `feat/durable-c4-browser` adds an Isaac-only profile, native unsafe wrappers, registry-wide tool exclusion, explicit scoped configuration and stop-only crash recovery around the retained private domain services. Full C4 remains in progress. Production remains on the legacy release; no production deployment or private-state migration ran.
 
 The user approved the durable-only extension strategy, chat-and-memory MVP, retained hosting and Telegram experience, target architecture, and C0–C7 sequence. This plan records intended work; it does not describe implemented behavior or supersede existing ADRs until their replacements are accepted.
 
@@ -195,9 +195,14 @@ message/epoch-bound callback claims. The guarded-mutation slice on
 `feat/durable-c4-mutations` adds Calendar creates/updates/deletion and places
 delete/cancel/undo through direct user confirmations. It retains original
 version/snapshot authority and never automatically repeats an uncertain effect.
-This is local implementation acceptance for these slices, not the complete C4
-pass gate; live integration delivery, protected browser workflows and full
-provider/operator parity remain pending.
+The protected-browser slice on `feat/durable-c4-browser` adds an Isaac-only
+profile for private input, multistep/OpenTable login, takeover and broker-only
+saved-login discovery. Explicit host configuration, registry-wide exclusion and
+unsafe recovery retain the private input boundary and crash gate. Tests cover
+all four protected tools before/after fictional effects and use the real domain
+wrapper for blocked recovery. This is local implementation acceptance for these
+slices, not the complete C4 pass gate; live integration delivery, browser/platform
+acceptance and full provider/operator parity remain pending.
 
 Restore general file/shell/public-web tools with operation-specific replay policies as part of C4. The C3 profile deliberately selects only typed memory/history tools.
 
@@ -274,7 +279,7 @@ Browser recovery is a separate acceptance boundary. A surviving browser process 
 | `reload`, `restart`, `skills`, `debug` | Host/Telegram commands and MVP diagnostics with explicit lifecycle ownership; extend diagnostics with later integrations | C2–C3; integration coverage C4 |
 | `places` | Native tool plus direct sections/callbacks; retain ranking/application store | C4 |
 | `google-workspace` | Native typed operations; retain transport/cache and operation-specific write recovery | C4 |
-| `private-browser-input` | Native wrappers and host guard around existing protected operations; broker stays authoritative | C4 |
+| `private-browser-input` | Implemented in `durable-browser-test`: unsafe native wrappers, registry-wide guard and scoped host lifetime around retained protected operations; broker stays authoritative | C4 local; live/platform C6 |
 | `fast`, `usage` | Explicit provider-facing host services and Telegram commands; remove dependence on old command contexts | C4, provider feasibility C1 |
 | `deploy` | Host command retaining instance privileges and deployment policy | C4/C6 |
 | `subagents` | Native durable tasks/owned conversations and completion reporter with bounded read-only execution | C5 |

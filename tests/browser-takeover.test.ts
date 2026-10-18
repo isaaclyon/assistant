@@ -50,6 +50,12 @@ describe("takeover ownership and teardown", () => {
   afterEach(async () => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); await rm(h.root, { recursive: true, force: true }); });
   const run = (chatId = 123) => runBrowserTakeover({ config: { instanceId: "test", telegramSurface: { type: "private" }, resourceRoot: process.cwd() } as BridgeInstanceConfig,
     request: { session: "default", resumeUrl: "https://example.com/" }, chatId, signal: new AbortController().signal, notifyWaiting() {} });
+  it("retains the gate if protected preparation fails after observer disconnection", async () => {
+    h.prepare.mockRejectedValueOnce(new Error("synthetic-private-failure"));
+    expect(await run()).toEqual({status:"browser_blocked"});
+    expect(await readFile(join(h.root,"protected-input.json"),"utf8")).not.toContain("synthetic-private-failure");
+    expect(h.finish).not.toHaveBeenCalled();
+  });
   it("pauses the observer and revokes viewer access before restoring the shared page and clearing the gate", async () => {
     let complete!: (value: TakeoverResult) => void; h.done = new Promise(resolve => { complete = resolve; });
     const result = run();

@@ -40,7 +40,17 @@ and direct deletion confirmations, plus direct places cancel/delete/undo approva
 Native durable records own confirmation identity and presentation; domain code
 owns event validation, stable create IDs, revision/snapshot checks and read-only
 reconciliation. Unknown effects never authorize an automatic repeated mutation.
-Full C4 integration and provider parity remain pending.
+`durable-browser-test` extends that profile for Isaac with native private input,
+OpenTable, multistep login, takeover and broker-only saved-login discovery. The
+host binds explicit browser paths, credential scope and broker/endpoints for one
+process lifetime. A registry-wide guard excludes tools during protected work and
+refuses entry while another tool is running. Cancellation drains domain cleanup
+before Harness close and environment release. All browser bundle calls are
+sequential and replay-unsafe; a crash keeps the stock-browser gate and reports
+an interrupted outcome. The retained domain owns private CDP and Mini App input;
+only whitelisted statuses/copy receipts reach the Harness. OpenTable email codes
+use the explicitly selected native Google runtime. Full C4 provider/operator
+parity and live browser/platform acceptance remain pending.
 
 The sections below describe the deployed legacy architecture. Its package,
 source patches and service path remain in the legacy release tree until the

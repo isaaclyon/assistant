@@ -74,3 +74,16 @@ The restrictions below continue to apply to the generic form tool.
 - Older default agent-browser daemons may still be attached after upgrading.
   Preparation fails closed; stop/reopen that dedicated browser and re-inspect the
   form. Never kill an unrelated daemon or clear the gate manually.
+
+## Native host binding (C4)
+
+The isolated `durable-browser-test` profile registers native replay-unsafe,
+sequential wrappers around the same protected operation. Its host supplies a
+narrow explicit configuration instead of a legacy instance manifest, binds the
+paired user/bot and leases selected browser paths/routing for one process
+lifetime. A registry-wide guard holds through cleanup and excludes other tools.
+Shutdown drains protected work before the Harness closes. A touched browser
+without verified cleanup keeps its gate, including uncertain preparation and
+listener cleanup. Crash recovery never repeats the operation. See the
+[C4 guide](../pi-durable-c4-tools.md#protected-browser-slice) for configuration,
+local evidence and remaining live/platform acceptance.

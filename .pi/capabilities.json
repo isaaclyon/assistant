@@ -2,6 +2,7 @@
   "version": 1,
   "resources": {
     "extensions": [
+      {"id":"native-private-browser","path":".pi/native/private-browser.mjs","enabled":true},
       {
         "id": "native-google-mutations",
         "path": ".pi/native/google-mutations.mjs",
@@ -226,6 +227,7 @@
       }
     ],
     "instructions": [
+      {"id":"telegram-browser-test","path":".pi/telegram/browser-test.md","enabled":true},
       {
         "id": "telegram-mutations-test",
         "path": ".pi/telegram/mutations-test.md",
@@ -269,6 +271,33 @@
     ]
   },
   "profiles": [
+    {
+      "id": "durable-browser-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-mutations",
+        "native-places",
+        "native-private-browser"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-mutations",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "google-calendar",
+        "agent-browser"
+      ],
+      "instructions": "telegram-browser-test"
+    },
     {
       "id": "durable-mutations-test",
       "extensions": [

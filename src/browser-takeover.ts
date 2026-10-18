@@ -10,7 +10,7 @@ import { withMutationLock } from "../.pi/lib/mutation-lock.mjs";
 import { assertDemoPortUnused, demoTelegramRequest, isPrivateDemoProxy, readDemoTelegramProfile } from "./secure-input-demo-launch.js";
 import { protectBrowserTakeover, validateTakeoverRequest, type TakeoverRequest } from "./browser-takeover-protection.js";
 import { startTakeoverServer, type TakeoverResult } from "./browser-takeover-server.js";
-import type { BridgeInstanceConfig } from "./config.js";
+import { isTrustedPrivateExecution, type PrivateBrowserConfig } from "./private-browser-config.js";
 import { protectPrivateLogin, validatePrivateLoginRequest, type PrivateLoginRequest } from "./private-login.js";
 import { privateLoginCredential } from "./private-login-credential.js";
 import { privateApprovedCredential } from "./private-approved-credential.js";
@@ -24,7 +24,7 @@ const httpsPort = 8447;
 type Result = (TakeoverResult | { status: "unavailable" | "browser_blocked" }) & { copiedCredentialItem?: string; credentialCopyStatus?: "unknown" };
 
 export async function runBrowserTakeover(options: {
-  config: BridgeInstanceConfig; request: TakeoverRequest; chatId: number; threadId?: number;
+  config: PrivateBrowserConfig; request: TakeoverRequest; chatId: number; threadId?: number;
   signal: AbortSignal; notifyWaiting(): void;
   login?: PrivateLoginRequest;
 }): Promise<Result> {
@@ -34,7 +34,7 @@ export async function runBrowserTakeover(options: {
     validatePrivateLoginRequest(options.login);
     if (options.login.session !== request.session || options.login.resumeUrl !== request.resumeUrl) throw new Error("Invalid private sign-in request");
   }
-  if (config.telegramSurface.type !== "private" || config.instanceId !== process.env.PI_TELEGRAM_BRIDGE_INSTANCE_ID || options.signal.aborted) return { status: "unavailable" };
+  if (!isTrustedPrivateExecution(config) || options.signal.aborted) return { status: "unavailable" };
   const profile = await readDemoTelegramProfile(config.agentDir, config.telegramProfile);
   if (options.chatId !== profile.userId) return { status: "unavailable" };
   const runtime = join(process.env.XDG_RUNTIME_DIR || tmpdir(), `pi-browser-takeover-${process.getuid?.()}`);
@@ -49,7 +49,7 @@ export async function runBrowserTakeover(options: {
     let login: PrivateLoginOperations | undefined;
     let server: Awaited<ReturnType<typeof startTakeoverServer>> | undefined;
     let proxy: ChildProcess | undefined, messageId: number | undefined;
-    let handoffStarted = false, gateOwned = false, cleanupFailed = false;
+    let handoffStarted = false, gateOwned = false, cleanupFailed = false, touched = false;
     let result: Result = { status: "unavailable" };
     let copiedCredentialItem: string | undefined, credentialCopyStatus: "unknown" | undefined, finishWithoutHandoff = false;
     const controller = new AbortController();
@@ -61,6 +61,7 @@ export async function runBrowserTakeover(options: {
       await writeFile(location.protectedPath, JSON.stringify({ version: 1, launchId: browser.launchId, requestId: randomUUID(), purpose: "takeover" }), { mode: 0o600, flag: "wx" });
       gateOwned = true;
       const binary = await executable("agent-browser", process.env.STOCK_BROWSER_AGENT_BROWSER);
+      touched = true;
       await exec(binary, ["--session", agentSessionName(request.session), "--cdp", String(browser.port), "close"], { timeout: 10_000, maxBuffer: 32_000 });
       protectedPage = await protectBrowserTakeover(browser.port, request);
       if (options.login) {
@@ -201,6 +202,7 @@ export async function runBrowserTakeover(options: {
         } catch { cleanupFailed = true; }
         finally { protectedPage.close(); }
       }
+      if (touched && !protectedPage) cleanupFailed = true; // Uncertain touched page: keep the gate.
       if (cleanupFailed) result = { status: "browser_blocked" };
       else if (gateOwned) await rm(location.protectedPath, { force: true });
       if (messageId !== undefined) await demoTelegramRequest(profile.botToken, "editMessageText", {

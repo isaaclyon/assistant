@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import type { PrivateBrowserConfig } from "./private-browser-config.js";
 import { loadCapabilityProfile } from "./capabilities.js";
 import { hasGogRuntime, resolveGoogleRuntime, runGogJson } from "../.pi/lib/google-transport.js";
 
@@ -133,11 +134,15 @@ export async function createMailChallenge(recipient: string, run: Run, signal: A
   } catch { return; }
 }
 
-export async function preparePrivateEmailCode(config: { resourceRoot: string; capabilityProfile: string }, recipient: string, signal: AbortSignal): Promise<MailChallenge | undefined> {
+export async function preparePrivateEmailCode(config: Pick<PrivateBrowserConfig, "resourceRoot" | "capabilityProfile" | "emailCodeEnabled" | "googleRuntime">, recipient: string, signal: AbortSignal): Promise<MailChallenge | undefined> {
   try {
-    const profile = await loadCapabilityProfile(config.resourceRoot, config.capabilityProfile);
-    if (!profile.extensionPaths.some(path => path.endsWith("/.pi/extensions/google-workspace.ts"))) return;
-    const runtime = await resolveGoogleRuntime();
+    if (config.emailCodeEnabled === false) return;
+    if (config.emailCodeEnabled === undefined) {
+      if (!config.capabilityProfile) return;
+      const profile = await loadCapabilityProfile(config.resourceRoot, config.capabilityProfile);
+      if (!profile.extensionPaths.some(path => path.endsWith("/.pi/extensions/google-workspace.ts"))) return;
+    }
+    const runtime = config.googleRuntime ?? await resolveGoogleRuntime();
     if (!hasGogRuntime(runtime) || !runtime.account || !/^[a-zA-Z0-9@._+\-]{1,254}$/.test(runtime.account)) return;
     const bounded = AbortSignal.any([signal, AbortSignal.timeout(8_000)]);
     const run: Run = (method, params, stepSignal) => runGogJson({ binary: runtime.binary, passwordFile: runtime.passwordFile, gogHome: runtime.gogHome,

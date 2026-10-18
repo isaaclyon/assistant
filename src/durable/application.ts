@@ -15,6 +15,7 @@ import { confirmationPresentation, formatDiagnostics, type DiagnosticSection } f
 import { isNativeMemoryProfile, type NativeConfig } from './config.js';
 
 export interface NativeApplicationOptions {
+ browserServices?:import('./browser.js').NativeBrowserServices;
  onFatal(error:unknown):void;
  onTransportFailure(error:unknown):void;
  requestRestart?():void;
@@ -29,7 +30,8 @@ const confirmationKey=(cid:ConversationId,id:string)=>createHash('sha256').updat
 export async function createNativeApplication(config:NativeConfig,options:NativeApplicationOptions) {
  await loadCapabilityProfile(config.resourceRoot,config.capabilityProfile);
  const enabled=isNativeMemoryProfile(config.capabilityProfile);
- const mutationsEnabled=config.capabilityProfile==='durable-mutations-test';
+ const browserEnabled=config.capabilityProfile==='durable-browser-test';
+ const mutationsEnabled=config.capabilityProfile==='durable-mutations-test'||browserEnabled;
  const placesEnabled=config.capabilityProfile==='durable-places-test'||mutationsEnabled;
  if(placesEnabled&&config.principal!=='isaac')throw new Error('Places profile requires the Isaac principal');
  const cliEnabled=config.capabilityProfile==='durable-cli-integrations-test'||placesEnabled;
@@ -58,6 +60,9 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  let places:ReturnType<typeof import('./places.js')['createNativePlaces']>|undefined;
  let calendar:ReturnType<typeof import('./calendar.js')['createNativeCalendar']>|undefined;
  let googleFactory:(()=>NativeBundle)|undefined;
+ let browser:ReturnType<typeof import('./browser.js')['createNativeBrowser']>|undefined;
+ let browserGuard:ReturnType<typeof import('./browser-environment.js')['createNativeBrowserGate']>|undefined;
+ let unbindBrowser:(()=>void)|undefined;
  let debugEnabled=false;
  const debugCommands=new Set<string>();
  let debugQueued=false;
@@ -66,9 +71,10 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  const close=()=>closing??=(async()=>{
   debugEnabled=false;
   const failures:unknown[]=[];
-  for(const cleanup of [()=>visible?.close(),()=>host?.close(),()=>places?.close(),()=>calendar?.close(),()=>executionEnvironment?.cleanup(context),()=>resources?.close(),()=>search?.close(),()=>provider.close()]){
+  for(const cleanup of [()=>visible?.close(),()=>browser?.close(),()=>host?.close(),()=>places?.close(),()=>calendar?.close(),()=>executionEnvironment?.cleanup(context),()=>resources?.close(),()=>search?.close(),()=>provider.close()]){
    try{await cleanup();}catch(error){failures.push(error);}
   }
+  if(!failures.length)unbindBrowser?.();
   if(failures.length)throw new AggregateError(failures,'Native application cleanup failed');
  })();
  const target={chatId:config.transport.allowedUserId};
@@ -86,6 +92,11 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   });
  };
  try {
+  if(browserEnabled){
+   const env=await import('./browser-environment.js');unbindBrowser=env.bindNativeBrowserEnvironment(config);
+   const module=await import('./browser.js');browser=module.createNativeBrowser(config,options.browserServices);
+   browserGuard=env.createNativeBrowserGate(browser.bundle().tools.map(({tool})=>tool.name));
+  }
   if(generalEnabled){
    const tools=await import('./general-tools.js');
    generalFactory=tools.createGeneralToolsBundle;
@@ -165,6 +176,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   }
   const bundle=(name:string):NativeBundle=>{
    if(!enabled)throw new Error('Native domain bundles are unavailable for this profile');
+   if(browserEnabled&&name==='private-browser')return browser!.bundle();
    if(generalEnabled&&name==='general-tools')return generalFactory!();
    if(generalEnabled&&name==='public-web')return publicWebFactory!();
    if(mutationsEnabled&&name==='google-mutations')return {...calendar!.bundle(),close:async()=>{}};
@@ -176,7 +188,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    if(['reload','restart','skills','debug'].includes(name))return {name,version:1,tools:[],close:async()=>{}};
    throw new Error('Unknown native bundle');
   };
-  const load=()=>loadNativeRegistry({resourceRoot:config.resourceRoot,profileId:config.capabilityProfile,bundleContext:{bundle},authorize:async(_name,api,ctx)=>{
+  const load=()=>loadNativeRegistry({resourceRoot:config.resourceRoot,profileId:config.capabilityProfile,bundleContext:{bundle},...(browserGuard?{executionGuard:browserGuard.run}:{}),authorize:async(_name,api,ctx)=>{
    const binding=await api.commit(tx=>nativeMemoryBinding(tx,requireHost(),config,api.conversationId),ctx);
    if(!binding)throw new Error('Current memory authority rejected');
   }});
@@ -185,6 +197,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   const selectedSignature=resources.signature;
   const controls=createNativeControls({config,host:requireHost,models:provider.models,requestRestart:()=>options.requestRestart?.(),
    invalidate:async()=>{
+    browser?.cancel();
     await places?.invalidate();
     await calendar?.invalidate();
     const current=requireHost();
@@ -250,17 +263,17 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   const raw=options.transport??createNativeTelegramTransport(config.transport.mode==='ordinary'?{...config.transport,cwd:config.workspaceCwd}:{mode:'restricted',socketPath:config.transport.socketPath,botId:config.transport.botId,allowedUserId:config.transport.allowedUserId});
   transport=bridgeTelegram(config,raw,options.onTransportFailure,{...(enabled?{ui}:{}),commands:enabled?['menu','model','thinking','new','abort','stop','compact','reload','restart','skills','debug',...(placesEnabled?['place_rankings']:[])]:['new','abort','stop','compact']});
   const bridge=transport;
-  const signature=createHash('sha256').update(JSON.stringify({registry:resources.signature,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,memory:config.memory??null,...(googleEnabled?{google:config.google}:{} ),...(cliEnabled?{cli:config.cli??{}}:{})})).digest('hex');
+  const signature=createHash('sha256').update(JSON.stringify({registry:resources.signature,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,memory:config.memory??null,...(googleEnabled?{google:config.google}:{} ),...(cliEnabled?{cli:config.cli??{}}:{}),...(browserEnabled?{browser:config.browser}:{})})).digest('hex');
   // The reader delegates to the active registry after a safe idle reload.
   const registry={snapshot:()=>resources!.registry.snapshot(),subscribe:(listener:()=>void)=>{registryListeners.add(listener);return()=>{registryListeners.delete(listener);};}};
   host=await DurableHost.create({stateDir:config.historyDir,inboxPath:config.inboxPath,models:provider.models,registry,
    ...(executionEnvironment?{env:({cwd})=>{if(cwd!==config.workspaceCwd)throw new Error('Tool working directory differs from selected workspace');return executionEnvironment;}}:{}),
    agent:{model:provider.model,thinkingLevel:provider.thinkingLevel,cwd:config.workspaceCwd,instructions:[resources.instructions,...resources.skills.map(s=>s.content)].join('\n\n')},
    compatibility:{runtimeGeneration:'pi-durable-1.3.0',releaseSchema:1,profile:config.capabilityProfile,registrySignature:signature},
-   onEpochChange:async(tx,previous,nextEpoch)=>{for(const id of previous){if(memoryModule)await memoryModule.invalidateMemoryState(tx,operations,id,String(nextEpoch),'new');else await operations.invalidate(tx,id,String(nextEpoch),'new');}},
+   onEpochChange:async(tx,previous,nextEpoch)=>{browser?.cancel();for(const id of previous){if(memoryModule)await memoryModule.invalidateMemoryState(tx,operations,id,String(nextEpoch),'new');else await operations.invalidate(tx,id,String(nextEpoch),'new');}},
    onConversation:async cid=>{await visible?.attach(cid);},
    ...(config.idleHours>0?{idleMs:config.idleHours*3_600_000}:{}),
-   transport:{start:bridge.start,stop:async()=>{await Promise.all([bridge.stop(),places?.close(),calendar?.close()]);},sendFinal:async request=>{await visible?.finish();return bridge.sendFinal(request);}},
+   transport:{start:bridge.start,stop:async()=>{await Promise.all([bridge.stop(),places?.close(),calendar?.close(),browser?.close()]);},sendFinal:async request=>{await visible?.finish();return bridge.sendFinal(request);}},
    policy:envelope=>assertNativeEnvelope(config,envelope),controlPolicy:control=>assertNativeControl(config,control),onFatal:options.onFatal,
   });
   const runtime=host;

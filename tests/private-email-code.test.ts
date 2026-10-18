@@ -122,3 +122,14 @@ describe("private submission with email verification", () => {
     await expect(flow.submit([recipient], controller.signal)).rejects.toThrow(); expect(page.submit).toHaveBeenCalledOnce(); flow.close();
   });
 });
+
+it('native email-code lookup uses its explicit Google runtime without legacy discovery or ambient credentials',async()=>{
+  const ambient=vi.spyOn(google,'resolveGoogleRuntime').mockRejectedValue(new Error('ambient credentials forbidden'));
+  const run=vi.spyOn(google,'runGogJson').mockImplementation(async request=>request.args.some(arg=>arg==='gmail.users.getProfile')?{emailAddress:recipient}:{messages:[]});
+  const runtime={stateDir:'/selected-state',account:recipient,binary:'/selected/gog',passwordFile:'/selected/password',gogHome:'/selected/home'};
+  try{
+    const challenge=await preparePrivateEmailCode({resourceRoot:'/not-a-legacy-release',emailCodeEnabled:true,googleRuntime:runtime},recipient,new AbortController().signal);
+    expect(challenge).toBeDefined();expect(ambient).not.toHaveBeenCalled();expect(run).toHaveBeenCalledTimes(2);
+    for(const [request] of run.mock.calls){expect(request).toMatchObject({binary:runtime.binary,passwordFile:runtime.passwordFile,gogHome:runtime.gogHome});expect(request.args).toEqual(expect.arrayContaining(['--readonly','--gmail-no-send','--account',recipient]));}
+  }finally{vi.restoreAllMocks();}
+});

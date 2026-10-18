@@ -22,6 +22,7 @@ export interface NativeRegistryOptions {
   profileId: string;
   /** Must resolve the current principal/target/epoch from host state for this invocation, including recovery. */
   authorize(toolName: string, api: ToolExecutionApi, context: Context): Promise<void>;
+  executionGuard?: <T>(toolName:string,work:()=>Promise<T>)=>Promise<T>;
   importer?: (canonicalPath: string) => Promise<NativeBundleModule>;
   /** Explicit host services. Factories cannot acquire ambient runtime identity. */
   bundleContext?: unknown;
@@ -75,13 +76,14 @@ export async function loadNativeRegistry(options: NativeRegistryOptions) {
         const signature = fingerprint(descriptor);
         toolSignatures.push(signature);
         toolNames.push(tool.name);
-        return { ...tool, execute: async (args: unknown, api: ToolExecutionApi, context: Context) => {
+        const execute = async (args:unknown,api:ToolExecutionApi,context:Context) => {
           if (closed) throw new Error('Native registry closed');
           await options.authorize(tool.name, api, context);
           const recorded = await api.memo<string>('native.handler-signature', signature, context);
           if (recorded !== signature) throw new Error('Native tool schema/handler changed; recovery requires reconciliation');
           return tool.execute(args, api, context);
-        } } satisfies ToolRegistration;
+        };
+        return { ...tool, execute:(args,api,context)=>options.executionGuard?options.executionGuard(tool.name,()=>execute(args,api,context)):execute(args,api,context) } satisfies ToolRegistration;
       });
       registry.install(defineExtension({ ...bundle.contributions, name: bundle.name, tools }));
       extensionNames.push(bundle.name);

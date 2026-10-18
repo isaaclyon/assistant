@@ -23,14 +23,17 @@
     "@earendil-works/pi-codemode": "1.3.0",
     "@earendil-works/pi-durable": "1.3.0",
     "@llblab/pi-telegram": "https://codeload.github.com/isaaclyon/pi-telegram/tar.gz/56f0fe38d2260db8dede028aca62d47cbb49bb20",
+    "@novnc/novnc": "1.7.0",
     "chrono-node": "2.10.1",
     "marked": "18.0.5",
     "proper-lockfile": "4.1.2",
+    "ws": "8.22.0",
     "yaml": "2.9.0"
   },
   "devDependencies": {
     "@types/node": "24.19.0",
     "@types/proper-lockfile": "4.1.4",
+    "@types/ws": "8.18.1",
     "typescript": "5.9.3",
     "vitest": "3.2.7"
   }
