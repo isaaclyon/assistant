@@ -87,3 +87,15 @@ reliably zeroized. Existing takeover transport and lifecycle protections in
 [ADR-0040](0040-protected-telegram-browser-input.md),
 [ADR-0041](0041-protected-opentable-sign-in.md) and
 [ADR-0024](0024-use-1password-for-browser-login-credentials.md).
+
+## Native host binding (C4)
+
+The native browser bundle reuses this recognizer and takeover owner with
+replay-unsafe execution and host-owned cancellation/draining. Broker-only
+`find_login_candidates` exposes titles/source references through the selected
+Unix socket; approvals and credential delivery remain broker-owned. Native
+output preserves independent copy receipts when returned, but an exception or
+crash can lose the receipt after a successful copy. Inspect the destination vault
+before retrying an interrupted saved login. The
+[C4 guide](../pi-durable-c4-tools.md#protected-browser-slice) records local
+validation and the remaining live credential/platform gates.

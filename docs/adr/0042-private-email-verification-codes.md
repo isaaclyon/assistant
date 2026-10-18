@@ -67,3 +67,12 @@ needed, and closes on final submission as before.
 - Automated tests use synthetic mail, mocked Google responses and real Chrome
   against local synthetic HTTPS pages. Real-inbox acceptance needs a sign-in
   through a Gmail-enabled personal profile; the builder has no mailbox connection.
+
+## Native host binding (C4)
+
+The selected native browser profile explicitly enables this adapter and supplies
+its native Google runtime/default account. It does not load the legacy
+capability profile or resolve ambient Google credentials. Missing Google
+configuration preserves manual entry. All recipient, sender, freshness and
+private-output rules above remain in force; see the
+[C4 guide](../pi-durable-c4-tools.md#protected-browser-slice).

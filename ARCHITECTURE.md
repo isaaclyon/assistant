@@ -11,6 +11,14 @@ Workspace reads can replay after authority checks; uncertain Places attempts
 stay interrupted through an internal replay-unsafe task. `feat/durable-c4-cli`
 adds a separate YNAB/Messages-link skill profile through the replay-unsafe shell,
 with release-root helper paths and an optional private Messages HTTPS origin.
+The places and guarded-mutations slices add native direct ranking flows,
+Calendar writes and durable user-only destructive confirmations. The separate
+`feat/durable-c4-browser` branch selects an Isaac-only browser profile around
+retained private input/login/takeover services. Its native host owns explicit
+browser configuration, process-scoped routing, registry-wide tool exclusion and
+cancellation cleanup. Browser calls are unsafe to replay; crashes preserve the
+stock-browser gate and report interruption. OpenTable mail lookup uses explicit
+native Google selection; broker approvals retain their existing authority.
 These branches use the native package, tests and explicit test-instance entrypoint. See [ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md),
 [ADR-0053](docs/adr/0053-native-chat-memory-and-evidence.md), and the
 [C3 evidence](docs/pi-durable-c3-chat-memory.md) and
