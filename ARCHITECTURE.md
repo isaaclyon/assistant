@@ -3,12 +3,14 @@
 ## Native migration status
 
 Production still uses the legacy boundaries below. The isolated
-`feat/durable-c3` release tree implements the native foundation and selected
-chat-and-memory profile with its own package, tests and explicit test-instance
+`feat/durable-c4` release tree extends the native foundation and accepted
+chat-and-memory profile with selected general tools and bounded public web with its own package, tests and explicit test-instance
 entrypoint. See [ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md),
 [ADR-0053](docs/adr/0053-native-chat-memory-and-evidence.md), and the
-[C3 evidence](docs/pi-durable-c3-chat-memory.md). Its dedicated live user
-checkpoint remains pending; production activation remains C6/C7.
+[C3 evidence](docs/pi-durable-c3-chat-memory.md) and
+[C4 first-slice guide](docs/pi-durable-c4-tools.md). C3 passed its dedicated live
+user checkpoint. C4 integrations remain in progress; production activation
+remains C6/C7.
 
 ## Boundaries
 
@@ -423,7 +425,7 @@ Inbound turns are crash-durable through the bridge inbox, but outbound Telegram 
 ## Planned runtime migration
 
 The [pi-durable migration plan](docs/pi-durable-migration-plan.md) records the
-approved target architecture and C0–C7 checkpoints. C0–C2 passed; C3 is
-implemented in a separate native release tree with its live user checkpoint
-pending. The runtime described above continues serving legacy production.
+approved target architecture and C0–C7 checkpoints. C0–C3 passed. The isolated
+C4 branch adds locally validated general tools and bounded public web; the
+remaining C4 integrations are pending. The runtime described above continues serving legacy production.
 Production activation remains C7.
