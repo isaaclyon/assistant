@@ -104,7 +104,7 @@ const escapeError = (error: unknown): string => error instanceof PlacesServiceEr
 
 export function createNativePlaces(options: NativePlacesOptions) {
   const { config } = options;
-  const mutationsEnabled = ['durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test'].includes(config.capabilityProfile);
+  const mutationsEnabled = ['durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test'].includes(config.capabilityProfile);
   const description = mutationsEnabled ? PLACES_TOOL_DESCRIPTION : "Maintain the user's private restaurant, coffee-shop, bar, and other place rankings. Supports categories, adding a place, durable pairwise comparisons, resume, and paginated rankings. Deleting, undoing, cancelling and confirmation requests are unavailable in this migration slice.";
   const now = options.now ?? Date.now;
   const randomKey = options.randomKey ?? (() => randomUUID().replaceAll('-', ''));

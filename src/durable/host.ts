@@ -32,6 +32,8 @@ export interface HostConfig {
   onConversation?:(conversationId:ConversationId)=>Promise<void>;
   /** Runs on the acceptance line, before queued input admission. */
   beforeAdmission?:()=>Promise<void>;
+  /** Trusted source adapters run on the same line as acceptance and rotation. */
+  reconcileSources?:(runtime:IngressRuntime)=>Promise<void>;
   onFatal?:(error:unknown)=>void;
   closeTimeoutMs?:number;
   reconcileIntervalMs?:number;
@@ -119,6 +121,7 @@ export class DurableHost {
       this.dirty=false;
       await this.recoverControls();
       await this.config.beforeAdmission?.();
+      await this.config.reconcileSources?.(this.runtime);
       for(const row of this.runtime.store.inbox.pending()){
         const envelope=normalize(JSON.parse(row.payload) as SourceEnvelope);await this.config.policy(envelope);await admit(this.runtime,envelope);
       }

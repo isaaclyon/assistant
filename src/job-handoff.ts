@@ -12,7 +12,7 @@ import {
 import { dirname, join } from "node:path";
 import { withMutationLock } from "../.pi/lib/mutation-lock.mjs";
 
-const MAX_HANDOFF_PROMPT_BYTES = 32 * 1024;
+export const MAX_HANDOFF_PROMPT_BYTES = 32 * 1024;
 
 interface JobHandoffFile {
   version: 1;
@@ -81,7 +81,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
+export async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
     const handle = await open(temporaryPath, "wx", 0o600);
@@ -103,7 +103,7 @@ async function syncDirectory(path: string): Promise<void> {
   try { await handle.sync(); } finally { await handle.close(); }
 }
 
-async function moveHandoff(from: string, to: string): Promise<void> {
+export async function moveHandoff(from: string, to: string): Promise<void> {
   await rename(from, to);
   await syncDirectory(dirname(to));
   await syncDirectory(dirname(from));

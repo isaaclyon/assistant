@@ -1,0 +1,43 @@
+import { fork,execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { cp,mkdir,mkdtemp,readFile,readdir,rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { afterAll,afterEach,beforeAll,expect,test,vi } from 'vitest';
+import { fauxAssistantMessage } from '@earendil-works/pi-ai/providers/faux';
+import { Bindings,context } from '../../src/durable/ingress.js';
+import { JobAdmissions } from '../../src/durable/job-admission.js';
+import { cleanup,setup } from './parity-application-fixture.js';
+let compiled:string;
+beforeAll(async()=>{
+ const cache=join(process.cwd(),'node_modules/.cache');await mkdir(cache,{recursive:true});compiled=await mkdtemp(join(cache,'job-crash-'));
+ await promisify(execFile)(process.execPath,['node_modules/typescript/bin/tsc','--strict','--skipLibCheck','--allowJs','--module','nodenext','--target','es2024','--rootDir','.','--outDir',compiled,'tests/durable/parity-application-fixture.ts'],{timeout:90_000});
+ await cp(join(process.cwd(),'.pi'),join(compiled,'.pi'),{recursive:true,filter:source=>!source.endsWith('.ts')});
+},100_000);
+afterAll(async()=>{if(compiled)await rm(compiled,{recursive:true,force:true});});
+afterEach(async()=>{for(const close of cleanup.splice(0).reverse())await close();});
+
+test.each(['claim','admit','effect'])('SIGKILL after native job %s recovers the same occurrence and never repeats a committed effect',async phase=>{
+ const directory=await mkdtemp(join(tmpdir(),'native-job-crash-'));cleanup.push(()=>rm(directory,{recursive:true,force:true}));
+ const child=fork(join(process.cwd(),'tests/durable/job-crash-worker.mjs'),[compiled,directory,phase],{stdio:['ignore','ignore','pipe','ipc']});
+ let stderr='';child.stderr!.on('data',chunk=>stderr+=String(chunk));
+ const paused=Promise.withResolvers<void>();child.on('message',(m:any)=>{if(m.type==='paused')paused.resolve();});
+ const exited=new Promise(resolve=>child.once('exit',(code,signal)=>{if(signal!=='SIGKILL')paused.reject(new Error(`Early worker exit ${code}: ${stderr}`));resolve(signal);}));
+ cleanup.push(async()=>{if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');await exited;});
+ await Promise.race([paused.promise,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(new Error(`Worker IPC timeout: ${stderr}`)),10_000);timer.unref();paused.promise.finally(()=>clearTimeout(timer)).catch(()=>{});})]);
+ child.kill('SIGKILL');expect(await exited).toBe('SIGKILL');
+ expect(await readFile(join(directory,'barriers'),'utf8')).toBe(`${phase}\n`);
+ const s=await setup('durable-jobs-test',directory);await s.open([fauxAssistantMessage('RECOVERED')]);
+ await vi.waitFor(()=>expect(s.finals).toEqual(['RECOVERED']),{timeout:8000});
+ await s.app()!.host.reconcile();
+ const runtime=s.app()!.host.runtime;
+ const state=await runtime.harness.snapshot(Bindings,runtime.root.id,context);expect(Object.values(state!.sources)).toHaveLength(1);
+ const jobs=await runtime.harness.snapshot(JobAdmissions,runtime.root.id,context);const receipts=Object.values(jobs!.receipts);
+ expect(receipts).toHaveLength(1);expect(receipts[0]).toMatchObject({admission:'admitted',run:'done'});
+ expect(await readdir(join(s.config.stateDir,'job-handoffs','processing'))).toEqual([]);
+ expect(await readdir(join(s.config.stateDir,'job-handoffs','completed'))).toHaveLength(1);
+ expect(await readFile(join(directory,'effects'),'utf8').catch(()=>'' )).toBe(phase==='effect'?'effect\n':'');
+ expect(s.requests).toHaveLength(1);expect(s.previews).toEqual([]);expect(s.fatal).toEqual([]);
+ await s.close();await s.open([fauxAssistantMessage('DUPLICATE')]);await s.app()!.host.reconcile();
+ expect(s.finals).toEqual(['RECOVERED']);expect(s.requests).toHaveLength(1);
+},30_000);

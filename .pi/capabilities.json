@@ -231,6 +231,7 @@
       }
     ],
     "instructions": [
+      {"id":"telegram-jobs-test","path":".pi/telegram/jobs-test.md","enabled":true},
       {"id":"telegram-parity-test","path":".pi/telegram/parity-test.md","enabled":true},
       {"id":"telegram-provider-test","path":".pi/telegram/provider-test.md","enabled":true},
       {"id":"telegram-browser-test","path":".pi/telegram/browser-test.md","enabled":true},
@@ -277,6 +278,38 @@
     ]
   },
   "profiles": [
+    {
+      "id": "durable-jobs-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-mutations",
+        "native-places",
+        "native-private-browser",
+        "native-fast",
+        "native-usage",
+        "native-web-run"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-mutations",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "google-calendar",
+        "agent-browser",
+        "plan-weekend",
+        "native-reserve-restaurant"
+      ],
+      "instructions": "telegram-jobs-test"
+    },
     {
       "id": "durable-parity-test",
       "extensions": [

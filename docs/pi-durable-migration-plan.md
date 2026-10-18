@@ -238,6 +238,14 @@ Browser recovery is a separate acceptance boundary. A surviving browser process 
 
 ### C5 — Native schedules and background agents
 
+The isolated `feat/durable-c5-recipient` slice starts this checkpoint with
+`durable-jobs-test` and explicit `jobsRole: "recipient"`. It maps v1 handoffs from
+the existing coordinator to stable native source/conversation/submission evidence,
+keeps admission separate from run completion, and preserves unknown historical
+claims. The [recipient guide](pi-durable-c5-jobs.md) records offline validation and
+remaining scope. Coordinator, full mixed-runtime matrix, heartbeat/webhook,
+price-watch and child/retention work remain open.
+
 **Deliverables**
 
 - Preserve canonical job definitions, cron/at/webhook semantics, heartbeat rules, checker cursors, temporary price-watch manifests, cancellation tombstones and occurrence identities.

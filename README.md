@@ -1,12 +1,14 @@
 # Pi Telegram Bridge Host
 
-> This `feat/durable-c4-parity` branch extends the accepted native chat-and-memory
+> This `feat/durable-c5-recipient` branch extends the accepted native chat-and-memory
 > MVP with general tools, bounded public web, typed Google reads and the YNAB/
 > editable Messages-link skills, plus direct private place rankings, guarded Calendar/places changes and protected
 > browser operations, native fast-mode/subscription-usage controls, hosted web
 > search, provider retry compatibility and protected reservation guidance, in
 > separate test profiles. Start with the [C4 guide](docs/pi-durable-c4-tools.md) for
 > selection, private configuration, recovery and validation. C4 remains open.
+> The [C5 recipient guide](docs/pi-durable-c5-jobs.md) adds a separate scheduled
+> handoff admission profile. Coordinator and child migration remain open.
 > Root scripts build and test `src/durable/` and shared domain contracts. C1
 > remains prototype evidence. The description below documents the legacy fleet.
 

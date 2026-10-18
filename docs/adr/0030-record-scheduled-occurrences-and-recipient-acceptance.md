@@ -108,3 +108,27 @@ enabled. Reboot clears manager authorization, so an interrupted enable sequence
 cannot bypass the surviving hold. This replaces the unit-only automatic rollback
 in ADR-0005 and ADR-0020. See the fleet runbook for explicit recovery and the
 required target-systemd smoke test.
+
+
+## Native recipient implementation
+
+The separate `durable-jobs-test` profile consumes the same v1 handoff exchange
+under the same private drain/transition locks. Its explicit recipient role reads
+only its own configured state directory and routes to its configured private
+chat. Legacy/native runtime generations never concurrently own one recipient;
+coexistence is across separately owned instances. Cross-UID exchange remains
+unsupported.
+
+A native reservation binds dispatch payload and authority. A job source identity
+retains dispatch/job/type/original-time metadata without synthetic Telegram
+message IDs. Public native submission with a stable request ID establishes
+admission before the file moves to `completed`. A native-owned surviving claim
+can reconcile its reservation and submission; historical claims with no native
+proof stay held. Changed or malformed bytes cannot authorize another request.
+The native document records run outcome separately; v1 acceptance still says
+nothing about external completion. Proactive output follows the native final
+ledger and its delivery ambiguity policy, with `NO_REPLY` suppressed.
+
+This starts recipient migration only. Canonical definitions, occurrence ledger,
+coordinator publication and terminal identities keep their existing owners. The
+[C5 recipient guide](../pi-durable-c5-jobs.md) records validation and open gates.

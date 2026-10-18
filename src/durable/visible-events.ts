@@ -1,4 +1,4 @@
-import { watchEvents, type AgentEvent, type AgentEventStream, type ConversationId, type MessageChange } from '@earendil-works/pi-durable';
+import { LiveDoc, watchEvents, type AgentEvent, type AgentEventStream, type ConversationId, type MessageChange, type SubmissionId } from '@earendil-works/pi-durable';
 import type { NativeConfig } from './config.js';
 import type { DurableHost } from './host.js';
 import { Bindings, context, type Target } from './ingress.js';
@@ -41,13 +41,38 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
     await current.watch.stop().catch(() => undefined);
   }
 
-  function start(cid: ConversationId, watch: AgentEventStream) {
+  async function previewInputs(inputs: readonly SubmissionId[] = []): Promise<boolean> {
+    if (options.config.jobsRole !== 'recipient') return true;
+    if (!inputs.length) return false;
+    try {
+      const host = options.host();
+      const state = await host.runtime.harness.snapshot(Bindings, host.runtime.root.id, context);
+      for (const id of inputs) {
+        const record = await (await host.runtime.harness.submission(id, context))?.status(context);
+        const binding = record?.requestId ? state?.sources[record.requestId] : undefined;
+        if (!binding || binding.proactive) return false;
+      }
+      return true;
+    } catch { return false; } // Unknown source authority never permits a preview.
+  }
+
+  async function start(cid: ConversationId, watch: AgentEventStream) {
     const me = { id: ++nextObserver, cid, watch, turns: new Set<string>(), settle: async () => {} };
     observer = me; lastConversation = cid;
+    let preview = await previewInputs(watch.snapshot.run?.inputs);
+    const refreshPreview = async () => {
+      if (options.config.jobsRole !== 'recipient' || !preview) return;
+      // A run can gain inputs at a tool boundary without another run_start.
+      // The attach snapshot is fixed. Read public live state before publishing
+      // the next turn and keep suppression sticky until the next run.
+      preview = false;
+      const live = await options.host().runtime.harness.snapshot(LiveDoc, cid, context);
+      preview = await previewInputs(live?.run?.inputs);
+    };
     let seq = 0, turn = '', finished = false, texts = new Map<number, string>(), last = '';
     const newTurn = () => { turn = `${me.id}:${++seq}`; finished = false; texts = new Map(); last = ''; };
     const publish = () => {
-      if (observer !== me || finished) return;
+      if (observer !== me || finished || !preview) return;
       const text = [...texts.entries()].sort((a, b) => a[0] - b[0]).map(e => e[1]).join('');
       if (!text.trim() || text === last) return;
       last = text; me.turns.add(turn);
@@ -60,15 +85,20 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
       else if (c.type === 'block') { if ((c.block as Block).type === 'text') texts.set(c.contentIndex, String((c.block as Block).text ?? '')); else texts.delete(c.contentIndex); }
       else if (c.type === 'message') texts = textOf(c.message.content);
     };
-    const handle = (event: AgentEvent) => {
+    const handle = async (event: AgentEvent) => {
+      if (observer !== me) return;
       switch (event.type) {
-        case 'run_start': safeDebug('durable run', { event: 'run_start', inputs: event.inputs.length }); break;
-        case 'run_end': safeDebug('durable run', { event: 'run_end', inputs: event.inputs.length }); break;
-        case 'turn_start': newTurn(); safeDebug('durable turn', { event: 'turn_start' }); break;
+        case 'snapshot':
+          // Watch overflow replaces queued events with a new atomic snapshot.
+          preview = false; preview = await previewInputs(event.run?.inputs);
+          await refreshPreview(); newTurn(); texts = textOf(event.generation?.message?.content); publish(); break;
+        case 'run_start': preview = false; preview = await previewInputs(event.inputs); safeDebug('durable run', { event: 'run_start', inputs: event.inputs.length }); break;
+        case 'run_end': preview = options.config.jobsRole !== 'recipient'; safeDebug('durable run', { event: 'run_end', inputs: event.inputs.length }); break;
+        case 'turn_start': await refreshPreview(); newTurn(); safeDebug('durable turn', { event: 'turn_start' }); break;
         case 'turn_end': safeDebug('durable turn', { event: 'turn_end' }); break;
         case 'message_start': {
           const m = event.message as { role?: string; content?: unknown };
-          if (m.role === 'assistant') { if (!turn || finished) newTurn(); texts = textOf(m.content); last = ''; publish(); }
+          if (m.role === 'assistant') { await refreshPreview(); if (!turn || finished) newTurn(); texts = textOf(m.content); last = ''; publish(); }
           break;
         }
         case 'message_update': ensureTurn(); for (const c of event.changes) change(c); publish(); break;
@@ -89,7 +119,7 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
       const turns = [...me.turns]; me.turns.clear();
       for (const t of turns) await options.stream.finish(target, t).catch(() => undefined);
     };
-    watch.start(async events => { if (observer !== me) return; for (const e of events) { try { handle(e); } catch { /* ignore malformed event */ } } });
+    watch.start(async events => { if (observer !== me) return; for (const e of events) { try { await handle(e); } catch { /* ignore malformed event */ } } });
     const ended = () => {
       if (observer !== me) return;
       void queue(async () => {
@@ -113,7 +143,7 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
           const host = options.host();
           const watch = await watchEvents(host.runtime.harness, cid, context);
           if (closed) { await watch.stop().catch(() => undefined); return; }
-          start(cid, watch);
+          await start(cid, watch);
         } catch (error) { safeDebug('durable observer', { event: 'attach_failed', error: error instanceof Error ? error.name : 'error' }); }
       });
     },
@@ -130,7 +160,7 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
           if (closed || !await isCurrent(cid)) return;
           const watch = await watchEvents(options.host().runtime.harness, cid, context);
           if (closed) { await watch.stop().catch(() => undefined); return; }
-          start(cid, watch);
+          await start(cid, watch);
         } catch (error) { safeDebug('durable observer', { event: 'attach_failed', error: error instanceof Error ? error.name : 'error' }); }
       });
     },

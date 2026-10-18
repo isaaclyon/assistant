@@ -62,6 +62,13 @@ POST requests are replay-unsafe and never automatically resent after interruptio
 The wrapper classifies only the missing legacy transient errors and aborts idle
 provider streams; the native Harness owns retry budgets and delivery settlement.
 All integration tools use the existing private, redacted lifecycle diagnostics.
+`durable-jobs-test` starts C5 with a self-only v1 scheduled-job recipient. Native
+reservations and submission receipts reconcile claims across restart; historical
+claims without native proof stay held. Explicit job source IDs preserve original
+time, destination and human-idle behavior. The v1 `completed` directory proves
+admission only; native run outcome and final delivery are separate. Scheduled
+runs have final-only output. Read-only inspection exposes bounded status counts.
+Coordinator and child migration remain open; see the [C5 guide](docs/pi-durable-c5-jobs.md).
 Live provider/browser/CLI/platform acceptance and privileged builder/deployment
 coverage remain at C6.
 

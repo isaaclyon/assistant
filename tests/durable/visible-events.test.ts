@@ -13,6 +13,7 @@ vi.mock('@earendil-works/pi-durable', async importOriginal => ({
   },
 }));
 const { createVisibleEvents } = await import('../../src/durable/visible-events.js');
+const { LiveDoc } = await import('@earendil-works/pi-durable');
 
 function setup(epoch = { epoch: 1, epochs: { '1': 'c1' } as Record<string, string> }) {
   const state = { ...epoch };
@@ -22,12 +23,13 @@ function setup(epoch = { epoch: 1, epochs: { '1': 'c1' } as Record<string, strin
     update: vi.fn((_t: unknown, turn: string, text: string) => { calls.push(`update:${turn}:${text}`); }),
     finish: vi.fn(async (_t: unknown, turn: string) => { calls.push(`finish:${turn}`); }),
   };
-  const host: any = { runtime: { root: { id: 'root' }, harness: { snapshot: async () => state } } };
+  const live: any = {};
+  const host: any = { runtime: { root: { id: 'root' }, harness: { snapshot: async (token: unknown) => token === LiveDoc ? live : state } } };
   const config: any = { transport: { allowedUserId: 42 } };
   const real = createVisibleEvents({ host: () => host, config, stream, debug });
   const visible = { ...real, attach: (cid: string) => real.attach(cid as never) };
   const emit = (i: number, ...events: any[]) => watches[i]!.listener!(events, {});
-  return { state, calls, debug, stream, visible, emit };
+  return { state, live, calls, debug, stream, visible, emit, config, host };
 }
 const reset = () => { watches.length = 0; snapshots = {}; };
 const asst = (content: any[]) => ({ role: 'assistant', content });
@@ -137,4 +139,62 @@ test('a closed watch settles its preview and final refresh restores observation'
  await emit(1,{type:'turn_start'},{type:'message_start',message:asst([{type:'text',text:'next'}])});
  expect(stream.update.mock.calls.map(call=>call[2])).toEqual(['partial','next']);
  await visible.close();
+});
+
+
+test('recipient previews omit proactive runs and recovered partials, while human text and debug stay available', async () => {
+ reset();
+ snapshots.c1={type:'snapshot',entries:[],tools:[],run:{inputs:['job']},generation:{attempt:1,message:asst([{type:'text',text:'NO_REPLY'}])}};
+ const s=setup();s.config.jobsRole='recipient';
+ (s.state as any).sources={job:{proactive:true},human:{proactive:false}};
+ s.host.runtime.harness.submission=async(id:string)=>({status:async()=>({requestId:id})});
+ await s.visible.attach('c1');expect(s.stream.update).not.toHaveBeenCalled();
+ s.live.run={inputs:['job']};
+ await s.emit(0,{type:'run_start',inputs:['job']},{type:'turn_start'},{type:'message_start',message:asst([{type:'text',text:'SCHEDULED'}])});
+ expect(s.stream.update).not.toHaveBeenCalled();
+ s.live.run={inputs:['human']};
+ await s.emit(0,{type:'run_end',inputs:['job']},{type:'run_start',inputs:['human']},{type:'turn_start'},{type:'message_start',message:asst([{type:'text',text:'Human visible'}])});
+ expect(s.stream.update.mock.calls.map(call=>call[2])).toEqual(['Human visible']);
+ expect(s.debug).toHaveBeenCalledWith('durable run',{event:'run_start',inputs:1});
+ await s.visible.close();
+});
+
+test('a proactive follow-up joining after tools suppresses previews without another run_start', async () => {
+ reset();
+ snapshots.c1={type:'snapshot',entries:[],tools:[],run:{inputs:['human']}};
+ const s=setup();s.config.jobsRole='recipient';
+ (s.state as any).sources={job:{proactive:true},human:{proactive:false}};
+ s.host.runtime.harness.submission=async(id:string)=>({status:async()=>({requestId:id})});
+ s.live.run={inputs:['human']};
+ await s.visible.attach('c1');
+ await s.emit(0,{type:'run_start',inputs:['human']},{type:'turn_start'},{type:'message_start',message:asst([{type:'text',text:'Before tools'}])});
+ expect(s.stream.update.mock.calls.map(call=>call[2])).toEqual(['Before tools']);
+ // pi-durable extends this run's input list at the post-tools boundary.
+ // The atomic attach snapshot stays unchanged and no run_start is emitted.
+ s.live.run.inputs.push('job');
+ await s.emit(0,{type:'turn_start'},{type:'message_start',message:asst([])},{type:'message_update',changes:[{type:'text_start',contentIndex:0,block:{type:'text',text:'NO_REPLY'}}]});
+ expect(s.stream.update.mock.calls.map(call=>call[2])).toEqual(['Before tools']);
+ // New human runs rearm preview eligibility.
+ s.live.run={inputs:['human']};
+ await s.emit(0,{type:'run_end',inputs:['human','job']},{type:'run_start',inputs:['human']},{type:'turn_start'},{type:'message_start',message:asst([{type:'text',text:'Later human'}])});
+ expect(s.stream.update.mock.calls.map(call=>call[2])).toEqual(['Before tools','Later human']);
+ await s.visible.close();
+});
+
+test('recipient watch overflow and unreadable source authority keep proactive partials hidden', async () => {
+ reset();
+ const s=setup();s.config.jobsRole='recipient';
+ (s.state as any).sources={job:{proactive:true},human:{proactive:false}};
+ s.host.runtime.harness.submission=async(id:string)=>({status:async()=>({requestId:id})});
+ s.live.run={inputs:['human']};
+ await s.visible.attach('c1');
+ await s.emit(0,{type:'run_start',inputs:['human']},{type:'message_start',message:asst([{type:'text',text:'Human'}])});
+ s.live.run={inputs:['job']};
+ await s.emit(0,{type:'snapshot',run:{inputs:['job']},generation:{message:asst([{type:'text',text:'NO_REPLY'}])}},{type:'message_update',changes:[{type:'text_delta',contentIndex:0,delta:' LATE'}]});
+ expect(s.stream.update.mock.calls.map(call=>call[2])).toEqual(['Human']);
+ s.host.runtime.harness.submission=async()=>{throw new Error('unavailable');};
+ s.live.run={inputs:['human']};
+ await s.emit(0,{type:'run_start',inputs:['human']},{type:'message_start',message:asst([{type:'text',text:'Unknown'}])});
+ expect(s.stream.update.mock.calls.map(call=>call[2])).toEqual(['Human']);
+ await s.visible.close();
 });
