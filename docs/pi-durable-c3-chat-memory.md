@@ -204,8 +204,13 @@ after the last final-message acknowledgement. The preview stream's in-flight
 completion scheduled a new timer while `finish` was awaiting that send; removing
 the slot afterward left that timer alive. The stream now detaches the slot before
 waiting, preserving newer turn slots and preventing that reschedule. The empty
-draft workaround was removed. Actual inbound user verification remains required;
-successful service calls and a clean process exit do not close the checkpoint.
+draft workaround was removed. In the next actual inbound run on the corrected
+build, the user confirmed that the doubled-up text was fixed. Both actual user
+turns delivered successfully; the trace recorded no draft after the last final,
+and no transport failures occurred. The user also noted a slow visible text
+reveal; this is a separate observation. Full C3 acceptance
+still requires the remaining memory confirmation across restart and the user's
+overall feedback; preview acceptance alone does not close the checkpoint.
 
 The pending dedicated checkpoint must use Jev recall and semantic search enabled,
 exercise chat/save/recall/edit and direct confirmation across restart, and record
