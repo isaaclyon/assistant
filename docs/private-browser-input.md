@@ -95,6 +95,18 @@ apart from the closed OpenTable adapter above.
 The tool is for authorized sign-in and verification, never purchases or account
 changes. The operating-system user and destination website remain trusted.
 
+## Native operator setup
+
+Use one configured `browser.runtimeDir` for the native observer and protected
+browser services. Keep its path short enough for local Unix sockets. Native
+general tools do not inherit an ambient `AGENT_BROWSER_SOCKET_DIR` override;
+a parent-only override can give the observer and private services different
+socket locations. The C6 live check passes with one short configured runtime
+and no ambient override. It does not prove the cause of an earlier failure.
+
+Confirm explicit `stock-chrome.mjs status` output after startup and shutdown.
+A zero exit code alone does not prove browser startup or shutdown.
+
 ## Host-only failure diagnostics
 
 `runPrivateBrowserInput` and `runBrowserTakeover` accept an optional internal

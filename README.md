@@ -18,9 +18,10 @@
 > profiles (`durable-personal-isaac`, `durable-personal-emma`,
 > `durable-household-shared`, `durable-builder`), the held frozen-copy migration
 > inventory, the immutable release builder and explicit staged activation. C6 is
-> in progress: the integrated check, build, Linux CI and four disposable Linux
-> rehearsal modes pass. A separate Linux browser run passes all 43 selected tests.
-> Live integration acceptance remains open.
+> in progress: the local check, build and four disposable Linux rehearsal modes
+> pass. A separate Linux browser run passes all 43 selected tests. Real broker,
+> credential approval/copy, sign-in and private Mini App handback also pass.
+> Authenticated CLI acceptance and two failures in the latest Linux CI remain open.
 > No production rollout has run (C7).
 > Root scripts build and test `src/durable/` and shared domain contracts. C1
 > remains prototype evidence. The description below documents the legacy fleet.

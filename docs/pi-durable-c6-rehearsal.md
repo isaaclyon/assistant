@@ -338,8 +338,8 @@ Regression tests cover both streaming APIs, separate instances, sessionless call
 repeated close and cleanup failure. An independent source review finds no material
 issue. A separate real Codex request creates one WebSocket without SSE fallback;
 provider close returns and the process exits naturally with code 0 in six seconds.
-Its credential copies are removed. Real broker, Mini App and credential
-approval/copy acceptance remain open.
+Its credential copies are removed. The later browser check below closes real
+broker, Mini App and credential approval/copy acceptance.
 
 A real restricted-broker instance also starts on a separate ephemeral Tailscale
 node. The native browser opens and inspects the synthetic HTTPS sign-in form,
@@ -347,7 +347,8 @@ and the instance receives a real Telegram request. It delivers two replies and
 exits naturally with no unfinished work. Three private-login attempts return
 `browser_blocked`; the broker records no approval request. The safety gate stays
 enabled. This run does not prove successful sign-in, credential approval/copy or
-Mini App takeover. Those gates remain open alongside authenticated CLI acceptance.
+Mini App takeover. The later bounded check below resolves those browser gates;
+authenticated CLI acceptance remains open.
 
 An offline source review identifies two failure paths: an existing crash gate,
 and uncertain observer disconnection or page protection that retains the gate.
@@ -357,15 +358,50 @@ now distinguish setup and cleanup failure phases using content-free metadata.
 Regression tests cover phase reporting, privacy, callback failures and gate
 retention. The full Node 24 check passes 151 files and 1,379 tests, with 39
 platform/browser tests skipped; the build also passes. The independent source
-review finds no material defect. This does not establish the cause of the live failure. Socket-path
-and observer-environment explanations remain hypotheses. A new bounded live
-check needs separate authorization after the previous test resources are retired.
+review finds no material defect. This does not establish the cause of the live
+failure. The later live check uses these diagnostics with separate authorization.
 
-The test application, broker, site and browser stop after the check. The dedicated
-node's three proxy mappings and temporary loopback address are removed. The node
-logs out, credential copies are removed, and both synthetic vaults are deleted
-with absence verified. The test service account has a one-hour expiry; early
-revocation is not claimed.
+A separately authorized 45-minute browser check runs the full native builder on
+`6c2dcca` with the real provider, restricted broker and an ephemeral test node.
+The first protected login fails at `page-protect`, followed by
+`cleanup-unprotected-page`; observer disconnection completes. No approval or
+site submission occurs in that attempt. The exact cause remains unproven.
+
+A private configuration change gives the native observer and protected operation
+one short `browser.runtimeDir`, without a harness-only
+`AGENT_BROWSER_SOCKET_DIR` override. The immutable configuration guard correctly
+refuses the changed configuration against the earlier state. A fresh test store
+with the matching configuration then passes; no public source change is needed.
+This validates the consistent-runtime setup without proving the earlier cause.
+
+The paired user approves the synthetic credential with **Always Allow**. The
+broker records one delivered approval and one credential copy. The site records
+one successful sign-in and no failed sign-in. Private login returns `submitted`
+with `copiedCredentialItem`; takeover returns `handed_back` after the user's
+**Hand back** action. Matching native browser tool results confirm the signed-in
+marker and sign-out link after both login and private handback. External helper probes
+with empty output are excluded from this proof. Submission status alone is not the authentication evidence.
+
+The native application delivers one final reply for one human request, with
+seven provider payloads, no unfinished work and no fatal or transport error.
+The process exits naturally with code 0. These results close the live browser,
+restricted-broker, credential approval/copy and Mini App acceptance gates.
+
+All owned resources are retired before the 45-minute limit. Explicit stock-helper
+status and stop checks verify that both test browser runtimes stop; owned
+observer sessions are closed. The application, broker, site and test node have
+no remaining processes. The three dedicated proxy mappings and temporary
+loopback address are removed, and the node logs out. Credential copies, browser
+state and node state are removed. Both synthetic vaults are deleted with absence
+verified. The production proxy mappings retain their original targets. The test
+service account has a one-hour expiry; early revocation is not claimed.
+
+Exact-source [Linux CI on 6c2dcca](https://github.com/isaaclyon/assistant/actions/runs/39166498677)
+reports 1,412 passing tests, four skipped tests and two failures in
+`tests/protected-browser.test.ts`: `Test Chrome did not start` and a timeout.
+The CI build is skipped after the test failure. The earlier passing Linux run
+and the successful live browser check do not close this CI gate. C6 remains
+unaccepted pending CI resolution and authenticated native CLI acceptance.
 
 Check `tailscale serve status --json` before choosing a private test endpoint.
 The text status can omit foreground configurations. The occupied-port guard
@@ -383,4 +419,4 @@ Each Linux mode requires Docker and Node 24. The containers use only synthetic
 data and repository build output. Run the modes separately within their bounded
 execution times. The separate Linux browser run closes its 43 selected platform
 checks. User-driven provider controls and natural shutdown also pass. Remaining
-browser, authenticated CLI and broker acceptance remain separate C6 gates.
+authenticated CLI acceptance and the latest Linux CI failures remain open C6 gates.
