@@ -1,9 +1,10 @@
-# C4 general tools, Google reads and CLI skills
+# C4 tools, reads, CLI skills and direct places
 
 Status: **first slice implemented and locally validated on `feat/durable-c4`;
 a second Google-read slice is implemented and locally validated on
 `feat/durable-c4-reads`; a CLI skill slice is implemented on
-`feat/durable-c4-cli` (validation below);
+`feat/durable-c4-cli`; direct private places are implemented and locally validated on
+`feat/durable-c4-places` (validation below);
 C4 remains in progress.** C3 is accepted. The first slice restores general file,
 shell and bounded public-web tools in a separate selected profile. Production
 continues using its legacy release. The legacy planning checkout retains this
@@ -259,9 +260,9 @@ An optional private native configuration field sets the Messages HTTPS origin:
 
 This is a synthetic configuration fragment; retain the other required C2/C3
 fields. The origin must use HTTPS without credentials, a non-root path, query or
-fragment. Unknown CLI fields and CLI configuration on other profiles fail
+fragment. Unknown CLI fields and CLI configuration outside the CLI and places profiles fail
 validation. The selected origin becomes `PI_TELEGRAM_MESSAGES_BASE_URL` only in
-this profile's child shell environment. Ambient values are excluded. Omitting
+the CLI and places profiles' child shell environment. Ambient values are excluded. Omitting
 `cli` or its origin retains the helper's bounded local Tailscale hostname
 discovery. CLI configuration is part of this profile's recovery signature;
 changing it blocks incompatible store reopening.
@@ -321,3 +322,88 @@ Tailscale endpoint was used. Live CLI/auth compatibility, private endpoint
 health, media/receipt handling and Linux service behavior remain later acceptance
 work. This completes the selected CLI skill migration slice; it does not close
 C4's places, guarded-mutation, browser or provider/operator gates.
+
+
+## Direct places application slice
+
+`durable-places-test` adds the `native-places` bundle and `rank_places` tool to
+the CLI profile's selected capabilities. It requires the `isaac` principal and
+the same explicit memory/Google configuration (`google: {}` is valid), with
+optional `cli.messagesBaseUrl`. Use a new private native store; changing an
+existing store's selected profile fails compatibility checks. All older profile
+selections and signatures remain unchanged.
+
+`/place_rankings` and the status menu open the deterministic application outside
+the model loop. The tool hands an add request to category/sentiment buttons, and
+comparison answers, back, resume, rankings and details use the existing
+`PlacesApplication`, `PlacesService` and private `places.db`. Ranking algorithms
+and the domain schema stay unchanged. Names, categories and place notes can be entered through replies to an exact
+direct prompt. Renaming, notes, moving/re-ranking and paginated categories and
+rankings use the same non-destructive application commands. A successful direct
+tool handoff ends the model round. The native profile remains text-only.
+
+The native Harness root owns the pre-insertion draft, prompt bindings, one-use
+callback capabilities and command claims. Capabilities expire after ten minutes
+and bind the current principal, actor, private chat, conversation epoch and
+acknowledged Telegram message. Callback data contains an opaque handle. A send
+without a known message receipt cannot enable its buttons; reopen the command to
+recover. New/reset invalidates old buttons and prompts while a fresh open
+recovers the saved draft or canonical comparison. Reload likewise invalidates
+interaction capabilities. Restart preserves unexpired current-epoch state.
+
+Acknowledged prompt message IDs remain as compact tombstones when full prompt
+records expire or are pruned. They keep delayed replies out of model history.
+If a prompt send loses its receipt, an exact quoted prompt from the configured
+bot in the private chat is consumed as inactive using its opaque input reference;
+it cannot authorize an effect. Prompt input bodies are not stored in these
+tombstones. C6 must measure their retention/storage cost before cutover.
+
+Each effect first commits a claim. A second Harness transaction rechecks current
+authority, synchronously runs the domain command and records its result. The
+Harness and ranking database are separate stores: a crash after claiming can
+leave an unknown result. That claim never executes again. Inspect or resume the
+canonical ranking before deciding what to do next. Interrupted model tool calls
+are also replay-unsafe. Losing a direct-result presentation cannot turn a
+captured reply into a new model request or automatically repeat an effect.
+Concurrent redelivery reuses the recorded result. Presentations are at-least-once,
+so an uncertain send can produce duplicate messages; only the acknowledged
+message binding enables its buttons. Shutdown stops intake and drains complete
+places operations while the Harness is still open, then closes its domain store.
+
+This slice excludes cancellation, deletion, undo and confirmation requests; the
+following guarded-mutation slice adds their explicit authority and recovery.
+It does not import legacy in-flight callbacks or private state. C6 owns migration
+rehearsal for legacy drafts and other existing recovery data.
+
+### Places-slice validation and limits
+
+Offline validation uses the actual selected application and registry, a faux
+provider, recording Telegram transport, disposable native stores and the existing
+ranking/application/service/store/management suites. It covers model handoff,
+direct callback/reply capture, actor/chat/message/epoch rejection, reset/reload,
+restart, concurrent redelivery, category pagination, queued shutdown and replies
+to pruned or unacknowledged prompts. An input that expires after its claim is
+consumed and gets a visible notice.
+
+Six SIGKILL cases exercise the real host and domain SQLite database: before and
+after a ranking write, both crashes followed by an epoch change, and before/after
+a captured category-input write. Recovery resends the exact original command ID
+first, then tests a fresh update ID. No write is repeated. Epoch fixtures mutate
+the root Bindings document directly; actual `/new` and `/reload` are also covered
+in the full application tests. Lost send receipts use fault injection rather
+than process death at the network boundary.
+
+Under Node 24, `npm run check:changed` passed 547 tests in 49 files and
+`npm run build` passed, including the compiled application import. Static
+comparison confirmed every pre-existing profile/resource object is unchanged;
+updated documentation links and `git diff --check` also passed.
+
+Independent read-only review covered the production integration and crash
+assertions and found no high/medium defects. Its shutdown-order and input-expiry
+findings were corrected with regression tests. Prompt-ID retention remains an
+explicit C6 measurement gate; pruning those IDs without another capture mechanism
+would admit old private replies to the model.
+
+No live Telegram bot, real provider account, private rankings or production
+service was used. Real ordinary/broker delivery, Linux service behavior and
+legacy-to-native state migration remain later acceptance gates.

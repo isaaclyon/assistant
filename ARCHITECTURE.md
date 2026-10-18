@@ -432,6 +432,8 @@ Inbound turns are crash-durable through the bridge inbox, but outbound Telegram 
 
 The [pi-durable migration plan](docs/pi-durable-migration-plan.md) records the
 approved target architecture and C0–C7 checkpoints. C0–C3 passed. The isolated
-C4 branches add general tools, bounded public web and Google reads; the
-remaining C4 integrations are pending. The runtime described above continues serving legacy production.
+C4 branches add general tools, bounded public web, Google reads, CLI-backed
+YNAB/Messages skills and direct private places flows. Guarded mutations,
+protected browser workflows and full provider/operator parity remain pending.
+The runtime described above continues serving legacy production.
 Production activation remains C7.
