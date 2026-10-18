@@ -1,9 +1,8 @@
 # C3 native chat and memory
 
-Status: **implemented; dedicated live user checkpoint pending.** The isolated
-`feat/durable-c3` tree extends C2's native foundation. Local validation and review
-are recorded below. Production continues using its legacy release. C3 acceptance
-requires the separate test-bot try specified by the roadmap. Commands and source
+Status: **C3 passed.** The isolated `feat/durable-c3` tree extends C2's native
+foundation. Local validation, independent review and dedicated live user acceptance
+are complete. Production continues using its legacy release. Commands and source
 paths below belong to the native tree; the legacy checkout retains this guide as
 checkpoint evidence.
 
@@ -131,7 +130,7 @@ visibility checks. System prompts, hidden context, thinking, controls, compactio
 summaries and protected tool output are excluded. Large session refreshes are
 bounded; results report partial status until later refreshes converge.
 
-## Validation and remaining acceptance
+## Validation and user acceptance
 
 The native suite exercises the real selected profile, actual serialized tool
 schemas, canonical Markdown CRUD/append, draft reuse, persisted share/delete
@@ -208,15 +207,36 @@ draft workaround was removed. In the next actual inbound run on the corrected
 build, the user confirmed that the doubled-up text was fixed. Both actual user
 turns delivered successfully; the trace recorded no draft after the last final,
 and no transport failures occurred. The user also noted a slow visible text
-reveal; this is a separate observation. Full C3 acceptance
-still requires the remaining memory confirmation across restart and the user's
-overall feedback; preview acceptance alone does not close the checkpoint.
+reveal; this is a separate observation. Preview acceptance alone did not close
+the checkpoint.
 
-The pending dedicated checkpoint must use Jev recall and semantic search enabled,
-exercise chat/save/recall/edit and direct confirmation across restart, and record
-the user's feedback and any gaps. Offline fixtures cannot establish user
-usefulness. Linux/systemd, full provider parity and staged production activation
-remain C4–C7 work.
+On 2026-10-18 UTC, the final focused live check passed with Jev recall and semantic
+search enabled, using `gpt-6-luna` at high thinking. The user saved a fictional note
+and requested sharing. The same operation was prepared with its approval message
+bound before shutdown, remained pending across a same-configuration restart, and
+succeeded after the user tapped the original Approve button. The trace recorded
+one restart, one callback, one successful share, two delivered replies, successful
+Jev/provider/embedding requests, and no transport failures. All completed Telegram
+requests returned HTTP 200; polling cancellations coincided with restart/stop.
+The test bot stopped and all four copied credential files were verified absent.
+Earlier enabled live checks supplied save, new/recall and append/edit evidence.
+
+The user confirmed successful sharing and overall usability. They still felt
+responses were slower and suggested the missing activity log might contribute.
+The final two replies took approximately 9.4 and 5.6 seconds from inbound polling
+receipt to final acknowledgement. These samples have no matched legacy baseline,
+so they do not establish a performance regression or its cause. `/debug` exposes
+MVP tool activity, lifecycle and recall diagnostics; it is opt-in, process-local
+and was off in this run. Perceived latency and activity visibility remain recorded
+observations for later parity work.
+
+An earlier startup attempt stopped on a polling transport failure. The next run
+completed save, recall, restart and sharing, but its share requests were created
+after restart; one confirmation presentation also timed out and was invalidated.
+That run did not prove pending-approval recovery. The focused check above supplied
+the missing ordering evidence. Raw traces and the acceptance receipt remain in
+private temporary evidence. C3 is accepted; Linux/systemd, full provider parity
+and staged production activation remain C4–C7 work.
 
 See [ADR-0053](adr/0053-native-chat-memory-and-evidence.md),
 [the roadmap](pi-durable-migration-plan.md), and

@@ -3,8 +3,8 @@
 Status: **C2 passed; go to C3.** Native implementation, local integration
 validation and independent review are complete. Production remains on the legacy
 release. This guide records the completed C2 checkpoint; the
-[C3 guide](pi-durable-c3-chat-memory.md) describes the subsequent implementation
-and its pending dedicated live user checkpoint.
+[C3 guide](pi-durable-c3-chat-memory.md) records the subsequent implementation
+and its completed dedicated live user checkpoint.
 
 Code paths below belong to the isolated `feat/durable-c2` release tree. The legacy
 checkout retains this guide as checkpoint evidence.
