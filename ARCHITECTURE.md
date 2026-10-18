@@ -85,7 +85,7 @@ OS writer/control leases govern read-safe restart, cancellation and retirement.
 One bounded report returns to the original conversation after parent idle.
 Seven-day creation-based cleanup commits a tombstone before verified store/file
 removal; main correlation evidence and bounded parent history remain durable.
-The child validation gate remains open. See the [child guide](docs/pi-durable-c5-children.md),
+The child offline validation gate passed. See the [child guide](docs/pi-durable-c5-children.md),
 [C5 recipient](docs/pi-durable-c5-jobs.md),
 [coordinator](docs/pi-durable-c5-coordinator.md) and
 [schedule](docs/pi-durable-c5-schedules.md) guides.

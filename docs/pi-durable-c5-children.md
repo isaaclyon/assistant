@@ -5,8 +5,8 @@ native schedule profile. Each child runs a separate native Harness in its own
 process and temporary store. The main Harness records orchestration, terminal
 status and a bounded parent report. This implements the approved
 [C0 retention contract](pi-durable-c0-contracts.md#d4-preserve-existing-state-guarantees-and-child-retention).
-The validation gate remains open. Production activation and private-state
-migration remain C6/C7 work.
+The full native validation gate and F1 follow-up review passed. Production
+activation and private-state migration remain C6/C7 work.
 
 ## Selection and configuration
 
@@ -150,25 +150,23 @@ post-removal retry and a two-job batch with one busy writer. A separate
 `npm run build` passed, including compiled worker and application imports.
 No general-tools typecheck repair was added after the scope boundary.
 
-**Full validation remains blocked.** The earlier complete native check reached
-its 285-second cap before producing a final summary. Read-only diagnosis found
-99 completed suites and serial execution, with no evidence of a hang. The user
-retained that cap and declined a longer run. Scoped passing tests do not replace
-the full gate; this slice remains unmerged until complete validation and required
-CI/review pass.
+**Full native validation passed on `b09f5f9`.** After the user explicitly
+accepted one shared 420-second hard timeout, `npm run check:changed && npm run
+build` completed in 184 seconds on the unchanged implementation. Strict native
+typechecking, 1,136 tests in 115 files and the build passed; 38 existing
+platform/tool-conditional tests were skipped across the 118-file inventory.
+Stderr was empty. No shard, test configuration or skip settings were changed.
+The earlier full attempt's 285-second timeout remains historical evidence; the
+complete run supersedes that incomplete result.
 
-The first exact-head GitHub CI run completed with 1,167 tests passing, two
-inspection tests failing because the Ubuntu runner lacked ripgrep, and three
-skipped tests. Its build step was skipped. The native workflow now installs
-ripgrep before validation; this supplies the existing inspection prerequisite
-without changing the tools or skipping tests. Native typechecking, all seven
-existing general-tool tests and the build passed together in a bounded ten-second
-local run with ripgrep available. CI on the prerequisite-fix commit `c6022ca`
-then passed 1,169 tests with three skipped, plus typechecking and build. Its test
-phase took 305 seconds. That evidence predates faulted-job reconciliation; passing
-exact-head CI and follow-up review are still required. The older 223-second run
-covered the C4 provider slice with 801 passing tests, so it does not establish that
-the current full local gate fits the retained 285-second cap.
+The local skips were 19 protected-browser tests, 17 private-login-browser tests,
+one browser-takeover browser test and one private-login-credential test. The
+real-Chrome suites require `/usr/bin/google-chrome`, which was absent locally.
+[Exact-head Linux CI](https://github.com/isaaclyon/assistant/actions/runs/39104502029)
+on the same implementation passed 1,171 tests with three skips, plus strict
+native typechecking and build. Its test phase took 318 seconds. The workflow
+installs ripgrep, the existing repository-inspection prerequisite missing from
+the initial runner; the tools and tests retain their existing behavior.
 
 Independent read-only source review found no material correctness defect in
 report deduplication, retention recovery, active synthesis protection or early
@@ -180,7 +178,15 @@ A subsequent reviewers-plus-judge workflow identified missing reconciliation for
 faulted native child job tasks. Two focused regression tests reproduced the stuck
 report and blocked-expiry paths before the fix. They now exercise failure
 reporting after writer closure and cleanup when the report task has also faulted.
-A follow-up independent judgment and exact-head CI remain required.
+Both independent follow-up reviewers and the distinct judge approved the F1 fix
+with no actionable findings. Their independent checks passed 11, 13 and 11 tests,
+respectively, including both regressions. They verified the unchanged `b09f5f9`
+implementation and focused on the F1 increment and affected boundaries. They read
+the prior review bundles and relevant transcript excerpts, rather than rereading
+the full original diff or transcript. The broader 69-test/typecheck/build result
+was inspected evidence, not independently repeated by the judge. These scoped
+review assessments and passing CI complement the full local gate; they do not
+claim live acceptance.
 
 All providers and transports are synthetic. This slice establishes no live
 provider, Telegram, Linux/systemd, physical power-loss or private-state migration
