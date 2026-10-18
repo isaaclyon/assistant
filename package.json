@@ -25,6 +25,7 @@
     "@llblab/pi-telegram": "https://codeload.github.com/isaaclyon/pi-telegram/tar.gz/56f0fe38d2260db8dede028aca62d47cbb49bb20",
     "@novnc/novnc": "1.7.0",
     "chrono-node": "2.10.1",
+    "croner": "10.0.1",
     "marked": "18.0.5",
     "proper-lockfile": "4.1.2",
     "ws": "8.22.0",

@@ -25,6 +25,7 @@ export interface NativeApplicationOptions {
  /** Explicit transport and timing seams for offline native acceptance. */
  webRunFetch?:typeof fetch;
  providerStallTimeoutMs?:number;
+ coordinator?:Omit<Parameters<typeof import('./coordinator.js')['startNativeJobsCoordinator']>[1], 'logger'>;
  transport?:RawTransport;
 }
 /** Store identity travels with the Harness, so citation locators survive moving a backup. */
@@ -35,8 +36,10 @@ const confirmationKey=(cid:ConversationId,id:string)=>createHash('sha256').updat
 export async function createNativeApplication(config:NativeConfig,options:NativeApplicationOptions) {
  await loadCapabilityProfile(config.resourceRoot,config.capabilityProfile);
  const enabled=isNativeMemoryProfile(config.capabilityProfile);
- const jobsEnabled=config.capabilityProfile==='durable-jobs-test';
- if(config.jobsRole!==(jobsEnabled?'recipient':'disabled'))throw new Error('jobsRole must match the selected native profile');
+ const coordinatorEnabled=config.capabilityProfile==='durable-jobs-coordinator-test';
+ const jobsEnabled=config.capabilityProfile==='durable-jobs-test'||coordinatorEnabled;
+ if(config.jobsRole!==(coordinatorEnabled?'coordinator':jobsEnabled?'recipient':'disabled'))throw new Error('jobsRole must match the selected native profile');
+ if(coordinatorEnabled!==!!config.coordinator)throw new Error('Coordinator configuration must match the selected native profile');
  const parityEnabled=config.capabilityProfile==='durable-parity-test'||jobsEnabled;
  const providerEnabled=config.capabilityProfile==='durable-provider-test'||parityEnabled;
  const browserEnabled=config.capabilityProfile==='durable-browser-test'||providerEnabled;
@@ -64,6 +67,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  let prepareIntent:((input:import('./memory-executor.js').PrepareMemoryIntentInput)=>Promise<{intent:import('./operations.js').MemoryIntent}>)|undefined;
  const registryListeners=new Set<()=>void>();
  let executionEnvironment:import('@earendil-works/pi-durable/env').ExecutionEnv|undefined;
+ let coordinator:Awaited<ReturnType<typeof import('./coordinator.js')['startNativeJobsCoordinator']>>|undefined;
  let previousJobDiagnostic='';
  let reconcileJobs:((runtime:import('./ingress.js').IngressRuntime)=>Promise<void>)|undefined;
  let webRunFactory:(()=>NativeBundle)|undefined;
@@ -83,7 +87,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  const close=()=>closing??=(async()=>{
   debugEnabled=false;
   const failures:unknown[]=[];
-  for(const cleanup of [()=>visible?.close(),()=>browser?.close(),()=>host?.close(),()=>places?.close(),()=>calendar?.close(),()=>executionEnvironment?.cleanup(context),()=>resources?.close(),()=>search?.close(),()=>provider.close()]){
+  for(const cleanup of [()=>coordinator?.stop(),()=>visible?.close(),()=>browser?.close(),()=>host?.close(),()=>places?.close(),()=>calendar?.close(),()=>executionEnvironment?.cleanup(context),()=>resources?.close(),()=>search?.close(),()=>provider.close()]){
    try{await cleanup();}catch(error){failures.push(error);}
   }
   if(!failures.length)unbindBrowser?.();
@@ -300,7 +304,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   const raw=options.transport??createNativeTelegramTransport(config.transport.mode==='ordinary'?{...config.transport,cwd:config.workspaceCwd}:{mode:'restricted',socketPath:config.transport.socketPath,botId:config.transport.botId,allowedUserId:config.transport.allowedUserId});
   transport=bridgeTelegram(config,raw,options.onTransportFailure,{...(enabled?{ui}:{}),commands:enabled?['menu','model','thinking','new','abort','stop','compact','reload','restart','skills','debug',...(providerEnabled?['fast','usage']:[]),...(placesEnabled?['place_rankings']:[])]:['new','abort','stop','compact']});
   const bridge=transport;
-  const signature=createHash('sha256').update(JSON.stringify({registry:resources.signature,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,memory:config.memory??null,...(jobsEnabled?{jobs:{role:config.jobsRole,stateDir:config.stateDir}}:{}),...(googleEnabled?{google:config.google}:{} ),...(cliEnabled?{cli:config.cli??{}}:{}),...(browserEnabled?{browser:config.browser}:{})})).digest('hex');
+  const signature=createHash('sha256').update(JSON.stringify({registry:resources.signature,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,memory:config.memory??null,...(jobsEnabled?{jobs:{role:config.jobsRole,stateDir:config.stateDir,...(coordinatorEnabled?{coordinator:config.coordinator}:{})}}:{}),...(googleEnabled?{google:config.google}:{} ),...(cliEnabled?{cli:config.cli??{}}:{}),...(browserEnabled?{browser:config.browser}:{})})).digest('hex');
   // The reader delegates to the active registry after a safe idle reload.
   const registry={snapshot:()=>resources!.registry.snapshot(),subscribe:(listener:()=>void)=>{registryListeners.add(listener);return()=>{registryListeners.delete(listener);};}};
   host=await DurableHost.create({stateDir:config.historyDir,inboxPath:config.inboxPath,models:provider.models,registry,
@@ -326,7 +330,24 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    return executeMemoryOperation('lint',{}, {env:nativeMemoryEnvironment(config),cwd:config.workspaceCwd,sourceResolver:search.provenanceResolver});
   };
   const restartAtOpen=(await runtime.runtime.harness.snapshot(NativePreferences,runtime.runtime.root.id,context))?.restartNotice?.requestId;
-  return {host:runtime,operations,controls,search,lintMemory,inspectJobs:async()=>jobsEnabled?(await import('./job-admission.js')).inspectJobHandoffs({runtime:runtime.runtime,stateDir:config.stateDir}):undefined,start:async()=>{await runtime.start();if(restartAtOpen)await controls.notifyRestart(async()=>{await bridge.presenter.present(target,{text:'Restart complete.'});},restartAtOpen);},close};
+  const inspectJobs=async()=>{
+   if(!jobsEnabled)return undefined;
+   const recipient=await (await import('./job-admission.js')).inspectJobHandoffs({runtime:runtime.runtime,stateDir:config.stateDir});
+   if(!coordinatorEnabled)return recipient;
+   const occurrences=await (await import('../job-occurrences.js')).inspectJobOccurrenceLedger(config.coordinator!.coordinatorStateDir);
+   return {...recipient,coordinator:{running:!!coordinator,occurrences}};
+  };
+  return {host:runtime,operations,controls,search,lintMemory,inspectJobs,start:async()=>{
+   try{
+    if(coordinatorEnabled&&!coordinator){
+     const module=await import('./coordinator.js');
+     const diagnostic=()=>debug('durable coordinator',{event:'diagnostic'});
+     coordinator=await module.startNativeJobsCoordinator({instanceId:config.instanceId,stateDir:config.stateDir,coordinator:config.coordinator!},{...options.coordinator,logger:{info:diagnostic,warn:diagnostic,error:diagnostic}});
+    }
+    await runtime.start();
+    if(restartAtOpen)await controls.notifyRestart(async()=>{await bridge.presenter.present(target,{text:'Restart complete.'});},restartAtOpen);
+   }catch(error){try{await close();}catch(cleanup){throw new AggregateError([error,cleanup],'Native application startup failed');}throw error;}
+  },close};
  } catch(error) {
   try{await close();}catch(cleanup){throw new AggregateError([error,cleanup],'Native application construction failed');}
   throw error;

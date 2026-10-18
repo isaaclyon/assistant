@@ -42,7 +42,7 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
   }
 
   async function previewInputs(inputs: readonly SubmissionId[] = []): Promise<boolean> {
-    if (options.config.jobsRole !== 'recipient') return true;
+    if (!['recipient', 'coordinator'].includes(options.config.jobsRole)) return true;
     if (!inputs.length) return false;
     try {
       const host = options.host();
@@ -61,7 +61,7 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
     observer = me; lastConversation = cid;
     let preview = await previewInputs(watch.snapshot.run?.inputs);
     const refreshPreview = async () => {
-      if (options.config.jobsRole !== 'recipient' || !preview) return;
+      if (!['recipient', 'coordinator'].includes(options.config.jobsRole) || !preview) return;
       // A run can gain inputs at a tool boundary without another run_start.
       // The attach snapshot is fixed. Read public live state before publishing
       // the next turn and keep suppression sticky until the next run.
@@ -93,7 +93,7 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
           preview = false; preview = await previewInputs(event.run?.inputs);
           await refreshPreview(); newTurn(); texts = textOf(event.generation?.message?.content); publish(); break;
         case 'run_start': preview = false; preview = await previewInputs(event.inputs); safeDebug('durable run', { event: 'run_start', inputs: event.inputs.length }); break;
-        case 'run_end': preview = options.config.jobsRole !== 'recipient'; safeDebug('durable run', { event: 'run_end', inputs: event.inputs.length }); break;
+        case 'run_end': preview = !['recipient', 'coordinator'].includes(options.config.jobsRole); safeDebug('durable run', { event: 'run_end', inputs: event.inputs.length }); break;
         case 'turn_start': await refreshPreview(); newTurn(); safeDebug('durable turn', { event: 'turn_start' }); break;
         case 'turn_end': safeDebug('durable turn', { event: 'turn_end' }); break;
         case 'message_start': {

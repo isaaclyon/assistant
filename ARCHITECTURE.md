@@ -68,7 +68,15 @@ claims without native proof stay held. Explicit job source IDs preserve original
 time, destination and human-idle behavior. The v1 `completed` directory proves
 admission only; native run outcome and final delivery are separate. Scheduled
 runs have final-only output. Read-only inspection exposes bounded status counts.
-Coordinator and child migration remain open; see the [C5 guide](docs/pi-durable-c5-jobs.md).
+`durable-jobs-coordinator-test` adds cron/at publication through the existing
+scheduler and occurrence ledger, in a coordinator directory outside recipient
+trees. Explicit same-UID targets constrain publication, and a lifetime SQLite
+lease excludes other native coordinators. Legacy/native switching still requires
+quiescent writers and one owner. Fresh-ledger provenance permits restart after a
+first rejected definition file without weakening historical migration guards.
+Heartbeat/webhook, price-watch and child migration remain open; see the
+[C5 recipient](docs/pi-durable-c5-jobs.md) and
+[coordinator](docs/pi-durable-c5-coordinator.md) guides.
 Live provider/browser/CLI/platform acceptance and privileged builder/deployment
 coverage remain at C6.
 

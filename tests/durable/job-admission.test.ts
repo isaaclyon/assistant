@@ -9,7 +9,7 @@ import { DurableHost, type HostConfig } from '../../src/durable/host.js';
 import { Bindings, accept, context, fingerprint, sourceKey, type SourceEnvelope } from '../../src/durable/ingress.js';
 import { JobAdmissions, inspectJobHandoffs, jobEnvelope, reconcileJobHandoffs } from '../../src/durable/job-admission.js';
 import type { FinalRequest } from '../../src/durable/delivery.js';
-import { cancelJobHandoff, enqueueJobHandoff } from '../../src/job-handoff.js';
+import { MAX_HANDOFF_PROMPT_BYTES, cancelJobHandoff, enqueueJobHandoff } from '../../src/job-handoff.js';
 
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -72,6 +72,16 @@ it('admits an enqueued job once, completes the v1 file on admission, and records
   expect(faux.state.callCount).toBe(1); expect(sent.map(s => s.text)).toEqual(['DONE']);
   expect(sent[0]!.target).toEqual(TARGET);
   expect(await list(d, 'completed')).toEqual([`${dispatchId}.json`]);
+});
+
+it('admits a maximum-size prompt whose JSON escaping expands the file', async () => {
+  const d = await dirs();
+  const { dispatchId } = await enqueue(d, { prompt: "\u0001".repeat(MAX_HANDOFF_PROMPT_BYTES) });
+  const { h, faux } = await host(d);
+  await h.start(); await h.reconcile();
+  expect(await list(d, 'completed')).toEqual([`${dispatchId}.json`]);
+  expect(await list(d, 'failed')).toEqual([]);
+  expect(faux.state.callCount).toBe(1);
 });
 
 it('deduplicates repeated publication and never reprocesses a completed dispatch', async () => {

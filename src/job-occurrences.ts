@@ -88,19 +88,38 @@ export function openJobOccurrenceLedger(stateDir: string, options: { offlineLega
   }
   const db = new DatabaseSync(path, { timeout: 5_000 });
   try {
-    db.exec(`
-      PRAGMA synchronous = FULL;
-      CREATE TABLE IF NOT EXISTS ledger_metadata (
-        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-        version INTEGER NOT NULL,
-        definitions_initialized INTEGER NOT NULL CHECK (definitions_initialized IN (0, 1))
-      ) STRICT;
-      INSERT OR IGNORE INTO ledger_metadata VALUES (1, 1, 0);
-    `);
+    db.exec("PRAGMA synchronous = FULL;");
+    // Fresh-runtime provenance is written in the same transaction that creates the
+    // metadata, and only when no legacy state existed. Ledgers without the tag
+    // (older or unknown) are never upgraded.
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const hasMetadata = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ledger_metadata'").get() !== undefined;
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS ledger_metadata (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          version INTEGER NOT NULL,
+          definitions_initialized INTEGER NOT NULL CHECK (definitions_initialized IN (0, 1))
+        ) STRICT;
+        INSERT OR IGNORE INTO ledger_metadata VALUES (1, 1, 0);
+      `);
+      if (!hasMetadata && !legacyState) {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS ledger_provenance (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            fresh_runtime INTEGER NOT NULL CHECK (fresh_runtime = 1)
+          ) STRICT;
+          INSERT OR IGNORE INTO ledger_provenance VALUES (1, 1);
+        `);
+      }
+      db.exec("COMMIT");
+    } catch (error) { try { db.exec("ROLLBACK"); } catch { /* keep original error */ } throw error; }
     if (db.prepare("SELECT version FROM ledger_metadata").get()?.version !== 1) {
       throw new Error("Unsupported job occurrence ledger version");
     }
-    if (legacyState && !options.offlineLegacyInitialization &&
+    const freshRuntime = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ledger_provenance'").get() !== undefined &&
+      db.prepare("SELECT fresh_runtime FROM ledger_provenance").get()?.fresh_runtime === 1;
+    if (legacyState && !options.offlineLegacyInitialization && !freshRuntime &&
         db.prepare("SELECT definitions_initialized FROM ledger_metadata").get()?.definitions_initialized !== 1) {
       throw new Error("Interrupted legacy job initialization requires offline migration");
     }
@@ -199,4 +218,24 @@ export function openJobOccurrenceLedger(stateDir: string, options: { offlineLega
     },
     close() { if (!closed) { closed = true; db.close(); } },
   };
+}
+
+/** Read-only count projection. Never initializes a ledger or adopts legacy state. */
+export function inspectJobOccurrenceLedger(stateDir: string) {
+  const root=lstatSync(stateDir);
+  if(!root.isDirectory()||(root.mode&0o777)!==0o700||(process.getuid&&root.uid!==process.getuid()))throw new Error('Job ledger inspection requires a private owned directory');
+  const path=join(stateDir,'job-occurrences.db');
+  let meta;
+  try{meta=lstatSync(path);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error;}
+  if(!meta.isFile()||meta.nlink!==1||(meta.mode&0o777)!==0o600||(process.getuid&&meta.uid!==process.getuid()))throw new Error('Job ledger inspection requires a private owned regular file');
+  const db=new DatabaseSync(path,{readOnly:true,timeout:5000});
+  try{
+    if(db.prepare('SELECT version FROM ledger_metadata WHERE singleton=1').get()?.version!==1)throw new Error('Unsupported job occurrence ledger version');
+    const counts={pending:0,published:0,superseded:0};
+    for(const row of db.prepare('SELECT status,count(*) AS count FROM occurrence GROUP BY status').all()){
+      if(!Object.hasOwn(counts,String(row.status)))throw new Error('Invalid occurrence state');
+      counts[row.status as keyof typeof counts]=Number(row.count);
+    }
+    return counts;
+  }finally{db.close();}
 }

@@ -80,6 +80,8 @@ export interface ParseJobsFileOptions {
   validTargets?: ReadonlySet<string>;
   requireTargets?: boolean;
   compatibilityTarget?: string;
+  /** Rejects any declared job type outside this set before reconciliation. */
+  allowedTypes?: ReadonlySet<JobDefinition["type"]>;
 }
 
 export function parseJobsFile(
@@ -129,6 +131,15 @@ export function parseJobsFile(
       return;
     }
     seenIds.add(id);
+    if (
+      options.allowedTypes !== undefined &&
+      typeof entry.type === "string" &&
+      ["cron", "at", "heartbeat", "webhook"].includes(entry.type) &&
+      !options.allowedTypes.has(entry.type as JobDefinition["type"])
+    ) {
+      errors.push(`${label} (${id}): job type "${entry.type}" is not supported by this scheduler`);
+      return;
+    }
     const targetRequired = parsed.version === 3 || options.requireTargets === true;
     let target = entry.target;
     if (target === undefined && targetRequired) {
@@ -337,6 +348,7 @@ export interface JobSchedulerOptions {
   validTargets?: ReadonlySet<string>;
   requireTargets?: boolean;
   compatibilityTarget?: string;
+  allowedTypes?: ReadonlySet<JobDefinition["type"]>;
   nowMs?: () => number;
   tickIntervalMs?: number;
   checkTimeoutMs?: number;
@@ -355,6 +367,8 @@ export interface JobDispatch {
   eventId: string;
   occurrenceId?: string;
   definitionFingerprint?: string;
+  /** Original materialization time (ms), stable across publication retries. */
+  createdAt?: number;
 }
 
 export interface JobScheduler {
@@ -375,6 +389,7 @@ export async function startJobScheduler({
   validTargets,
   requireTargets,
   compatibilityTarget,
+  allowedTypes,
   nowMs = Date.now,
   tickIntervalMs = 30_000,
   checkTimeoutMs = 60_000,
@@ -395,6 +410,7 @@ export async function startJobScheduler({
     ...(validTargets === undefined ? {} : { validTargets }),
     ...(requireTargets === undefined ? {} : { requireTargets }),
     ...(compatibilityTarget === undefined ? {} : { compatibilityTarget }),
+    ...(allowedTypes === undefined ? {} : { allowedTypes }),
   };
   const dispatchFor = (occurrence: JobOccurrence): JobDispatch => ({
     jobId: occurrence.jobId,
@@ -403,6 +419,7 @@ export async function startJobScheduler({
     eventId: occurrence.eventId,
     occurrenceId: occurrence.id,
     definitionFingerprint: occurrence.definitionFingerprint,
+    createdAt: occurrence.createdAt,
   });
   let attempted = new Set<string>();
   const publish = async (occurrence: JobOccurrence): Promise<boolean> => {

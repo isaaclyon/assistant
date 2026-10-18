@@ -129,6 +129,32 @@ The native document records run outcome separately; v1 acceptance still says
 nothing about external completion. Proactive output follows the native final
 ledger and its delivery ambiguity policy, with `NO_REPLY` suppressed.
 
-This starts recipient migration only. Canonical definitions, occurrence ledger,
-coordinator publication and terminal identities keep their existing owners. The
-[C5 recipient guide](../pi-durable-c5-jobs.md) records validation and open gates.
+Canonical definitions, occurrence ledger and terminal identities keep their
+existing domain owners. The [C5 recipient guide](../pi-durable-c5-jobs.md) records
+recipient validation and open gates.
+
+## Native cron and one-shot coordinator
+
+The separate `durable-jobs-coordinator-test` profile adds cron/at publication by
+reusing the host-neutral scheduler. Its coordinator state stays outside every
+recipient state tree. Explicit self or same-UID target grants control each v1
+publication; cross-UID exchange remains unsupported. A lifetime SQLite lease
+excludes other native coordinators, while legacy/native transition still needs
+quiescent writers and one active owner. The legacy coordinator does not use this
+lease.
+
+Publication retains the materialized occurrence's full identity and original
+creation time. Restored unsupported work cannot publish. Definition edits and
+removal reconcile cancellation before recipient startup; invalid identities,
+unsafe trees or removed target grants can hold startup until explicitly resolved.
+Processing and accepted work remain recipient-owned.
+
+Fresh-runtime provenance, committed atomically with first ledger metadata only
+when legacy state is absent, allows restart after a rejected first definition
+file saves scheduler state. It does not mark definitions initialized or prove a
+historical one-shot ran. Untagged/unknown ledgers and interrupted offline legacy
+initialization retain their migration guard. This additive domain record keeps
+the version-1 occurrence and handoff identities intact.
+
+The [coordinator guide](../pi-durable-c5-coordinator.md) records offline evidence
+and remaining heartbeat/webhook, price-watch and child migration gates.

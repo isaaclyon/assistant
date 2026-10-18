@@ -1,4 +1,5 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -71,5 +72,34 @@ describe("durable occurrence ledger", () => {
     ledger.reconcileDefinitions([job], {});
     ledger.materialize(job, "event", "First", 1);
     expect(() => ledger.materialize(job, "event", "Different", 2)).toThrow(/collision/);
+  });
+
+  describe("restart provenance", () => {
+    it("lets a fresh ledger restart after the scheduler saved load-error state", async () => {
+      const stateDir = await mkdtemp(join(tmpdir(), "occurrence-fresh-"));
+      openJobOccurrenceLedger(stateDir).close(); // first start: invalid jobs.json, no reconcile
+      await writeFile(join(stateDir, "jobs-state.json"), "{}");
+      const ledger = openJobOccurrenceLedger(stateDir);
+      ledgers.push(ledger);
+      ledger.reconcileDefinitions([job], {});
+      expect(ledger.oneShotPublished(job)).toBe(false); // no legacy import
+    });
+
+    it("rejects an interrupted legacy initialization", async () => {
+      const stateDir = await mkdtemp(join(tmpdir(), "occurrence-interrupted-"));
+      await writeFile(join(stateDir, "jobs-state.json"), "{}");
+      openJobOccurrenceLedger(stateDir, { offlineLegacyInitialization: true }).close();
+      expect(() => openJobOccurrenceLedger(stateDir)).toThrow(/offline migration/);
+    });
+
+    it("does not upgrade an untagged prior ledger", async () => {
+      const stateDir = await mkdtemp(join(tmpdir(), "occurrence-unknown-"));
+      openJobOccurrenceLedger(stateDir).close();
+      const db = new DatabaseSync(join(stateDir, "job-occurrences.db"));
+      db.exec("DROP TABLE ledger_provenance");
+      db.close();
+      await writeFile(join(stateDir, "jobs-state.json"), "{}");
+      expect(() => openJobOccurrenceLedger(stateDir)).toThrow(/offline migration/);
+    });
   });
 });

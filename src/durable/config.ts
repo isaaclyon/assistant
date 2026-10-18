@@ -1,4 +1,5 @@
 import { lstat, readFile, realpath } from 'node:fs/promises';
+import type { NativeCoordinatorConfig } from './coordinator.js';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export interface NativeMemoryConfig {
@@ -11,7 +12,7 @@ export interface NativeMemoryConfig {
  judgeKeyFile?: string;
  embeddingKeyFile?: string;
 }
-export const isNativeMemoryProfile=(profile:string)=>['durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test'].includes(profile);
+export const isNativeMemoryProfile=(profile:string)=>['durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test'].includes(profile);
 export interface NativeGoogleConfig {
  account?:string;
  gog?:{binary:string;passwordFile:string;home:string};
@@ -25,13 +26,14 @@ export interface NativeBrowserConfig {
 export interface NativeConfig {
  version: 1; runtime: 'pi-durable'; instanceId: string; principal: 'isaac'|'emma'|'household'|'engineering';
  releaseSha: string; resourceRoot: string; workspaceCwd: string; stateDir: string;
- capabilityProfile: string; account: string; credentialPath: string; settingsPath: string; jobsRole: 'disabled'|'recipient'; idleHours: number;
+ capabilityProfile: string; account: string; credentialPath: string; settingsPath: string; jobsRole: 'disabled'|'recipient'|'coordinator'; idleHours: number;
  transport: { mode:'ordinary'; profile:string; configPath:string; locksPath:string; botId:number; allowedUserId:number }
    | { mode:'broker'; socketPath:string; botId:number; allowedUserId:number };
  memory?: NativeMemoryConfig;
  google?: NativeGoogleConfig;
  cli?: { messagesBaseUrl?: string };
  browser?: NativeBrowserConfig;
+ coordinator?: NativeCoordinatorConfig;
  historyDir: string; inboxPath: string; runtimeMetadataPath: string;
 }
 const record=(value:unknown,label:string):Record<string,unknown>=>{
@@ -62,22 +64,43 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
  if((stat.mode&0o077)!==0 || (process.getuid && stat.uid!==process.getuid())) throw new Error('Configuration must be private and owned by this runtime');
  let raw:unknown; try{raw=JSON.parse(await readFile(path,'utf8'));}catch{throw new Error('Invalid native configuration JSON');}
  const value=record(raw,'Native configuration');
- fields(value,['version','runtime','instanceId','principal','releaseSha','resourceRoot','workspaceCwd','stateDir','capabilityProfile','account','credentialPath','settingsPath','jobsRole','idleHours','transport','memory','google','cli','browser'],'Native configuration');
+ fields(value,['version','runtime','instanceId','principal','releaseSha','resourceRoot','workspaceCwd','stateDir','capabilityProfile','account','credentialPath','settingsPath','jobsRole','idleHours','transport','memory','google','cli','browser','coordinator'],'Native configuration');
  if(value.version!==1||value.runtime!=='pi-durable') throw new Error('Unsupported native runtime or configuration version');
  const idleHours=value.idleHours??0;
  if(typeof idleHours!=='number'||!Number.isFinite(idleHours)||idleHours<0||idleHours>8760)throw new Error('Invalid idleHours');
  const principal=text(value.principal,'principal');
  if(!['isaac','emma','household','engineering'].includes(principal)) throw new Error('Invalid principal');
  const capabilityProfile=text(value.capabilityProfile,'capability profile');
- if(!['durable-foundation-test','durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test'].includes(capabilityProfile)) throw new Error('Unsupported native capability profile');
- if(value.jobsRole!==(capabilityProfile==='durable-jobs-test'?'recipient':'disabled'))throw new Error('jobsRole must match the selected native profile');
- if(['durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test'].includes(capabilityProfile)&&principal!=='isaac')throw new Error('Places profile requires the Isaac principal');
+ if(!['durable-foundation-test','durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test'].includes(capabilityProfile)) throw new Error('Unsupported native capability profile');
+ if(value.jobsRole!==(capabilityProfile==='durable-jobs-coordinator-test'?'coordinator':capabilityProfile==='durable-jobs-test'?'recipient':'disabled'))throw new Error('jobsRole must match the selected native profile');
+ if(['durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test'].includes(capabilityProfile)&&principal!=='isaac')throw new Error('Places profile requires the Isaac principal');
  const resourceRoot=await realpath(absolute(value.resourceRoot,'resourceRoot'));
  const workspaceCwd=await realpath(absolute(value.workspaceCwd,'workspaceCwd'));
  const stateDir=await realpath(absolute(value.stateDir,'stateDir'));
  if(contains(resourceRoot,stateDir)||contains(stateDir,resourceRoot)||contains(stateDir,workspaceCwd)||contains(workspaceCwd,stateDir)) throw new Error('Native state, release and workspace roots must not overlap');
  const stateStat=await lstat(stateDir);
  if(!stateStat.isDirectory() || (stateStat.mode&0o077)!==0 || (process.getuid && stateStat.uid!==process.getuid())) throw new Error('Native state directory must be private and owned by this runtime');
+ let coordinator:NativeCoordinatorConfig|undefined;
+ if(capabilityProfile==='durable-jobs-coordinator-test'){
+  const selected=record(value.coordinator,'coordinator');fields(selected,['stateRoot','coordinatorStateDir','targets','scope'],'coordinator');
+  const requestedRoot=absolute(selected.stateRoot,'coordinator stateRoot'),requestedCoordinator=absolute(selected.coordinatorStateDir,'coordinator state directory');
+  for(const directory of [requestedRoot,requestedCoordinator])if(!(await lstat(directory)).isDirectory())throw new Error('Coordinator paths must be real directories');
+  const stateRoot=await realpath(requestedRoot),coordinatorStateDir=await realpath(requestedCoordinator);
+  if(selected.scope!=='self'&&selected.scope!=='shared-owner')throw new Error('Invalid coordinator scope');
+  if(!Array.isArray(selected.targets)||!selected.targets.length||selected.targets.length>64)throw new Error('Invalid coordinator targets');
+  const targets=selected.targets.map(id=>text(id,'coordinator target',/^[a-z0-9][a-z0-9-]{0,63}$/));
+  if(targets.includes('both-personal')||new Set(targets).size!==targets.length)throw new Error('Invalid coordinator targets');
+  const instanceId=text(value.instanceId,'instanceId',/^[a-z0-9][a-z0-9-]{0,63}$/);
+  if(selected.scope==='self'&&(targets.length!==1||targets[0]!==instanceId))throw new Error('Self coordinator requires its own target only');
+  if(resolve(stateRoot,'instances',instanceId)!==stateDir)throw new Error('Coordinator recipient layout differs from native state directory');
+  if(contains(coordinatorStateDir,join(stateRoot,'instances'))||contains(join(stateRoot,'instances'),coordinatorStateDir)||[resourceRoot,workspaceCwd].some(root=>contains(root,coordinatorStateDir)||contains(coordinatorStateDir,root)))throw new Error('Coordinator state overlaps another runtime root');
+  for(const directory of [stateRoot,join(stateRoot,'instances'),coordinatorStateDir]){
+   const meta=await lstat(directory);
+   if(!meta.isDirectory()||(meta.mode&0o777)!==0o700||(process.getuid&&meta.uid!==process.getuid()))throw new Error('Coordinator directories must be private, owned real directories');
+   if(await realpath(directory)!==resolve(directory))throw new Error('Coordinator directory ancestry must be canonical');
+  }
+  coordinator={stateRoot:resolve(stateRoot),coordinatorStateDir:resolve(coordinatorStateDir),targets,scope:selected.scope};
+ }else if(value.coordinator!==undefined)throw new Error('Coordinator configuration requires the coordinator profile');
  let memory: NativeMemoryConfig | undefined;
  if (isNativeMemoryProfile(capabilityProfile)) {
   const selected = record(value.memory, 'memory');
@@ -105,7 +128,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
   if (memory.semantic === 'on' && !memory.embeddingKeyFile) throw new Error('Enabled semantic search requires explicit provider authorization');
  } else if (value.memory !== undefined) throw new Error('Foundation profile cannot select memory configuration');
  let google:NativeGoogleConfig|undefined;
- if(['durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test'].includes(capabilityProfile)){
+ if(['durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test'].includes(capabilityProfile)){
   const selected=record(value.google,'google');fields(selected,['account','gog','places','calendarTargets'],'google');google={};
   if(selected.account!==undefined)google.account=text(selected.account,'Google account');
   if(google.account&&(google.account.length>254||/[\0\r\n]/.test(google.account)))throw new Error('Invalid Google account');
@@ -127,7 +150,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
  }else if(value.google!==undefined)throw new Error('Google configuration requires the read-integrations profile');
  let cli:NativeConfig['cli'];
  if(value.cli!==undefined){
-  if(!['durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test'].includes(capabilityProfile))throw new Error('CLI configuration requires the CLI-integrations profile');
+  if(!['durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test'].includes(capabilityProfile))throw new Error('CLI configuration requires the CLI-integrations profile');
   const selected=record(value.cli,'cli');fields(selected,['messagesBaseUrl'],'cli');cli={};
   if(selected.messagesBaseUrl!==undefined){
    let url:URL;try{url=new URL(text(selected.messagesBaseUrl,'Messages base URL'));}catch{throw new Error('Invalid Messages base URL');}
@@ -136,7 +159,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
   }
  }
  let browser:NativeBrowserConfig|undefined;
- if(['durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test'].includes(capabilityProfile)){
+ if(['durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test'].includes(capabilityProfile)){
   const selected=record(value.browser,'browser');fields(selected,['agentDir','telegramProfile','credentialScope','configRoot','runtimeDir','dataDir','endpoints'],'browser');
   browser={agentDir:absolute(selected.agentDir,'browser agentDir'),telegramProfile:text(selected.telegramProfile,'browser Telegram profile',/^[a-z0-9-]+$/),credentialScope:text(selected.credentialScope,'credential scope',/^[a-z0-9][a-z0-9-]{0,63}$/),configRoot:absolute(selected.configRoot,'browser configRoot'),runtimeDir:absolute(selected.runtimeDir,'browser runtimeDir'),dataDir:absolute(selected.dataDir,'browser dataDir')};
   if(selected.endpoints!==undefined){
@@ -161,5 +184,5 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
   if(transport.mode==='broker'&&!browser.endpoints)throw new Error('Broker browser requires provisioned private endpoints');
   if(transport.mode==='ordinary'&&(resolve(transport.configPath)!==resolve(browser.agentDir,'telegram.json')||transport.profile!==browser.telegramProfile))throw new Error('Browser and native Telegram profiles differ');
  }
- return {version:1,runtime:'pi-durable',instanceId:text(value.instanceId,'instanceId',/^[a-z0-9][a-z0-9-]{0,63}$/),principal:principal as NativeConfig['principal'],releaseSha:text(value.releaseSha,'releaseSha',/^[a-f0-9]{40}$/),resourceRoot,workspaceCwd,stateDir,capabilityProfile,account:text(value.account,'account',/^[a-zA-Z0-9._-]{1,128}$/),credentialPath:absolute(value.credentialPath,'credentialPath'),settingsPath:absolute(value.settingsPath,'settingsPath'),jobsRole:value.jobsRole as NativeConfig['jobsRole'],idleHours,transport,...(memory ? { memory } : {}),...(google?{google}:{}),...(cli?{cli}:{}),...(browser?{browser}:{}),historyDir:join(stateDir,'durable'),inboxPath:join(stateDir,'inbox.db'),runtimeMetadataPath:join(stateDir,'runtime.json')};
+ return {version:1,runtime:'pi-durable',instanceId:text(value.instanceId,'instanceId',/^[a-z0-9][a-z0-9-]{0,63}$/),principal:principal as NativeConfig['principal'],releaseSha:text(value.releaseSha,'releaseSha',/^[a-f0-9]{40}$/),resourceRoot,workspaceCwd,stateDir,capabilityProfile,account:text(value.account,'account',/^[a-zA-Z0-9._-]{1,128}$/),credentialPath:absolute(value.credentialPath,'credentialPath'),settingsPath:absolute(value.settingsPath,'settingsPath'),jobsRole:value.jobsRole as NativeConfig['jobsRole'],idleHours,transport,...(memory ? { memory } : {}),...(google?{google}:{}),...(cli?{cli}:{}),...(browser?{browser}:{}),...(coordinator?{coordinator}:{}),historyDir:join(stateDir,'durable'),inboxPath:join(stateDir,'inbox.db'),runtimeMetadataPath:join(stateDir,'runtime.json')};
 }

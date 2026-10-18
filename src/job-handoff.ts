@@ -13,6 +13,8 @@ import { dirname, join } from "node:path";
 import { withMutationLock } from "../.pi/lib/mutation-lock.mjs";
 
 export const MAX_HANDOFF_PROMPT_BYTES = 32 * 1024;
+// JSON can encode one prompt byte as six ASCII bytes (for example \u0001).
+export const MAX_HANDOFF_FILE_BYTES = MAX_HANDOFF_PROMPT_BYTES * 6 + 4096;
 
 interface JobHandoffFile {
   version: 1;

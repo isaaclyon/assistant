@@ -11,18 +11,19 @@ import type { NativeTelegramHooks } from '../../src/durable/transport.js';
 export const cleanup: Array<() => Promise<unknown>> = [];
 export async function setup(profile = 'durable-parity-test', existingDirectory?:string) {
   const directory = existingDirectory??await mkdtemp(join(tmpdir(), 'native-parity-app-')); if(!existingDirectory)cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const stateDir = profile==='durable-jobs-test'?join(directory,'instances','test'):join(directory, 'state'), workspaceCwd = join(directory, 'workspace'), vaultRoot = join(directory, 'vault');
+  const stateDir = profile.startsWith('durable-jobs')?join(directory,'instances','test'):join(directory, 'state'), workspaceCwd = join(directory, 'workspace'), vaultRoot = join(directory, 'vault');
   const agentDir = join(directory, 'agent'), configRoot = join(directory, 'browser-config'), runtimeDir = join(directory, 'browser-runtime'), dataDir = join(directory, 'browser-data');
   await Promise.all([stateDir, workspaceCwd, vaultRoot, agentDir, configRoot, runtimeDir, dataDir].map(path => mkdir(path, { recursive: true, mode: 0o700 })));
   await writeFile(join(agentDir, 'telegram.json'), JSON.stringify({profiles:{'synthetic-profile':{botToken:'123:runtime',allowedUserId:42}}}), { mode: 0o600 });
   const config: NativeConfig = {
     version: 1, runtime: 'pi-durable', instanceId: 'test', principal: 'isaac', releaseSha: 'a'.repeat(40), resourceRoot: resolve(import.meta.dirname, '../..'), workspaceCwd, stateDir,
-    capabilityProfile: profile, account: 'test', credentialPath: join(directory, 'unused-auth'), settingsPath: join(directory, 'unused-settings'), jobsRole: profile==='durable-jobs-test'?'recipient':'disabled', idleHours: 0,
+    capabilityProfile: profile, account: 'test', credentialPath: join(directory, 'unused-auth'), settingsPath: join(directory, 'unused-settings'), jobsRole: profile==='durable-jobs-coordinator-test'?'coordinator':profile==='durable-jobs-test'?'recipient':'disabled', idleHours: 0,
     transport: { mode: 'broker', socketPath: join(directory, 'unused.sock'), botId: 123, allowedUserId: 42 }, historyDir: join(stateDir, 'durable'), inboxPath: join(stateDir, 'inbox.db'), runtimeMetadataPath: join(stateDir, 'runtime.json'),
     memory: { vaultRoot, gitAutocommit: false, legacySessionRoots: [], timeZone: 'UTC', recall: 'off', semantic: 'off' },
     google: { account: 'owner@example.com', gog: { binary: join(directory, 'fake-gog'), passwordFile: join(directory, 'password'), home: join(directory, 'gog-home') }, calendarTargets: { account: 'owner@example.com', personal: 'personal-id', thingsToDo: 'things-id' } },
     browser: { agentDir, telegramProfile: 'synthetic-profile', credentialScope: 'synthetic-scope', configRoot, runtimeDir, dataDir, endpoints: { bindAddress: '10.20.30.2', inputOrigin: 'https://assistant.synthetic.ts.net:8446', takeoverOrigin: 'https://assistant.synthetic.ts.net:8447' } },
   } as unknown as NativeConfig;
+  if(profile==='durable-jobs-coordinator-test'){config.coordinator={stateRoot:directory,coordinatorStateDir:join(directory,'coordinator'),scope:'self',targets:['test']};await mkdir(config.coordinator.coordinatorStateDir,{recursive:true,mode:0o700});}
   await mkdir(config.google!.gog!.home, { mode: 0o700, recursive:true }); await writeFile(config.google!.gog!.passwordFile, 'fictional-password', { mode: 0o600 });
   await writeFile(config.google!.gog!.binary, `#!${process.execPath}\nconsole.log('{}');\n`, { mode: 0o700 });
 
@@ -37,7 +38,7 @@ export async function setup(profile = 'durable-parity-test', existingDirectory?:
   const raw = { start: async (h: NativeTelegramHooks) => { hooks = h; return 'ready' as const; }, stop: async () => {}, deliver: async (_t: unknown, text: string) => { finals.push(text); return ++nextId; }, preview:async(_t:unknown,text:string)=>{previews.push(text);}, present: async (_t: unknown, value: { text: string }) => { presented.push(value.text); return ++nextId; }, edit: async () => {}, answerCallback: async () => true };
   let app: Awaited<ReturnType<typeof createNativeApplication>> | undefined; cleanup.push(async () => app?.close());
   const open = async (responses: any[] = [], plainModel = false, extras: Partial<import('../../src/durable/application.js').NativeApplicationOptions> = {}, configureModels?: (models:ReturnType<typeof createModels>)=>void, beforeStart?: (application:Awaited<ReturnType<typeof createNativeApplication>>)=>Promise<void>) => {
-    const faux = fauxProvider({ ...(['durable-provider-test','durable-parity-test','durable-jobs-test'].includes(profile) && !plainModel ? { provider: 'openai-codex', api: 'openai-codex-responses' } : {}), tokensPerSecond: 1e9, tokenSize: { min: 1024, max: 1024 } });
+    const faux = fauxProvider({ ...(['durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test'].includes(profile) && !plainModel ? { provider: 'openai-codex', api: 'openai-codex-responses' } : {}), tokensPerSecond: 1e9, tokenSize: { min: 1024, max: 1024 } });
     faux.setResponses(responses.map(response => (request: any) => { requests.push(structuredClone(request)); return typeof response === 'function' ? response(request) : response; }));
     const models = createModels(); models.setProvider(faux.provider); configureModels?.(models); const model = faux.getModel();
     app = await createNativeApplication(config, { provider: { models, provider: faux.provider, model: { provider: model.provider, modelId: model.id }, thinkingLevel: 'off', close: async () => {} }, transport: raw, onFatal: (error:unknown)=>{fatal.push(error);}, onTransportFailure: () => {}, browserServices: services, ...extras } as any);

@@ -24,10 +24,10 @@ export function createNativeExecutionEnvironment(config:NativeConfig) {
   PI_TELEGRAM_BRIDGE_INSTANCE_ID:config.instanceId,
   PI_TELEGRAM_PRINCIPAL:config.principal,
  });
- if(['durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test'].includes(config.capabilityProfile)&&config.cli?.messagesBaseUrl) {
+ if(['durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test'].includes(config.capabilityProfile)&&config.cli?.messagesBaseUrl) {
   shellEnv.PI_TELEGRAM_MESSAGES_BASE_URL=config.cli.messagesBaseUrl;
  }
- if(['durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test'].includes(config.capabilityProfile)){for(const [key,value] of Object.entries(nativeBrowserEnvironment(config))){if(value!==undefined)shellEnv[key]=value;}}
+ if(['durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test'].includes(config.capabilityProfile)){for(const [key,value] of Object.entries(nativeBrowserEnvironment(config))){if(value!==undefined)shellEnv[key]=value;}}
  const env=new NodeExecutionEnv({cwd:config.workspaceCwd});
  const execute=env.exec.bind(env);
  // SDK shellEnv overlays process.env; inheritEnv:false is required to exclude it.

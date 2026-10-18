@@ -4,10 +4,10 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { defineDoc, type ConversationId, type SubmissionId } from '@earendil-works/pi-durable';
 import { withMutationLock } from '../../.pi/lib/mutation-lock.mjs';
-import { MAX_HANDOFF_PROMPT_BYTES, moveHandoff, writeJsonAtomic } from '../job-handoff.js';
+import { MAX_HANDOFF_FILE_BYTES, MAX_HANDOFF_PROMPT_BYTES, moveHandoff, writeJsonAtomic } from '../job-handoff.js';
 import { Bindings, accept, admit, context, fingerprint, sourceKey, type IngressRuntime, type SourceEnvelope, type Target } from './ingress.js';
 
-const MAX_FILE_BYTES = MAX_HANDOFF_PROMPT_BYTES + 4096;
+const MAX_FILE_BYTES = MAX_HANDOFF_FILE_BYTES;
 const MAX_ATTEMPTS = 5;
 const MAX_SCAN_FILES = 100;
 const KEYS = new Set(['version', 'dispatchId', 'jobId', 'jobType', 'target', 'prompt', 'createdAt', 'attempts']);

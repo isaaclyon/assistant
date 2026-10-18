@@ -123,9 +123,10 @@ state migration or cross-UID handoff.
 
 ## Remaining C5 work
 
-Native coordinator publication/execution tracking, all supported mixed-runtime
-matrix combinations, cron/late one-shot/webhook behavior, heartbeat cursors,
-price-watch tasks, background children and creation-based seven-day child-store
-retirement remain open. Canonical definitions, occurrence identities and legacy
+The subsequent [coordinator slice](pi-durable-c5-coordinator.md) adds cron and late
+one-shot publication, four-way legacy/native admission and restart coverage, and
+coordinator inspection. Heartbeat/webhook execution and their full mixed-runtime
+matrix, price-watch tasks, schedule-editing selection, background children and
+creation-based seven-day child-store retirement remain open. Canonical definitions, occurrence identities and legacy
 uncertainty must survive those later slices. Optional codemode remains separately
 gated. See the [roadmap](pi-durable-migration-plan.md#c5--native-schedules-and-background-agents).
