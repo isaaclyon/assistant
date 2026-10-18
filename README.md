@@ -1,10 +1,11 @@
 # Pi Telegram Bridge Host
 
-> This `feat/durable-c3` branch contains the native chat-and-memory MVP.
-> Start with [the C3 guide](docs/pi-durable-c3-chat-memory.md) for its selected
-> profile, configuration, recovery and pending live checkpoint. Root scripts
-> build and test `src/durable/` and shared memory contracts. C1 remains prototype
-> evidence. The production description below documents the deployed legacy fleet.
+> This `feat/durable-c4-reads` branch extends the accepted native chat-and-memory
+> MVP with general tools, bounded public web and typed Google reads in separate
+> test profiles. Start with the [C4 guide](docs/pi-durable-c4-tools.md) for
+> selection, private configuration, recovery and validation. C4 remains open.
+> Root scripts build and test `src/durable/` and shared domain contracts. C1
+> remains prototype evidence. The description below documents the legacy fleet.
 
 A systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](https://github.com/isaaclyon/pi-telegram/commit/dc84d2038ce80d83406f1ea767df2fd99906cc3c). It runs a manifest-defined household fleet whose bots share one immutable capability release while keeping conversations, workspaces, credentials, and memory views distinct.
 

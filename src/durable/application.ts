@@ -29,7 +29,9 @@ const confirmationKey=(cid:ConversationId,id:string)=>createHash('sha256').updat
 export async function createNativeApplication(config:NativeConfig,options:NativeApplicationOptions) {
  await loadCapabilityProfile(config.resourceRoot,config.capabilityProfile);
  const enabled=isNativeMemoryProfile(config.capabilityProfile);
- const generalEnabled=config.capabilityProfile==='durable-tools-test';
+ const googleEnabled=config.capabilityProfile==='durable-read-integrations-test';
+ const generalEnabled=config.capabilityProfile==='durable-tools-test'||googleEnabled;
+ if(googleEnabled&&!config.google)throw new Error('Google reads require explicit instance configuration');
  if(enabled&&(!config.memory||config.principal==='engineering'))throw new Error('Chat-memory profile requires scoped memory configuration');
  const provider=options.provider??await createNativeProvider({credentialPath:config.credentialPath,settingsPath:config.settingsPath,account:config.account});
  let resources:Awaited<ReturnType<typeof loadNativeRegistry>>|undefined;
@@ -49,6 +51,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  let executionEnvironment:import('@earendil-works/pi-durable/env').ExecutionEnv|undefined;
  let generalFactory:(()=>NativeBundle)|undefined;
  let publicWebFactory:(()=>NativeBundle)|undefined;
+ let googleFactory:(()=>NativeBundle)|undefined;
  let debugEnabled=false;
  const debugCommands=new Set<string>();
  let debugQueued=false;
@@ -82,6 +85,9 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    generalFactory=tools.createGeneralToolsBundle;
    publicWebFactory=(await import('./public-web.js')).createPublicWebBundle;
    executionEnvironment=tools.createNativeExecutionEnvironment(config);
+  }
+  if(googleEnabled){
+   const google=await import('./google-read.js');googleFactory=()=>google.createGoogleReadBundle(config);
   }
   if(enabled){
    // No canonical domain code imports before every selected path is validated above.
@@ -149,6 +155,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    if(!enabled)throw new Error('Native domain bundles are unavailable for this profile');
    if(generalEnabled&&name==='general-tools')return generalFactory!();
    if(generalEnabled&&name==='public-web')return publicWebFactory!();
+   if(googleEnabled&&name==='google-reads')return googleFactory!();
    if(name==='memory')return {name,version:1,tools:[memoryTool!],close:async()=>{}};
    if(name==='search')return searchFactory!();
    if(name==='core-memory')return contextFactory!();
@@ -224,7 +231,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   const raw=options.transport??createNativeTelegramTransport(config.transport.mode==='ordinary'?{...config.transport,cwd:config.workspaceCwd}:{mode:'restricted',socketPath:config.transport.socketPath,botId:config.transport.botId,allowedUserId:config.transport.allowedUserId});
   transport=bridgeTelegram(config,raw,options.onTransportFailure,{...(enabled?{ui}:{}),commands:enabled?['menu','model','thinking','new','abort','stop','compact','reload','restart','skills','debug']:['new','abort','stop','compact']});
   const bridge=transport;
-  const signature=createHash('sha256').update(JSON.stringify({registry:resources.signature,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,memory:config.memory??null})).digest('hex');
+  const signature=createHash('sha256').update(JSON.stringify({registry:resources.signature,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,memory:config.memory??null,...(googleEnabled?{google:config.google}:{} )})).digest('hex');
   // The reader delegates to the active registry after a safe idle reload.
   const registry={snapshot:()=>resources!.registry.snapshot(),subscribe:(listener:()=>void)=>{registryListeners.add(listener);return()=>{registryListeners.delete(listener);};}};
   host=await DurableHost.create({stateDir:config.historyDir,inboxPath:config.inboxPath,models:provider.models,registry,
