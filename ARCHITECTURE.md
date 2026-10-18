@@ -29,7 +29,13 @@ YNAB and editable Messages-link skills through the replay-unsafe shell. Helpers
 resolve from the release while relative work stays in the workspace. An optional
 private Messages origin enters only this profile's shell environment and recovery
 signature; YNAB authentication remains under the runtime's OS identity. Unknown
-financial outcomes require read-only inspection before another attempt. Full C4
+financial outcomes require read-only inspection before another attempt.
+`durable-places-test` adds the native private ranking application for Isaac.
+The Harness owns drafts, prompt bindings and one-use, message/epoch-bound
+callback claims; the existing private places SQLite store owns ranking and
+comparison progress. A claimed write with an unknown result never repeats its
+domain effect; recovery may repeat read commands. Direct Telegram menus and model handoffs use the same application
+service. Destructive places actions await the guarded-mutation slice. Full C4
 integration and provider parity remain pending.
 
 The sections below describe the deployed legacy architecture. Its package,
@@ -450,6 +456,6 @@ Inbound turns are crash-durable through the bridge inbox, but outbound Telegram 
 
 The [pi-durable migration plan](docs/pi-durable-migration-plan.md) records the
 approved target architecture and C0–C7 checkpoints. C0–C3 passed. C4 general
-file/shell/public-web tools, Google reads and CLI-backed YNAB/Messages skills are
-implemented on isolated native branches; remaining C4 integrations are pending. The sections above the migration note describe legacy production,
+file/shell/public-web tools, Google reads, CLI-backed YNAB/Messages skills and
+direct private places flows are implemented on isolated native branches; remaining C4 integrations are pending. The sections above the migration note describe legacy production,
 except for the explicit native branch overview. Production activation remains C7.

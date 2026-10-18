@@ -11,7 +11,7 @@ export interface NativeMemoryConfig {
  judgeKeyFile?: string;
  embeddingKeyFile?: string;
 }
-export const isNativeMemoryProfile=(profile:string)=>['durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test'].includes(profile);
+export const isNativeMemoryProfile=(profile:string)=>['durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test','durable-places-test'].includes(profile);
 export interface NativeGoogleConfig {
  account?:string;
  gog?:{binary:string;passwordFile:string;home:string};
@@ -65,7 +65,8 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
  const principal=text(value.principal,'principal');
  if(!['isaac','emma','household','engineering'].includes(principal)) throw new Error('Invalid principal');
  const capabilityProfile=text(value.capabilityProfile,'capability profile');
- if(!['durable-foundation-test','durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test'].includes(capabilityProfile)) throw new Error('Unsupported native capability profile');
+ if(!['durable-foundation-test','durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test','durable-places-test'].includes(capabilityProfile)) throw new Error('Unsupported native capability profile');
+ if(capabilityProfile==='durable-places-test'&&principal!=='isaac')throw new Error('Places profile requires the Isaac principal');
  const resourceRoot=await realpath(absolute(value.resourceRoot,'resourceRoot'));
  const workspaceCwd=await realpath(absolute(value.workspaceCwd,'workspaceCwd'));
  const stateDir=await realpath(absolute(value.stateDir,'stateDir'));
@@ -99,7 +100,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
   if (memory.semantic === 'on' && !memory.embeddingKeyFile) throw new Error('Enabled semantic search requires explicit provider authorization');
  } else if (value.memory !== undefined) throw new Error('Foundation profile cannot select memory configuration');
  let google:NativeGoogleConfig|undefined;
- if(['durable-read-integrations-test','durable-cli-integrations-test'].includes(capabilityProfile)){
+ if(['durable-read-integrations-test','durable-cli-integrations-test','durable-places-test'].includes(capabilityProfile)){
   const selected=record(value.google,'google');fields(selected,['account','gog','places','calendarTargets'],'google');google={};
   if(selected.account!==undefined)google.account=text(selected.account,'Google account');
   if(google.account&&(google.account.length>254||/[\0\r\n]/.test(google.account)))throw new Error('Invalid Google account');
@@ -121,7 +122,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
  }else if(value.google!==undefined)throw new Error('Google configuration requires the read-integrations profile');
  let cli:NativeConfig['cli'];
  if(value.cli!==undefined){
-  if(capabilityProfile!=='durable-cli-integrations-test')throw new Error('CLI configuration requires the CLI-integrations profile');
+  if(!['durable-cli-integrations-test','durable-places-test'].includes(capabilityProfile))throw new Error('CLI configuration requires the CLI-integrations profile');
   const selected=record(value.cli,'cli');fields(selected,['messagesBaseUrl'],'cli');cli={};
   if(selected.messagesBaseUrl!==undefined){
    let url:URL;try{url=new URL(text(selected.messagesBaseUrl,'Messages base URL'));}catch{throw new Error('Invalid Messages base URL');}

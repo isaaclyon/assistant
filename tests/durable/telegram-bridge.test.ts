@@ -115,3 +115,37 @@ test('presenter and stream only serve the instance private target',async()=>{
  h.transport.stream.update({chatId:43},'t','hidden');await h.transport.stream.finish({chatId:43},'t');
  expect(h.raw.preview).not.toHaveBeenCalled();
 });
+
+test('places callbacks carry authenticated message identity through a dedicated bounded grammar',async()=>{
+ const places=vi.fn(async()=>({toast:'Saved'}));const h=harness({places});const hooks=await h.start();
+ const key='a'.repeat(32);await hooks.accept(callbackUpdate(`pp:${key}`));
+ expect(places).toHaveBeenCalledWith({commandId:'telegram-callback:123:20',principal:'isaac',actorId:42,target:{chatId:42},messageId:300,key});
+ for(const data of ['pp:unsafe','pp:'+key+':extra','pp:'+key.toUpperCase()])await hooks.accept(callbackUpdate(data));
+ await hooks.accept(callbackUpdate(`pp:${key}`,{from:{id:99}}));await hooks.accept(callbackUpdate(`pp:${key}`,{message:{message_id:300,chat:{id:43,type:'private'}}}));
+ expect(places).toHaveBeenCalledTimes(1);
+});
+
+test('places exact reply capture consumes handled input and never admits it to the model',async()=>{
+ const placesInput=vi.fn(async()=>true);const h=harness({placesInput});await h.start();const admitted=vi.fn(async()=>{});
+ await h.transport.start(admitted,h.control);const hooks=h.raw.start.mock.calls.at(-1)![0];
+ const reply={...update,message:{...update.message,text:'Synthetic name',reply_to_message:{message_id:200}}};await hooks.accept(reply);
+ expect(placesInput).toHaveBeenCalledWith({commandId:'telegram-reply:123:7',principal:'isaac',actorId:42,target:{chatId:42},messageId:99,replyToMessageId:200,text:'Synthetic name'});expect(admitted).not.toHaveBeenCalled();
+ placesInput.mockResolvedValue(false);await hooks.accept({...reply,update_id:8});expect(admitted).toHaveBeenCalledTimes(1);
+ placesInput.mockRejectedValue(new Error('durable capture failed'));await expect(hooks.accept({...reply,update_id:9})).rejects.toThrow('durable capture failed');expect(admitted).toHaveBeenCalledTimes(1);
+ await hooks.accept({...reply,update_id:10,message:{...reply.message,from:{id:99}}});expect(placesInput).toHaveBeenCalledTimes(3);
+});
+
+test('places command visibility follows the selected profile',async()=>{
+ const h=harness({}, {commands:['menu','new']});const hooks=await h.start();await hooks.accept({...update,message:{...update.message,text:'/place_rankings'}});
+ expect(h.controller.command).not.toHaveBeenCalled();expect(h.raw.deliver).toHaveBeenCalledWith({chatId:42},expect.stringContaining('unavailable'));
+});
+
+test('only exact private bot quotes carry a prompt reference to places capture',async()=>{
+ const placesInput=vi.fn(async(_request:unknown)=>true);const h=harness({placesInput});const hooks=await h.start();
+ const quoted={message_id:50,from:{id:123,is_bot:true},chat:{id:42,type:'private'},text:'A synthetic prompt'};
+ const accept=(reply:unknown)=>hooks.accept({...update,message:{...update.message,reply_to_message:reply}});
+ await accept(quoted);expect(placesInput.mock.calls.at(-1)?.[0]).toMatchObject({trustedPromptText:quoted.text});
+ for(const reply of [{...quoted,from:{id:42,is_bot:false}},{...quoted,from:{id:124,is_bot:true}},{...quoted,chat:{id:43,type:'private'}},{...quoted,chat:{id:42,type:'group'}}]){
+  await accept(reply);expect(placesInput.mock.calls.at(-1)?.[0]).not.toHaveProperty('trustedPromptText');
+ }
+});

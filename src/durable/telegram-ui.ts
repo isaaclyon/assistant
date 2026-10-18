@@ -14,7 +14,7 @@ const KEY = /^[A-Za-z0-9_-]{8,56}$/;
 
 /** Slash commands. Controls go through durable host controls; the rest through the UI controller. */
 export const CONTROL_COMMANDS = ['new', 'abort', 'stop', 'compact'] as const;
-export const UI_COMMANDS = ['menu', 'model', 'thinking', 'skills', 'debug', 'reload', 'restart'] as const;
+export const UI_COMMANDS = ['menu', 'model', 'thinking', 'skills', 'debug', 'reload', 'restart', 'place_rankings'] as const;
 export type ControlCommand = (typeof CONTROL_COMMANDS)[number];
 export type UiCommandName = (typeof UI_COMMANDS)[number];
 export type ParsedText =
@@ -39,25 +39,28 @@ export function parseCommandText(text: string, enabled?: ReadonlySet<string>): P
 }
 
 /** Callback data grammar (all <= 64 bytes):
- *  m:<menu|model|thinking|skills> · mp:<page> · mc:<model id> · tl:<level>
- *  k:<new|compact|abort|stop> (durable controls) · cf:<a|d>:<confirmation key> */
+ *  m:<menu|model|thinking|skills|place_rankings> · mp:<page> · mc:<model id> · tl:<level>
+ *  k:<new|compact|abort|stop> (durable controls) · cf:<a|d>:<confirmation key>
+ *  pp:<32 lowercase hex opaque places key> */
 export type CallbackAction =
-  | { type: 'menu'; name: 'menu' | 'model' | 'thinking' | 'skills' }
+  | { type: 'menu'; name: 'menu' | 'model' | 'thinking' | 'skills' | 'place_rankings' }
   | { type: 'modelPage'; page: number }
   | { type: 'model'; id: string }
   | { type: 'thinking'; level: ThinkingLevel }
   | { type: 'control'; name: ControlCommand }
+  | { type: 'places'; key: string }
   | { type: 'confirmation'; key: string; choice: 'approve' | 'deny' };
 export function parseCallbackData(data: unknown): CallbackAction | undefined {
   if (typeof data !== 'string' || bytes(data) > 64) return undefined;
   const [kind, ...rest] = data.split(':');
   const arg = rest.join(':');
   switch (kind) {
-    case 'm': return (['menu', 'model', 'thinking', 'skills'] as const).includes(arg as 'menu') ? { type: 'menu', name: arg as 'menu' } : undefined;
+    case 'm': return (['menu', 'model', 'thinking', 'skills', 'place_rankings'] as const).includes(arg as 'menu') ? { type: 'menu', name: arg as 'menu' } : undefined;
     case 'mp': return /^\d{1,3}$/.test(arg) ? { type: 'modelPage', page: Number(arg) } : undefined;
     case 'mc': return ID.test(arg) ? { type: 'model', id: arg } : undefined;
     case 'tl': return (THINKING_LEVELS as readonly string[]).includes(arg) ? { type: 'thinking', level: arg as ThinkingLevel } : undefined;
     case 'k': return (CONTROL_COMMANDS as readonly string[]).includes(arg) ? { type: 'control', name: arg as ControlCommand } : undefined;
+    case 'pp': return /^[a-f0-9]{32}$/.test(arg) ? { type: 'places', key: arg } : undefined;
     case 'cf': {
       const [choice, key, ...extra] = rest;
       return extra.length === 0 && (choice === 'a' || choice === 'd') && key !== undefined && KEY.test(key) ? { type: 'confirmation', key, choice: choice === 'a' ? 'approve' : 'deny' } : undefined;
@@ -106,10 +109,11 @@ export function assertPresentation(value: Presentation): Presentation {
 }
 
 // ---- Menus -------------------------------------------------------------
-export type MenuState = { model?: string; thinking?: string; busy?: boolean };
+export type MenuState = { model?: string; thinking?: string; busy?: boolean; places?: boolean };
 export const statusMenu = (state: MenuState): Presentation => ({
   text: clean(['Assistant', `Model: ${clean(state.model ?? 'unknown', 80)}`, `Thinking: ${clean(state.thinking ?? 'unknown', 20)}`, state.busy ? 'Status: working' : 'Status: idle'].join('\n')),
   buttons: [
+    ...(state.places ? [[{ text: 'Place Rankings', callback: 'm:place_rankings' }]] : []),
     [{ text: 'Model', callback: 'm:model' }, { text: 'Thinking', callback: 'm:thinking' }],
     [{ text: 'New', callback: 'k:new' }, { text: 'Compact', callback: 'k:compact' }],
     [{ text: 'Skills', callback: 'm:skills' }, ...(state.busy ? [{ text: 'Abort', callback: 'k:abort' }] : [])],

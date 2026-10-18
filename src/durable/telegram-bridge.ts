@@ -32,6 +32,9 @@ export interface NativeUiController {
   command(request:UiCommandRequest):Promise<UiResult>;
   /** Resolve `key` to the persisted memory approval and decide with principal/target/messageId taken from this request, never from the key. */
   confirmation(request:UiConfirmationRequest):Promise<UiResult>;
+  places?(request:UiOrigin&{messageId:number;key:string}):Promise<UiResult>;
+  /** Exact private reply capture; true consumes the input before model admission. */
+  placesInput?(request:UiOrigin&{messageId:number;replyToMessageId:number;text:string;trustedPromptText?:string}):Promise<boolean>;
 }
 export type TrustedCallback={id:string;commandId:string;actorId:number;principal:string;target:Target;messageId:number;data:string;action:CallbackAction|undefined};
 export type NormalizedUpdate =
@@ -159,6 +162,12 @@ export function bridgeTelegram(config:NativeConfig,raw:RawTransport,onTransportF
     if(result)await showMenu(origin);   // Selection returns to the status menu.
     return;
    }
+   case 'places':{
+    const handler=options.ui?.places;if(!handler){await answer(item.id,'Unavailable');return;}
+    try{const result=await handler({...origin,messageId:item.messageId,key:action.key});await answer(item.id,result.toast);}
+    catch(error){if(error instanceof UiRejectedError){await answer(item.id,error.message);return;}throw error;}
+    return;
+   }
    case 'confirmation':{
     const ui=options.ui;if(!ui){await answer(item.id,'Unavailable');return;}
     let result:UiResult;
@@ -176,7 +185,17 @@ export function bridgeTelegram(config:NativeConfig,raw:RawTransport,onTransportF
    await raw.start({accept:async(update)=>{
     try{
      const item=normalizeTelegramUpdate(config,update,commands);
-     if(item.type==='input')await onEnvelope(item.envelope);
+     if(item.type==='input'){
+      const message=object(update.message),reply=object(message?.reply_to_message);
+      const handler=options.ui?.placesInput;
+      if(handler&&integer(reply?.message_id)&&reply!.message_id>0){
+       const author=object(reply?.from),chat=object(reply?.chat);
+        const trustedPromptText=author?.id===config.transport.botId&&author?.is_bot===true&&chat?.type==='private'&&chat?.id===home.chatId&&typeof reply?.text==='string'?reply.text:undefined;
+        const consumed=await handler({commandId:`telegram-reply:${config.transport.botId}:${update.update_id}`,principal:config.principal,actorId:config.transport.allowedUserId,target:home,messageId:item.envelope.messageIds[0]!,replyToMessageId:reply!.message_id,text:item.envelope.content,...(trustedPromptText===undefined?{}:{trustedPromptText})});
+       if(consumed)return;
+      }
+      await onEnvelope(item.envelope);
+     }
      else if(item.type==='control')await runControl(item.control,{});
      else if(item.type==='ui')await runUi(update.update_id,{...item.origin,name:item.name},undefined);
      else if(item.type==='rejected')await reject(item.reason);

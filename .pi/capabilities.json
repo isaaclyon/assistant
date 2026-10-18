@@ -3,6 +3,11 @@
   "resources": {
     "extensions": [
       {
+        "id": "native-places",
+        "path": ".pi/native/places.mjs",
+        "enabled": true
+      },
+      {
         "id": "native-google-reads",
         "path": ".pi/native/google-reads.mjs",
         "enabled": true
@@ -212,6 +217,11 @@
     ],
     "instructions": [
       {
+        "id": "telegram-places-test",
+        "path": ".pi/telegram/places-test.md",
+        "enabled": true
+      },
+      {
         "id": "telegram-cli-integrations-test",
         "path": ".pi/telegram/cli-integrations-test.md",
         "enabled": true
@@ -244,6 +254,30 @@
     ]
   },
   "profiles": [
+    {
+      "id": "durable-places-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-reads",
+        "native-places"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-read-tools",
+        "check-weather",
+        "manage-ynab",
+        "message-link"
+      ],
+      "instructions": "telegram-places-test"
+    },
     {
       "id": "durable-cli-integrations-test",
       "extensions": [

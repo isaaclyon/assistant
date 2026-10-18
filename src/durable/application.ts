@@ -29,7 +29,9 @@ const confirmationKey=(cid:ConversationId,id:string)=>createHash('sha256').updat
 export async function createNativeApplication(config:NativeConfig,options:NativeApplicationOptions) {
  await loadCapabilityProfile(config.resourceRoot,config.capabilityProfile);
  const enabled=isNativeMemoryProfile(config.capabilityProfile);
- const cliEnabled=config.capabilityProfile==='durable-cli-integrations-test';
+ const placesEnabled=config.capabilityProfile==='durable-places-test';
+ if(placesEnabled&&config.principal!=='isaac')throw new Error('Places profile requires the Isaac principal');
+ const cliEnabled=config.capabilityProfile==='durable-cli-integrations-test'||placesEnabled;
  const googleEnabled=config.capabilityProfile==='durable-read-integrations-test'||cliEnabled;
  const generalEnabled=config.capabilityProfile==='durable-tools-test'||googleEnabled;
  if(googleEnabled&&!config.google)throw new Error('Google reads require explicit instance configuration');
@@ -52,6 +54,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  let executionEnvironment:import('@earendil-works/pi-durable/env').ExecutionEnv|undefined;
  let generalFactory:(()=>NativeBundle)|undefined;
  let publicWebFactory:(()=>NativeBundle)|undefined;
+ let places:ReturnType<typeof import('./places.js')['createNativePlaces']>|undefined;
  let googleFactory:(()=>NativeBundle)|undefined;
  let debugEnabled=false;
  const debugCommands=new Set<string>();
@@ -61,7 +64,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  const close=()=>closing??=(async()=>{
   debugEnabled=false;
   const failures:unknown[]=[];
-  for(const cleanup of [()=>visible?.close(),()=>host?.close(),()=>executionEnvironment?.cleanup(context),()=>resources?.close(),()=>search?.close(),()=>provider.close()]){
+  for(const cleanup of [()=>visible?.close(),()=>host?.close(),()=>places?.close(),()=>executionEnvironment?.cleanup(context),()=>resources?.close(),()=>search?.close(),()=>provider.close()]){
    try{await cleanup();}catch(error){failures.push(error);}
   }
   if(failures.length)throw new AggregateError(failures,'Native application cleanup failed');
@@ -89,6 +92,9 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   }
   if(googleEnabled){
    const google=await import('./google-read.js');googleFactory=()=>google.createGoogleReadBundle(config);
+  }
+  if(placesEnabled){
+   const module=await import('./places.js');places=module.createNativePlaces({config,host:requireHost,present:async(destination,presentation)=>{if(!transport)throw new Error('Telegram presenter unavailable');return transport.presenter.present(destination,presentation);}});
   }
   if(enabled){
    // No canonical domain code imports before every selected path is validated above.
@@ -157,6 +163,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    if(generalEnabled&&name==='general-tools')return generalFactory!();
    if(generalEnabled&&name==='public-web')return publicWebFactory!();
    if(googleEnabled&&name==='google-reads')return googleFactory!();
+   if(placesEnabled&&name==='places')return {...places!.bundle(),close:async()=>{}}; // Application owns the shared domain lifetime across reloads.
    if(name==='memory')return {name,version:1,tools:[memoryTool!],close:async()=>{}};
    if(name==='search')return searchFactory!();
    if(name==='core-memory')return contextFactory!();
@@ -172,6 +179,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   const selectedSignature=resources.signature;
   const controls=createNativeControls({config,host:requireHost,models:provider.models,requestRestart:()=>options.requestRestart?.(),
    invalidate:async()=>{
+    await places?.invalidate();
     const current=requireHost();
     await current.runtime.root.commit(async tx=>{const state=await tx.doc(Bindings,current.runtime.root.id);for(const cid of Object.values(state.epochs)){
      if(memoryModule)await memoryModule.invalidateMemoryState(tx,operations,cid,String(state.epoch),'reload');
@@ -194,7 +202,8 @@ export async function createNativeApplication(config:NativeConfig,options:Native
     try{
      const status=await controls.status();
      switch(request.name){
-      case 'menu':return {view:{kind:'menu',state:{model:status.modelLabel,thinking:status.thinking,busy:status.busy}}};
+      case 'menu':return {view:{kind:'menu',state:{model:status.modelLabel,thinking:status.thinking,busy:status.busy,...(placesEnabled?{places:true}:{})}}};
+      case 'place_rankings':if(!places)throw new UiRejectedError('Places is unavailable.');return places.command(request);
       case 'model':return {view:{kind:'models',choices:controls.models(),current:status.model,page:Number(request.arg??0)}};
       case 'thinking':return {view:{kind:'thinking',levels:await controls.thinkingLevels(),current:status.thinking}};
       case 'selectModel':await controls.setModel(request.commandId,request.arg);return {toast:'Model selected'};
@@ -208,6 +217,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
      }
     }catch(error){if(error instanceof HostControlRejectedError)throw new UiRejectedError(error.message);throw error;}
    },
+   ...(places?{places:(request)=>places!.callback(request),placesInput:(request)=>places!.input(request)}: {}),
    confirmation:async request=>{
     if(!memoryModule)throw new UiRejectedError('This action is unavailable.');
     const current=requireHost();
@@ -230,7 +240,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    },
   };
   const raw=options.transport??createNativeTelegramTransport(config.transport.mode==='ordinary'?{...config.transport,cwd:config.workspaceCwd}:{mode:'restricted',socketPath:config.transport.socketPath,botId:config.transport.botId,allowedUserId:config.transport.allowedUserId});
-  transport=bridgeTelegram(config,raw,options.onTransportFailure,{...(enabled?{ui}:{}),commands:enabled?['menu','model','thinking','new','abort','stop','compact','reload','restart','skills','debug']:['new','abort','stop','compact']});
+  transport=bridgeTelegram(config,raw,options.onTransportFailure,{...(enabled?{ui}:{}),commands:enabled?['menu','model','thinking','new','abort','stop','compact','reload','restart','skills','debug',...(placesEnabled?['place_rankings']:[])]:['new','abort','stop','compact']});
   const bridge=transport;
   const signature=createHash('sha256').update(JSON.stringify({registry:resources.signature,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,memory:config.memory??null,...(googleEnabled?{google:config.google}:{} ),...(cliEnabled?{cli:config.cli??{}}:{})})).digest('hex');
   // The reader delegates to the active registry after a safe idle reload.
@@ -242,7 +252,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    onEpochChange:async(tx,previous,nextEpoch)=>{for(const id of previous){if(memoryModule)await memoryModule.invalidateMemoryState(tx,operations,id,String(nextEpoch),'new');else await operations.invalidate(tx,id,String(nextEpoch),'new');}},
    onConversation:async cid=>{await visible?.attach(cid);},
    ...(config.idleHours>0?{idleMs:config.idleHours*3_600_000}:{}),
-   transport:{start:bridge.start,stop:bridge.stop,sendFinal:async request=>{await visible?.finish();return bridge.sendFinal(request);}},
+   transport:{start:bridge.start,stop:async()=>{await bridge.stop();await places?.close();},sendFinal:async request=>{await visible?.finish();return bridge.sendFinal(request);}},
    policy:envelope=>assertNativeEnvelope(config,envelope),controlPolicy:control=>assertNativeControl(config,control),onFatal:options.onFatal,
   });
   const runtime=host;
