@@ -115,15 +115,16 @@ review found no material issue in fresh-ledger provenance or read-only inspectio
 
 These are synthetic local application/provider/transport and filesystem tests.
 They do not establish live provider or Telegram delivery, Linux service readiness,
-real state migration or cross-UID handoff. The complete matrix for heartbeat and
-webhook work remains pending with those implementations.
+real state migration or cross-UID handoff. The subsequent schedule slice records
+the heartbeat and webhook mixed-runtime matrix.
 
 ## Remaining C5 work
 
 The subsequent [schedule slice](pi-durable-c5-schedules.md) adds heartbeat/checker
 rules and cursors, webhook ingestion, temporary price-watch tasks and
 schedule-editing selection in a separate profile. It also adds the heartbeat and
-webhook mixed-runtime matrix. Background children and creation-based seven-day
-child-store retirement remain open. Keep canonical
-definitions, terminal occurrence identities and historical uncertainty through
-those slices. See the [roadmap](pi-durable-migration-plan.md#c5--native-schedules-and-background-agents).
+webhook mixed-runtime matrix. The [child slice](pi-durable-c5-children.md) adds
+native background orchestration and creation-based seven-day retirement of
+process-owned child stores; its validation gate remains open. Canonical
+definitions, terminal occurrence identities and historical uncertainty retain
+their existing owners. See the [roadmap](pi-durable-migration-plan.md#c5--native-schedules-and-background-agents).

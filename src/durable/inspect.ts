@@ -13,6 +13,6 @@ try {
  } else {
   const recovery=await application.host.inspect();
   // Deliberately omit prompts, tool inputs, model responses, credentials and targets.
-  console.log(JSON.stringify({runtime:'pi-durable',instanceId:config.instanceId,pendingInbox:recovery.pendingInbox,jobs:await application.inspectJobs(),uncertainDeliveries:recovery.uncertain,taskStates:recovery.inspection.tasks.map(task=>({id:task.record.id,kind:task.record.kind,state:task.state.kind}))},null,2));
+  console.log(JSON.stringify({runtime:'pi-durable',instanceId:config.instanceId,pendingInbox:recovery.pendingInbox,jobs:await application.inspectJobs(),children:await application.inspectChildren(),uncertainDeliveries:recovery.uncertain,taskStates:recovery.inspection.tasks.map(task=>({id:task.record.id,kind:task.record.kind,state:task.state.kind}))},null,2));
  }
 } finally {await application.close();}

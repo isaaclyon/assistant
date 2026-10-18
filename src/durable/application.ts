@@ -18,6 +18,7 @@ import { isNativeMemoryProfile, type NativeConfig } from './config.js';
 
 export interface NativeApplicationOptions {
  browserServices?:import('./browser.js').NativeBrowserServices;
+ childSupervisor?:ReturnType<typeof import('./child-supervisor.js')['createChildSupervisor']>;
  onFatal(error:unknown):void;
  onTransportFailure(error:unknown):void;
  requestRestart?():void;
@@ -36,11 +37,12 @@ const confirmationKey=(cid:ConversationId,id:string)=>createHash('sha256').updat
 export async function createNativeApplication(config:NativeConfig,options:NativeApplicationOptions) {
  await loadCapabilityProfile(config.resourceRoot,config.capabilityProfile);
  const enabled=isNativeMemoryProfile(config.capabilityProfile);
- const coordinatorEnabled=['durable-jobs-coordinator-test','durable-jobs-schedules-test'].includes(config.capabilityProfile);
+ const childrenEnabled=config.capabilityProfile==='durable-jobs-children-test';
+ const coordinatorEnabled=['durable-jobs-coordinator-test','durable-jobs-schedules-test','durable-jobs-children-test'].includes(config.capabilityProfile);
  const jobsEnabled=config.capabilityProfile==='durable-jobs-test'||coordinatorEnabled;
  if(config.jobsRole!==(coordinatorEnabled?'coordinator':jobsEnabled?'recipient':'disabled'))throw new Error('jobsRole must match the selected native profile');
  if(coordinatorEnabled!==!!config.coordinator)throw new Error('Coordinator configuration must match the selected native profile');
- if((config.capabilityProfile==='durable-jobs-schedules-test')!==!!config.coordinator?.schedules)throw new Error('Schedule configuration must match the selected native profile');
+ if((['durable-jobs-schedules-test','durable-jobs-children-test'].includes(config.capabilityProfile))!==!!config.coordinator?.schedules)throw new Error('Schedule configuration must match the selected native profile');
  const parityEnabled=config.capabilityProfile==='durable-parity-test'||jobsEnabled;
  const providerEnabled=config.capabilityProfile==='durable-provider-test'||parityEnabled;
  const browserEnabled=config.capabilityProfile==='durable-browser-test'||providerEnabled;
@@ -69,6 +71,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  const registryListeners=new Set<()=>void>();
  let executionEnvironment:import('@earendil-works/pi-durable/env').ExecutionEnv|undefined;
  let coordinator:Awaited<ReturnType<typeof import('./coordinator.js')['startNativeJobsCoordinator']>>|undefined;
+ let children:ReturnType<typeof import('./children.js')['createNativeChildren']>|undefined;
  let previousJobDiagnostic='';
  let reconcileJobs:((runtime:import('./ingress.js').IngressRuntime)=>Promise<void>)|undefined;
  let webRunFactory:(()=>NativeBundle)|undefined;
@@ -88,7 +91,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  const close=()=>closing??=(async()=>{
   debugEnabled=false;
   const failures:unknown[]=[];
-  for(const cleanup of [()=>coordinator?.stop(),()=>visible?.close(),()=>browser?.close(),()=>host?.close(),()=>places?.close(),()=>calendar?.close(),()=>executionEnvironment?.cleanup(context),()=>resources?.close(),()=>search?.close(),()=>provider.close()]){
+  for(const cleanup of [()=>coordinator?.stop(),()=>visible?.close(),()=>browser?.close(),()=>host?.close(),()=>children?.close(),()=>places?.close(),()=>calendar?.close(),()=>executionEnvironment?.cleanup(context),()=>resources?.close(),()=>search?.close(),()=>provider.close()]){
    try{await cleanup();}catch(error){failures.push(error);}
   }
   if(!failures.length)unbindBrowser?.();
@@ -109,6 +112,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   });
  };
  try {
+  if(childrenEnabled){const {createNativeChildren}=await import('./children.js');children=createNativeChildren({config,host:requireHost,provider,...(options.childSupervisor?{supervisor:options.childSupervisor}:{})});}
   if(jobsEnabled){
    const {reconcileJobHandoffs}=await import('./job-admission.js');
    reconcileJobs=async runtime=>{
@@ -210,6 +214,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   }
   const bundle=(name:string):NativeBundle=>{
    if(!enabled)throw new Error('Native domain bundles are unavailable for this profile');
+   if(childrenEnabled&&name==='background-children')return children!.bundle();
    if(browserEnabled&&name==='private-browser')return browser!.bundle();
    if(generalEnabled&&name==='general-tools')return generalFactory!();
    if(parityEnabled&&name==='web-run')return webRunFactory!();
@@ -305,7 +310,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   const raw=options.transport??createNativeTelegramTransport(config.transport.mode==='ordinary'?{...config.transport,cwd:config.workspaceCwd}:{mode:'restricted',socketPath:config.transport.socketPath,botId:config.transport.botId,allowedUserId:config.transport.allowedUserId});
   transport=bridgeTelegram(config,raw,options.onTransportFailure,{...(enabled?{ui}:{}),commands:enabled?['menu','model','thinking','new','abort','stop','compact','reload','restart','skills','debug',...(providerEnabled?['fast','usage']:[]),...(placesEnabled?['place_rankings']:[])]:['new','abort','stop','compact']});
   const bridge=transport;
-  const signature=createHash('sha256').update(JSON.stringify({registry:resources.signature,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,memory:config.memory??null,...(jobsEnabled?{jobs:{role:config.jobsRole,stateDir:config.stateDir,...(coordinatorEnabled?{coordinator:config.coordinator}:{})}}:{}),...(googleEnabled?{google:config.google}:{} ),...(cliEnabled?{cli:config.cli??{}}:{}),...(browserEnabled?{browser:config.browser}:{})})).digest('hex');
+  const signature=createHash('sha256').update(JSON.stringify({registry:resources.signature,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,memory:config.memory??null,...(jobsEnabled?{jobs:{role:config.jobsRole,stateDir:config.stateDir,...(coordinatorEnabled?{coordinator:config.coordinator}:{})}}:{}),...(googleEnabled?{google:config.google}:{} ),...(cliEnabled?{cli:config.cli??{}}:{}),...(browserEnabled?{browser:config.browser}:{}),...(childrenEnabled?{children:{workspaceCwd:config.workspaceCwd,resourceRoot:config.resourceRoot,account:config.account,credentialPath:config.credentialPath,settingsPath:config.settingsPath}}:{})})).digest('hex');
   // The reader delegates to the active registry after a safe idle reload.
   const registry={snapshot:()=>resources!.registry.snapshot(),subscribe:(listener:()=>void)=>{registryListeners.add(listener);return()=>{registryListeners.delete(listener);};}};
   host=await DurableHost.create({stateDir:config.historyDir,inboxPath:config.inboxPath,models:provider.models,registry,
@@ -315,7 +320,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    onEpochChange:async(tx,previous,nextEpoch)=>{browser?.cancel();for(const id of previous){if(memoryModule)await memoryModule.invalidateMemoryState(tx,operations,id,String(nextEpoch),'new');else await operations.invalidate(tx,id,String(nextEpoch),'new');}},
    onConversation:async cid=>{await visible?.attach(cid);},
    ...(fast?{beforeAdmission:fast.settle}:{}),
-   ...(reconcileJobs?{reconcileSources:reconcileJobs}:{}),
+   ...((reconcileJobs||children)?{reconcileSources:async(runtime:import('./ingress.js').IngressRuntime)=>{await reconcileJobs?.(runtime);await children?.cleanup();}}:{}),
    ...(config.idleHours>0?{idleMs:config.idleHours*3_600_000}:{}),
    transport:{start:bridge.start,stop:async()=>{await Promise.all([bridge.stop(),places?.close(),calendar?.close(),browser?.close()]);},sendFinal:async request=>{await visible?.finish();return bridge.sendFinal(request);}},
    policy:envelope=>assertNativeEnvelope(config,envelope),controlPolicy:control=>assertNativeControl(config,control),onFatal:options.onFatal,
@@ -338,7 +343,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    const occurrences=await (await import('../job-occurrences.js')).inspectJobOccurrenceLedger(config.coordinator!.coordinatorStateDir);
    return {...recipient,coordinator:{running:!!coordinator,occurrences}};
   };
-  return {host:runtime,operations,controls,search,lintMemory,inspectJobs,start:async()=>{
+  return {host:runtime,operations,controls,search,lintMemory,inspectJobs,inspectChildren:async()=>children?.inspect(),start:async()=>{
    try{
     if(coordinatorEnabled&&!coordinator){
      const module=await import('./coordinator.js');

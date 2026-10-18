@@ -1,6 +1,6 @@
 # Pi Telegram Bridge Host
 
-> This `feat/durable-c5-schedules` branch extends the accepted native chat-and-memory
+> This `feat/durable-c5-children` branch extends the accepted native chat-and-memory
 > MVP with general tools, bounded public web, typed Google reads and the YNAB/
 > editable Messages-link skills, plus direct private place rankings, guarded Calendar/places changes and protected
 > browser operations, native fast-mode/subscription-usage controls, hosted web
@@ -12,7 +12,8 @@
 > adds cron/at publication and mixed-runtime admission/restart coverage.
 > The [schedule guide](docs/pi-durable-c5-schedules.md) adds selected heartbeat
 > checkers, loopback webhooks, temporary watches and scoped schedule helpers.
-> Background children and their retention remain open.
+> The [child guide](docs/pi-durable-c5-children.md) adds process-owned child
+> Harnesses, original-conversation reporting and temporary-store retirement.
 > Root scripts build and test `src/durable/` and shared domain contracts. C1
 > remains prototype evidence. The description below documents the legacy fleet.
 

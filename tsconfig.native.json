@@ -18,6 +18,7 @@
   },
   "include": [
     "src/durable/**/*.ts",
+    ".pi/extensions/subagents/inspection.ts",
     "tests/durable/**/*.ts",
     ".pi/lib/mutation-lock.mjs",
     ".pi/skills/personal-memory/scripts/*.mjs",

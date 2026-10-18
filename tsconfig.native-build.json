@@ -2,6 +2,7 @@
   "extends": "./tsconfig.native.json",
   "include": [
     "src/durable/**/*.ts",
+    ".pi/extensions/subagents/inspection.ts",
     ".pi/lib/mutation-lock.mjs",
     ".pi/skills/personal-memory/scripts/*.mjs",
     "src/jobs-cli.ts",

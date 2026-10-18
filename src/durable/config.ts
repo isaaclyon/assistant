@@ -13,7 +13,7 @@ export interface NativeMemoryConfig {
  judgeKeyFile?: string;
  embeddingKeyFile?: string;
 }
-export const isNativeMemoryProfile=(profile:string)=>['durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test'].includes(profile);
+export const isNativeMemoryProfile=(profile:string)=>['durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test','durable-jobs-children-test'].includes(profile);
 export interface NativeGoogleConfig {
  account?:string;
  gog?:{binary:string;passwordFile:string;home:string};
@@ -72,9 +72,9 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
  const principal=text(value.principal,'principal');
  if(!['isaac','emma','household','engineering'].includes(principal)) throw new Error('Invalid principal');
  const capabilityProfile=text(value.capabilityProfile,'capability profile');
- if(!['durable-foundation-test','durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test'].includes(capabilityProfile)) throw new Error('Unsupported native capability profile');
- if(value.jobsRole!==(['durable-jobs-coordinator-test','durable-jobs-schedules-test'].includes(capabilityProfile)?'coordinator':capabilityProfile==='durable-jobs-test'?'recipient':'disabled'))throw new Error('jobsRole must match the selected native profile');
- if(['durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test'].includes(capabilityProfile)&&principal!=='isaac')throw new Error('Places profile requires the Isaac principal');
+ if(!['durable-foundation-test','durable-chat-memory-test','durable-tools-test','durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test','durable-jobs-children-test'].includes(capabilityProfile)) throw new Error('Unsupported native capability profile');
+ if(value.jobsRole!==(['durable-jobs-coordinator-test','durable-jobs-schedules-test','durable-jobs-children-test'].includes(capabilityProfile)?'coordinator':capabilityProfile==='durable-jobs-test'?'recipient':'disabled'))throw new Error('jobsRole must match the selected native profile');
+ if(['durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test','durable-jobs-children-test'].includes(capabilityProfile)&&principal!=='isaac')throw new Error('Places profile requires the Isaac principal');
  const resourceRoot=await realpath(absolute(value.resourceRoot,'resourceRoot'));
  const workspaceCwd=await realpath(absolute(value.workspaceCwd,'workspaceCwd'));
  const stateDir=await realpath(absolute(value.stateDir,'stateDir'));
@@ -82,8 +82,8 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
  const stateStat=await lstat(stateDir);
  if(!stateStat.isDirectory() || (stateStat.mode&0o077)!==0 || (process.getuid && stateStat.uid!==process.getuid())) throw new Error('Native state directory must be private and owned by this runtime');
  let coordinator:NativeCoordinatorConfig|undefined;
- if(['durable-jobs-coordinator-test','durable-jobs-schedules-test'].includes(capabilityProfile)){
-  const selected=record(value.coordinator,'coordinator');fields(selected,['stateRoot','coordinatorStateDir','targets','scope',...(capabilityProfile==='durable-jobs-schedules-test'?['schedules']:[])],'coordinator');
+ if(['durable-jobs-coordinator-test','durable-jobs-schedules-test','durable-jobs-children-test'].includes(capabilityProfile)){
+  const selected=record(value.coordinator,'coordinator');fields(selected,['stateRoot','coordinatorStateDir','targets','scope',...(['durable-jobs-schedules-test','durable-jobs-children-test'].includes(capabilityProfile)?['schedules']:[])],'coordinator');
   const requestedRoot=absolute(selected.stateRoot,'coordinator stateRoot'),requestedCoordinator=absolute(selected.coordinatorStateDir,'coordinator state directory');
   for(const directory of [requestedRoot,requestedCoordinator])if(!(await lstat(directory)).isDirectory())throw new Error('Coordinator paths must be real directories');
   const stateRoot=await realpath(requestedRoot),coordinatorStateDir=await realpath(requestedCoordinator);
@@ -101,7 +101,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
    if(await realpath(directory)!==resolve(directory))throw new Error('Coordinator directory ancestry must be canonical');
   }
   coordinator={stateRoot:resolve(stateRoot),coordinatorStateDir:resolve(coordinatorStateDir),targets,scope:selected.scope};
-  if(capabilityProfile==='durable-jobs-schedules-test'){
+  if(['durable-jobs-schedules-test','durable-jobs-children-test'].includes(capabilityProfile)){
    const schedules=record(selected.schedules,'coordinator schedules');fields(schedules,['checkerIds','judgeKeyFile','webhook'],'coordinator schedules');
    const supported:readonly string[]=SUPPORTED_NATIVE_CHECKER_IDS;
    if(!Array.isArray(schedules.checkerIds)||schedules.checkerIds.length>supported.length||schedules.checkerIds.some(id=>typeof id!=='string'||!supported.includes(id))||new Set(schedules.checkerIds).size!==schedules.checkerIds.length)throw new Error('Invalid native checker selection');
@@ -143,7 +143,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
   if (memory.semantic === 'on' && !memory.embeddingKeyFile) throw new Error('Enabled semantic search requires explicit provider authorization');
  } else if (value.memory !== undefined) throw new Error('Foundation profile cannot select memory configuration');
  let google:NativeGoogleConfig|undefined;
- if(['durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test'].includes(capabilityProfile)){
+ if(['durable-read-integrations-test','durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test','durable-jobs-children-test'].includes(capabilityProfile)){
   const selected=record(value.google,'google');fields(selected,['account','gog','places','calendarTargets'],'google');google={};
   if(selected.account!==undefined)google.account=text(selected.account,'Google account');
   if(google.account&&(google.account.length>254||/[\0\r\n]/.test(google.account)))throw new Error('Invalid Google account');
@@ -165,7 +165,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
  }else if(value.google!==undefined)throw new Error('Google configuration requires the read-integrations profile');
  let cli:NativeConfig['cli'];
  if(value.cli!==undefined){
-  if(!['durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test'].includes(capabilityProfile))throw new Error('CLI configuration requires the CLI-integrations profile');
+  if(!['durable-cli-integrations-test','durable-places-test','durable-mutations-test','durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test','durable-jobs-children-test'].includes(capabilityProfile))throw new Error('CLI configuration requires the CLI-integrations profile');
   const selected=record(value.cli,'cli');fields(selected,['messagesBaseUrl'],'cli');cli={};
   if(selected.messagesBaseUrl!==undefined){
    let url:URL;try{url=new URL(text(selected.messagesBaseUrl,'Messages base URL'));}catch{throw new Error('Invalid Messages base URL');}
@@ -174,7 +174,7 @@ export async function loadNativeConfig(path:string):Promise<NativeConfig> {
   }
  }
  let browser:NativeBrowserConfig|undefined;
- if(['durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test'].includes(capabilityProfile)){
+ if(['durable-browser-test','durable-provider-test','durable-parity-test','durable-jobs-test','durable-jobs-coordinator-test','durable-jobs-schedules-test','durable-jobs-children-test'].includes(capabilityProfile)){
   const selected=record(value.browser,'browser');fields(selected,['agentDir','telegramProfile','credentialScope','configRoot','runtimeDir','dataDir','endpoints'],'browser');
   browser={agentDir:absolute(selected.agentDir,'browser agentDir'),telegramProfile:text(selected.telegramProfile,'browser Telegram profile',/^[a-z0-9-]+$/),credentialScope:text(selected.credentialScope,'credential scope',/^[a-z0-9][a-z0-9-]{0,63}$/),configRoot:absolute(selected.configRoot,'browser configRoot'),runtimeDir:absolute(selected.runtimeDir,'browser runtimeDir'),dataDir:absolute(selected.dataDir,'browser dataDir')};
   if(selected.endpoints!==undefined){

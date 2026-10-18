@@ -2,6 +2,7 @@
   "version": 1,
   "resources": {
     "extensions": [
+      {"id":"native-background-children","path":".pi/native/background-children.mjs","enabled":true},
       {"id":"native-web-run","path":".pi/native/web-run.mjs","enabled":true},
       {"id":"native-fast","path":".pi/native/fast.mjs","enabled":true},
       {"id":"native-usage","path":".pi/native/usage.mjs","enabled":true},
@@ -231,6 +232,7 @@
       }
     ],
     "instructions": [
+      {"id":"telegram-jobs-children-test","path":".pi/telegram/jobs-children-test.md","enabled":true},
       {"id":"telegram-jobs-schedules-test","path":".pi/telegram/jobs-schedules-test.md","enabled":true},
       {"id":"telegram-jobs-coordinator-test","path":".pi/telegram/jobs-coordinator-test.md","enabled":true},
       {"id":"telegram-jobs-test","path":".pi/telegram/jobs-test.md","enabled":true},
@@ -280,6 +282,41 @@
     ]
   },
   "profiles": [
+    {
+      "id": "durable-jobs-children-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-mutations",
+        "native-places",
+        "native-private-browser",
+        "native-fast",
+        "native-usage",
+        "native-web-run",
+        "native-background-children"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-mutations",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "google-calendar",
+        "agent-browser",
+        "plan-weekend",
+        "native-reserve-restaurant",
+        "schedule-reminders-and-jobs",
+        "watch-prices"
+      ],
+      "instructions": "telegram-jobs-children-test"
+    },
     {
       "id": "durable-jobs-schedules-test",
       "extensions": [
