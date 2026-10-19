@@ -203,7 +203,7 @@ as a new activation.
 ## Canary observation and deliberate advancement
 
 Observation is a separate administrator invocation. Its private selection file
-contains only `{dispatchId}`. Select an actual scheduled native run created after
+normally contains only `{dispatchId}`. Select an actual scheduled native run created after
 initial readiness. An admission-only v1 handoff receipt is insufficient.
 
 ```sh
@@ -227,6 +227,16 @@ Observation failure keeps the selected runtime held and disabled. An interrupted
 finalization can leave valid evidence and a maintenance hold together. An
 administrator must inspect the evidence, unit state and hold before a separate
 recovery action; the adapter does not clear that hold automatically.
+If no evidence files exist, an administrator can explicitly repeat `stage-observe`
+with `{dispatchId,resumeHeld:true}`. The adapter requires the selected unit stopped
+and disabled, a private runtime-owned hold matching the active checkpoint, and
+unchanged release, unit, configuration and stage identities. It repeats native
+inspection before authorizing startup. It never restores a checkpoint or submits
+work. A missing or different hold refuses this recovery. Retained evidence still
+requires separate reconciliation.
+The administrator evidence stores submission IDs as strings. The inspector can
+return the SDK's positive numeric record ID; the adapter normalizes that exact ID
+before retaining and validating the proof.
 The broker retains updates while the runtime restarts. A later stage requires
 the previous root-owned observation and an exact map chain. Advancing to another
 instance always needs another explicit `stage-activate` invocation.

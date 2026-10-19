@@ -23,7 +23,7 @@ import { assertRuntimeReady, readRuntimeMetadata } from "./runtime-metadata.js";
 import { renderInstanceServiceUnit, renderIsolatedInstanceServiceUnit, type RenderedInstanceServiceUnit } from "./service-unit.js";
 import { parseTrustedBrokerConfig } from "./trusted-broker-config.js";
 import { trustedTelegramFetch } from "./trusted-telegram-ipc.js";
-import { activateRuntimeStage, assertCanaryObservation, assertCanaryEvidence, assertRuntimeAdvancement, inspectSelectedReleases, parseRuntimeActivation, runtimeActivationDigest, sameRuntimeMap, type RuntimeActivation, type CanaryObservation } from './durable/activation.js';
+import { activateRuntimeStage, assertCanaryObservation, assertCanaryEvidence, assertRuntimeAdvancement, inspectSelectedReleases, parseCanaryCompletionProof, parseCanaryDispatchSelection, readCanaryRecoveryAuthorization, parseRuntimeActivation, runtimeActivationDigest, sameRuntimeMap, type RuntimeActivation, type CanaryObservation } from './durable/activation.js';
 import { assertInstalledRuntimeSelection, assertNativeDeploymentBinding, readDeploymentTelegramIdentity } from './durable/deployment-config.js';
 import { assertLegacyInboxDrained } from './durable/deployment-inbox.js';
 import { releaseFromEntrypoint } from './runtime-entrypoint.js';
@@ -279,21 +279,25 @@ await withMutationLock(join(policy.checkpointRoot, "deployment-lock.sqlite"), as
     assertInstalledRuntimeSelection(await readFile(unitPath,'utf8'),selection,policy.releaseRoot,observedBinding.digest);
     const initial=current.initialReady;
     if(!initial||!Number.isSafeInteger(initial.pid)||initial.pid<=0||!Number.isSafeInteger(initial.at)||!Number.isSafeInteger(current.startedAt)||initial.at<current.startedAt||Date.now()-initial.at<activation.observationMs)throw new Error('Canary observation interval or initial readiness is incomplete');
-    const selectedDispatch=JSON.parse(await readFile(observationPath,'utf8'));
-    if(!selectedDispatch||Object.keys(selectedDispatch).length!==1||typeof selectedDispatch.dispatchId!=='string'||!/^[a-z0-9-]{1,64}-[a-f0-9]{16}(?:[a-f0-9]{48})?$/.test(selectedDispatch.dispatchId))throw new Error('Canary dispatch selection must contain only an exact dispatchId');
+    const selectedDispatch=parseCanaryDispatchSelection(JSON.parse(await readFile(observationPath,'utf8')));
     for(const retained of ['evidence.json','observation.json'])if(await exists(join(stageDirectory,retained)))throw new Error('Canary observation evidence already exists; inspect the retained result before another restart');
-    const marker=join(runtime.stateRoot,'.recovery-maintenance'),token=randomUUID();
-    if(await exists(marker))throw new Error('Unresolved hold blocks the canary restart');
+    const marker=join(runtime.stateRoot,'.recovery-maintenance');
+    const resuming=await exists(marker);
+    let token:string=randomUUID();
+    if(resuming){
+      if(!selectedDispatch.resumeHeld)throw new Error('Unresolved hold requires explicit resumeHeld selection');
+      await assertServiceQuiescent(service);
+      token=await readCanaryRecoveryAuthorization(marker,runtime.uid,current.snapshotDir);
+    }else if(selectedDispatch.resumeHeld)throw new Error('No retained canary hold exists to resume');
     const metadataPath=join(runtime.stateRoot,'instances',runtime.instanceId,'runtime.json');
     const beforePid=Number(await controlService(runtime,'show',unitName,'--property=MainPID','--value'));
-    assertRuntimeReady(await readRuntimeMetadata(metadataPath),{instanceId:runtime.instanceId,releaseSha:selection.releaseSha,pid:beforePid});
-    let held=false;
+    if(!resuming)assertRuntimeReady(await readRuntimeMetadata(metadataPath),{instanceId:runtime.instanceId,releaseSha:selection.releaseSha,pid:beforePid});
+    let held=resuming;
     try{
-      await writeDurableExclusive(marker,{version:1,authorization:token,snapshotDir:current.snapshotDir});held=true;await chown(marker,runtime.uid,runtime.gid);
+      if(!resuming){await writeDurableExclusive(marker,{version:1,authorization:token,snapshotDir:current.snapshotDir});held=true;await chown(marker,runtime.uid,runtime.gid);}
       await controlService(runtime,'disable','--now',unitName);await assertServiceQuiescent(service);
       const inspected=await exec('/usr/sbin/runuser',['-u',runtime.user,'--','/usr/bin/env','-i',`HOME=${runtime.home}`,'PATH=/usr/bin:/bin',`PI_DURABLE_CONFIG=${selection.nativeConfigPath!}`,`PI_DURABLE_CONFIG_SHA256=${observedBinding.digest}`,policy.nodePath,join(policy.releaseRoot,selection.releaseSha,'dist/src/durable/inspect.js'),'--canary-dispatch',selectedDispatch.dispatchId],{timeout:30_000,maxBuffer:64_000});
-      const proof=JSON.parse(inspected.stdout);
-      if(proof.version!==1||proof.instanceId!==runtime.instanceId||proof.dispatchId!==selectedDispatch.dispatchId||proof.outcome!=='done'||typeof proof.submissionId!=='string'||!Number.isSafeInteger(proof.createdAt)||proof.createdAt<initial.at||!Number.isSafeInteger(proof.inspectedAt)||proof.inspectedAt<initial.at||proof.inspectedAt>Date.now())throw new Error('Selected dispatch lacks completed native work from this stage');
+      const proof=parseCanaryCompletionProof(JSON.parse(inspected.stdout),{instanceId:runtime.instanceId,dispatchId:selectedDispatch.dispatchId,initialReadyAt:initial.at});
       await controlService(runtime,'set-environment',`PI_TELEGRAM_RECOVERY_AUTHORIZATION=${token}`);
       await controlService(runtime,'start',unitName);
       let restarted:{at:number;pid:number}|undefined;

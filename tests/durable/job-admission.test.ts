@@ -12,6 +12,7 @@ import type { FinalRequest } from '../../src/durable/delivery.js';
 import { MAX_HANDOFF_PROMPT_BYTES, cancelJobHandoff, enqueueJobHandoff } from '../../src/job-handoff.js';
 import { MediaOutbox } from '../../src/durable/media-outbound.js';
 import { inspectScheduledCompletion } from '../../src/durable/canary-proof.js';
+import { parseCanaryCompletionProof } from '../../src/durable/activation.js';
 
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -74,7 +75,9 @@ it('admits an enqueued job once, completes the v1 file on admission, and records
   expect(faux.state.callCount).toBe(1); expect(sent.map(s => s.text)).toEqual(['DONE']);
   expect(sent[0]!.target).toEqual(TARGET);
   expect(await list(d, 'completed')).toEqual([`${dispatchId}.json`]);
-  expect(await inspectScheduledCompletion(h.runtime,dispatchId)).toMatchObject({dispatchId,submissionId:receipt.submissionId,outcome:'done',createdAt:NOW.getTime()});
+  const proof=await inspectScheduledCompletion(h.runtime,dispatchId);
+  expect(proof).toMatchObject({dispatchId,submissionId:receipt.submissionId,outcome:'done',createdAt:NOW.getTime()});
+  expect(parseCanaryCompletionProof(proof,{instanceId:INSTANCE,dispatchId,initialReadyAt:NOW.getTime()-1})).toMatchObject({submissionId:String(receipt.submissionId),outcome:'done'});
   expect(faux.state.callCount).toBe(1);
   for(const status of ['queued','sending','uncertain'] as const){
    await h.runtime.root.commit(async tx=>{(await tx.doc(MediaOutbox,h.runtime.root.id)).items['synthetic-media']={files:[{status,notice:'done'} as never]};},context);

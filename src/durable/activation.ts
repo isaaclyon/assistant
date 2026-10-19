@@ -1,4 +1,5 @@
-import { lstat, realpath } from 'node:fs/promises';
+import { lstat, realpath, open } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { isAbsolute, join, normalize } from 'node:path';
 import { activateIsolatedDeployment, type IsolatedDeploymentOperations } from '../isolated-deployment.js';
@@ -13,6 +14,28 @@ export type RuntimeSelection = {
 export interface RuntimeActivation {
  version:1;stageId:string;selectedInstance:string;releaseRoot:string;brokerReleaseSha:string;
  observationMs:number;previous:RuntimeSelection[];desired:RuntimeSelection[];
+}
+export function parseCanaryDispatchSelection(value:unknown):{dispatchId:string;resumeHeld?:true} {
+ if(!object(value)||!keys(value,['dispatchId'],['resumeHeld'])||typeof value.dispatchId!=='string'||!/^[a-z0-9-]{1,64}-[a-f0-9]{16}(?:[a-f0-9]{48})?$/.test(value.dispatchId)||('resumeHeld' in value&&value.resumeHeld!==true))throw new Error('Canary selection requires an exact dispatchId and optional explicit resumeHeld');
+ return value as {dispatchId:string;resumeHeld?:true};
+}
+/** Normalize SDK numeric record IDs only at the administrator evidence boundary. */
+export function parseCanaryCompletionProof(value:unknown,expected:{instanceId:string;dispatchId:string;initialReadyAt:number},now=Date.now()) {
+ if(!object(value))throw new Error('Invalid native canary proof');
+ const submissionId=typeof value.submissionId==='number'&&Number.isSafeInteger(value.submissionId)&&value.submissionId>0?String(value.submissionId):value.submissionId;
+ if(!keys(value,['version','instanceId','dispatchId','submissionId','outcome','createdAt','inspectedAt'])||value.version!==1||value.instanceId!==expected.instanceId||value.dispatchId!==expected.dispatchId||value.outcome!=='done'||typeof submissionId!=='string'||!submissionId||submissionId.length>256||/[\0\r\n]/.test(submissionId)||!Number.isSafeInteger(value.createdAt)||Number(value.createdAt)<expected.initialReadyAt||!Number.isSafeInteger(value.inspectedAt)||Number(value.inspectedAt)<Number(value.createdAt)||Number(value.inspectedAt)>now)throw new Error('Selected dispatch lacks completed native work from this stage');
+ return {version:1 as const,instanceId:expected.instanceId,dispatchId:expected.dispatchId,submissionId,outcome:'done' as const,createdAt:Number(value.createdAt),inspectedAt:Number(value.inspectedAt)};
+}
+/** A held observation can resume only from its exact private checkpoint marker. */
+export async function readCanaryRecoveryAuthorization(marker:string,uid:number,snapshotDir:string):Promise<string> {
+ const file=await open(marker,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+ try{
+  const info=await file.stat();
+  if(!info.isFile()||info.nlink!==1||info.uid!==uid||(info.mode&0o777)!==0o600||info.size>4096)throw new Error('Unsafe canary recovery hold');
+  const value:unknown=JSON.parse(await file.readFile('utf8'));
+  if(!object(value)||!keys(value,['version','authorization','snapshotDir'])||value.version!==1||value.snapshotDir!==snapshotDir||typeof value.authorization!=='string'||!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value.authorization))throw new Error('Canary recovery hold differs from the active checkpoint');
+  return value.authorization;
+ }finally{await file.close();}
 }
 export interface CanaryObservation {
  version:1;stageId:string;instanceId:string;releaseSha:string;startedAt:number;
