@@ -459,9 +459,11 @@ observation recovery does not rewind the checkpoint or resubmit work.
 The fix passes type checking, 1,392 tests and a build, with 39 platform/browser
 tests skipped. A focused 34-test check also verifies the real native inspector's
 proof through the administrator parser. An independent read-only safety review
-finds no material issue. Human confirmation of an ordinary personal-bot reply
-remains open. Authenticated YNAB acceptance stays deferred, so full C6 acceptance,
-fleet advancement and legacy retirement remain open.
+finds no material issue. The user confirms an ordinary personal-bot reply.
+Read-only native evidence also verifies two completed human-message submissions.
+This completes the limited one-bot production trial. Authenticated YNAB acceptance
+stays deferred, so full C6 acceptance remains open. Fleet advancement and legacy
+retirement remain unauthorized.
 
 ### Repeat the offline checks
 
