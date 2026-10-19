@@ -461,9 +461,10 @@ tests skipped. A focused 34-test check also verifies the real native inspector's
 proof through the administrator parser. An independent read-only safety review
 finds no material issue. The user confirms an ordinary personal-bot reply.
 Read-only native evidence also verifies two completed human-message submissions.
-This completes the limited one-bot production trial. Authenticated YNAB acceptance
-stays deferred, so full C6 acceptance remains open. Fleet advancement and legacy
-retirement remain unauthorized.
+This completes the limited one-bot production trial. The user explicitly skips
+authenticated YNAB acceptance for the current scope. No authenticated YNAB
+validation is claimed. This scope decision does not authorize fleet advancement,
+legacy retirement or a branch merge.
 
 ### Repeat the offline checks
 
@@ -477,4 +478,4 @@ Each Linux mode requires Docker and Node 24. The containers use only synthetic
 data and repository build output. Run the modes separately within their bounded
 execution times. The separate Linux browser run closes its 43 selected platform
 checks. User-driven provider controls and natural shutdown also pass.
-Authenticated native CLI acceptance remains an open C6 gate.
+Authenticated YNAB acceptance is skipped by user decision for the current scope.
