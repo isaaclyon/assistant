@@ -5,7 +5,7 @@ import type { JsonObject } from "../heartbeat.js";
 
 interface GmailInboxArgs { account: string; timeZone: string }
 type Search = (query: string, page?: string) => Promise<unknown>;
-interface Cursor extends JsonObject { since: number; until?: number; page?: string; seen?: string[] }
+type Cursor = { since: number; until?: number; page?: string; seen?: string[] };
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
 const MAX_MESSAGES = 3;
 

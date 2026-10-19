@@ -1,0 +1,69 @@
+import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, expect, it } from 'vitest';
+import { assertInstalledRuntimeSelection, assertNativeDeploymentBinding } from '../../src/durable/deployment-config.js';
+import type { ManagedRuntime } from '../../src/isolated-deployment-config.js';
+import { parseBridgeInstanceManifest } from '../../src/instances.js';
+import { resolveBridgeInstanceConfig } from '../../src/config.js';
+const roots:string[]=[];
+afterEach(async()=>{for(const root of roots.splice(0))await rm(root,{recursive:true,force:true});});
+const sha='a'.repeat(40),releaseRoot='/opt/bridge/releases',release=join(releaseRoot,sha);
+it('binds the previous runtime map to the exact installed executable, release and native config',()=>{
+ const selected={instanceId:'personal',runtime:'pi-durable' as const,releaseSha:sha,nativeConfigPath:'/etc/bridge/native.json'};
+ const unit=`ExecStart="/opt/node/bin/node" "${release}/dist/src/durable/daemon.js"\nEnvironment="PI_TELEGRAM_BRIDGE_RELEASE_SHA=${sha}"\nEnvironment="PI_DURABLE_CONFIG=/etc/bridge/native.json"\n`;
+ expect(()=>assertInstalledRuntimeSelection(unit,selected,releaseRoot)).not.toThrow();
+ const pinned=unit+`Environment="PI_DURABLE_CONFIG_SHA256=${'c'.repeat(64)}"\n`;
+ expect(()=>assertInstalledRuntimeSelection(pinned,selected,releaseRoot,'c'.repeat(64))).not.toThrow();
+ for(const invalid of [unit,pinned+pinned,pinned.replace('c'.repeat(64),'d'.repeat(64))])expect(()=>assertInstalledRuntimeSelection(invalid,selected,releaseRoot,'c'.repeat(64))).toThrow(/digest|unique/);
+ for(const changed of [unit.replace('/durable/daemon.js','/daemon.js'),unit.replace(sha,'b'.repeat(40)),unit.replace('/etc/bridge/native.json','/etc/bridge/other.json'),unit+unit,unit.replace('Environment="PI_TELEGRAM_BRIDGE_RELEASE_SHA','Ignored="PI_TELEGRAM_BRIDGE_RELEASE_SHA')])expect(()=>assertInstalledRuntimeSelection(changed,selected,releaseRoot)).toThrow();
+});
+it('checks native paths, owner, principal and self-only broker jobs without importing candidate code',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'native-deployment-config-')));roots.push(root);
+ const filename=join(root,'native.json');
+ const runtime:ManagedRuntime={instanceId:'personal',user:'fixture',uid:process.getuid!(),gid:process.getgid!(),home:join(root,'home'),manager:'system',manifestPath:join(root,'manifest.json'),configRoot:join(root,'config'),stateRoot:join(root,'state'),agentDir:join(root,'agent')};
+ await mkdir(runtime.home,{mode:0o700});
+ const config=resolveBridgeInstanceConfig(parseBridgeInstanceManifest(JSON.stringify({version:1,instances:[{id:'personal',displayName:'Fixture',principal:'isaac',telegramProfile:'personal',telegramSurface:{type:'private'},workspaceCwd:join(root,'workspace'),capabilityProfile:'personal-isaac',credentialScope:'isaac-personal',memoryView:'owner-and-household',jobsRole:'coordinator'}]})),'personal',{PI_CODING_AGENT_DIR:runtime.agentDir,PI_TELEGRAM_BRIDGE_STATE_ROOT:runtime.stateRoot,PI_TELEGRAM_BRIDGE_CONFIG_ROOT:runtime.configRoot},runtime.home,release);
+ const selection={instanceId:'personal',runtime:'pi-durable' as const,releaseSha:sha,nativeConfigPath:filename};
+ const socket='/run/pi-broker-personal/telegram.sock';
+ const value={version:1,runtime:'pi-durable',instanceId:'personal',principal:'isaac',releaseSha:sha,resourceRoot:release,workspaceCwd:config.workspaceCwd,stateDir:config.stateDir,jobsRole:'coordinator',capabilityProfile:'durable-personal-isaac',transport:{mode:'broker',socketPath:socket,botId:9,allowedUserId:42},coordinator:{scope:'self',targets:['personal'],stateRoot:runtime.stateRoot,coordinatorStateDir:join(runtime.stateRoot,'coordinator')}};
+ const save=async(v:unknown)=>writeFile(filename,JSON.stringify(v),{mode:0o600});await save(value);
+ const bound=await assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,{botId:9,allowedUserId:42});
+ for(const identity of [{botId:10,allowedUserId:42},{botId:9,allowedUserId:43}])await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,identity)).rejects.toThrow(/existing transport/);
+ expect(bound).toMatchObject({capabilityProfile:'durable-personal-isaac',digest:expect.stringMatching(/^[a-f0-9]{64}$/)});
+ await save({...value,capabilityProfile:'durable-jobs-coordinator-test'});
+ expect((await assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket)).digest).not.toBe(bound.digest);
+ for(const change of [{principal:'emma'},{releaseSha:'b'.repeat(40)},{resourceRoot:root},{stateDir:root},{jobsRole:'disabled'},{transport:{mode:'ordinary'}},{capabilityProfile:'durable-personal-emma'},{capabilityProfile:'durable-household-shared'},{capabilityProfile:'durable-unknown'},{capabilityProfile:'durable-browser-test'},{group:{chatId:-1,actors:{isaac:42,emma:43}}},{transport:{mode:'broker',socketPath:socket,botId:0,allowedUserId:42}},{coordinator:{...value.coordinator,targets:['personal','builder']}},{coordinator:{...value.coordinator,coordinatorStateDir:root}}]){await save({...value,...change});await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket)).rejects.toThrow();}
+ await save(value);await chmod(filename,0o644);await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket)).rejects.toThrow(/private/);
+});
+
+it('requires the exact legacy household group and rejects a group on the broker',async()=>{
+ const root=await realpath(await mkdtemp(join(tmpdir(),'native-group-config-')));roots.push(root);
+ const filename=join(root,'native.json');
+ const runtime:ManagedRuntime={instanceId:'household',user:'fixture',uid:process.getuid!(),gid:process.getgid!(),home:join(root,'home'),manager:'user',manifestPath:join(root,'manifest.json'),configRoot:join(root,'config'),stateRoot:join(root,'state'),agentDir:join(root,'agent')};
+ await mkdir(runtime.home,{mode:0o700});
+ const config=resolveBridgeInstanceConfig(parseBridgeInstanceManifest(JSON.stringify({version:1,instances:[{id:'household',displayName:'Fixture',principal:'household',telegramProfile:'household',telegramSurface:{type:'household-group',chatId:-100500,actors:{isaac:42,emma:43}},workspaceCwd:join(root,'workspace'),capabilityProfile:'household-shared',credentialScope:'household',memoryView:'household',jobsRole:'disabled'}]})),'household',{PI_CODING_AGENT_DIR:runtime.agentDir,PI_TELEGRAM_BRIDGE_STATE_ROOT:runtime.stateRoot,PI_TELEGRAM_BRIDGE_CONFIG_ROOT:runtime.configRoot},runtime.home,release);
+ const selection={instanceId:'household',runtime:'pi-durable' as const,releaseSha:sha,nativeConfigPath:filename};
+ const value={version:1,runtime:'pi-durable',instanceId:'household',principal:'household',releaseSha:sha,resourceRoot:release,workspaceCwd:config.workspaceCwd,stateDir:config.stateDir,jobsRole:'disabled',capabilityProfile:'durable-household-shared',group:{chatId:-100500,actors:{isaac:42,emma:43}},transport:{mode:'ordinary',configPath:join(runtime.agentDir,'telegram.json'),profile:config.telegramProfile,botId:9,allowedUserId:42}};
+ const check=async(v:unknown)=>{await writeFile(filename,JSON.stringify(v),{mode:0o600});return assertNativeDeploymentBinding(selection,runtime,config,releaseRoot);};
+ await expect(check(value)).resolves.toMatchObject({capabilityProfile:'durable-household-shared'});
+ config.jobsRole='target-only';
+ await expect(check({...value,jobsRole:'recipient'})).resolves.toMatchObject({capabilityProfile:'durable-household-shared'});
+ await expect(check(value)).rejects.toThrow(/deployment binding/);
+ config.jobsRole='disabled';
+ for(const change of [{group:undefined},{group:{chatId:-100501,actors:{isaac:42,emma:43}}},{group:{chatId:-100500,actors:{isaac:43,emma:42}}},{group:{chatId:-100500,actors:{isaac:42,emma:43},extra:1}},{capabilityProfile:'durable-personal-isaac'},{transport:{...value.transport,allowedUserId:99}},{transport:{mode:'broker',socketPath:'/run/x.sock',botId:9,allowedUserId:42}}])await expect(check({...value,...change})).rejects.toThrow();
+});
+
+it('reads only the selected existing Telegram identity and refuses token/catalog disagreement',async()=>{
+ const {readDeploymentTelegramIdentity}=await import('../../src/durable/deployment-config.js');
+ const root=await realpath(await mkdtemp(join(tmpdir(),'native-telegram-identity-')));roots.push(root);
+ const file=join(root,'transport.json'),uid=process.getuid!();
+ await writeFile(file,JSON.stringify({profiles:{selected:{botToken:'9:synthetic',botId:9,allowedUserId:42},other:{botToken:'10:other',allowedUserId:43}}}),{mode:0o600});
+ expect(await readDeploymentTelegramIdentity(file,uid,'selected')).toEqual({botId:9,allowedUserId:42});
+ await expect(readDeploymentTelegramIdentity(file,uid,'missing')).rejects.toThrow(/incomplete/);
+ await writeFile(file,JSON.stringify({profiles:{selected:{botToken:'9:synthetic',botId:10,allowedUserId:42}}}));
+ await expect(readDeploymentTelegramIdentity(file,uid,'selected')).rejects.toThrow(/inconsistent/);
+ await writeFile(file,JSON.stringify({botToken:'11:synthetic',userId:44}));
+ expect(await readDeploymentTelegramIdentity(file,uid)).toEqual({botId:11,allowedUserId:44});
+ await chmod(file,0o644);await expect(readDeploymentTelegramIdentity(file,uid)).rejects.toThrow(/private/);
+});

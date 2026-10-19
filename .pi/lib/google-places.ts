@@ -3,8 +3,8 @@
 // lives here: public profiles, cache/meter keys, fixed HTTPS field masks, and
 // response normalization. See ADR-0029.
 import { join } from "node:path";
-import { openGooglePlacesGateway } from "../../src/google-places-gateway.ts";
-import { boundedString, requiredSafeString } from "./google-operations.ts";
+import { openGooglePlacesGateway } from "../../src/google-places-gateway.js";
+import { boundedString, requiredSafeString } from "./google-operations.js";
 import {
   DEFAULT_MAX_OUTPUT_BYTES,
   DEFAULT_TIMEOUT_MS,
@@ -12,7 +12,7 @@ import {
   readBoundedResponse,
   readPrivatePassword,
   type GoogleRuntime,
-} from "./google-transport.ts";
+} from "./google-transport.js";
 
 export const MAX_PLACE_CANDIDATES = 15;
 const MAX_PLACE_REVIEWS = 3;

@@ -131,3 +131,14 @@ the existing crash gate.
 Tests cover authentication and bounds, resize/handback races, actual mobile
 framebuffer rendering, keyboard-height changes, desktop fallback and shared-page
 state restoration. Native Telegram keyboard behavior still needs phone acceptance.
+
+## Native host binding (C4)
+
+The selected `durable-browser-test` host owns cancellation, all-tool exclusion
+and explicit private configuration around this same takeover implementation.
+Broker mode uses the provisioned private endpoint and selected socket with a
+surrogate profile; ordinary mode retains the temporary Serve path. The native
+wrapper is replay-unsafe and sequential, returns only whitelisted terminal
+fields, and never resumes an interrupted operation or removes its gate.
+Live Chrome/noVNC/Telegram and platform acceptance remain C6 gates; see the
+[C4 guide](../pi-durable-c4-tools.md#protected-browser-slice).

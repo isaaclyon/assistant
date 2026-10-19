@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": false,
+    "rootDir": ".",
+    "outDir": "dist",
+    "types": [
+      "node",
+      "vitest/globals"
+    ],
+    "declaration": false,
+    "sourceMap": true
+  },
+  "include": [
+    "src/durable/**/*.ts",
+    "src/recovery-start-check.ts",
+    "src/isolated-deploy-cli.ts",
+    "src/isolation-start-check.ts",
+    "src/trusted-broker-daemon.ts",
+    "src/isolation-network-service.ts",
+    "src/isolation-proxy-service.ts",
+    ".pi/extensions/subagents/inspection.ts",
+    "tests/durable/**/*.ts",
+    "tests/service-unit-isolation.test.ts",
+    "tests/isolation-audit.test.ts",
+    "tests/isolation-network.test.ts",
+    "tests/isolation-support-units.test.ts",
+    ".pi/lib/mutation-lock.mjs",
+    ".pi/skills/personal-memory/scripts/*.mjs",
+    "src/jobs-cli.ts",
+    "src/price-watches.ts",
+    "src/checkers/*.ts",
+    "tests/chrome-fixture.test.ts"
+  ]
+}

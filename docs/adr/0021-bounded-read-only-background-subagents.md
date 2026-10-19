@@ -69,3 +69,36 @@ Telegram result over claiming an unobserved delivery.
   inspectable batch without an automatic summary, but cannot duplicate a
   completion turn on restart.
 - The pi-telegram version/source patch must be reviewed whenever its pin changes.
+
+
+## Native migration implementation
+
+The approved [C0 D4 contract](../pi-durable-c0-contracts.md#d4-preserve-existing-state-guarantees-and-child-retention)
+supersedes the legacy batch/session storage and uncertain-injection mechanism
+above for the explicit `durable-jobs-children-test` profile. Native main-store
+tasks record stable launch IDs, terminal status and a bounded parent report.
+Each child process owns a separate temporary WAL/FULL Harness under
+`<stateDir>/temporary/background-children/<batchId>/<jobId>/store/`.
+Raw child inputs, partials and transcripts stay in that temporary tree.
+The main launch tool's ordinary history remains retained.
+
+An external SQLite control lease serializes recovery and cleanup. Recovery
+reopens the same child store only after proving exclusive writer ownership;
+an unknown PID cannot authorize termination. Read-safe unfinished work retains
+its original absolute deadline. Children receive the same seven confined
+read-only tools with no ambient discovery or nested delegation.
+
+One native reporting task waits for all job receipts and ordinary parent idle,
+then admits a fingerprinted completion source into the recorded conversation
+and epoch. Stable source/submission identity reconciles lost acknowledgements.
+Its inline bounded report supports old-conversation synthesis after `/new`
+without granting old tools current-epoch authority. External send uncertainty
+continues to use the native delivery receipt policy.
+
+Expiry is seven days from batch creation. Cleanup requires terminal jobs,
+closed writers and no active completion admission/synthesis; it commits an
+expiry tombstone before removing temporary SQLite/WAL/SHM and other artifacts.
+Crashes retry removal without recreating expired work. Persistent control
+lockfiles remain outside the deleted tree. Failed cleanup holds the affected
+batch while ordinary host admission continues. See the
+[native child guide](../pi-durable-c5-children.md) for implementation and evidence.

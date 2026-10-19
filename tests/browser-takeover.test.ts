@@ -48,8 +48,26 @@ describe("takeover ownership and teardown", () => {
     h.spawn.mockImplementation(() => Object.assign(new EventEmitter(), { kill: () => { h.removed = true; } }));
   });
   afterEach(async () => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); await rm(h.root, { recursive: true, force: true }); });
-  const run = (chatId = 123) => runBrowserTakeover({ config: { instanceId: "test", telegramSurface: { type: "private" }, resourceRoot: process.cwd() } as BridgeInstanceConfig,
-    request: { session: "default", resumeUrl: "https://example.com/" }, chatId, signal: new AbortController().signal, notifyWaiting() {} });
+  const run = (chatId = 123, onDiagnostic?: (event: unknown) => void) => runBrowserTakeover({ config: { instanceId: "test", telegramSurface: { type: "private" }, resourceRoot: process.cwd() } as BridgeInstanceConfig,
+    request: { session: "default", resumeUrl: "https://example.com/" }, chatId, signal: new AbortController().signal, notifyWaiting() {}, onDiagnostic });
+  it("reports observer disconnection failure without exposing process output or clearing the gate", async () => {
+    const diagnostic = vi.fn(), previous = h.exec.getMockImplementation()!;
+    const failure = Object.assign(new Error("synthetic-secret-message"), { code: 1, stdout: "synthetic-secret-output", stderr: "synthetic-secret-error" });
+    h.exec.mockImplementation((binary, ...args) => binary === "agent-browser" ? Promise.reject(failure) : previous(binary, ...args));
+    expect(await run(123, diagnostic)).toEqual({ status: "browser_blocked" });
+    expect(diagnostic).toHaveBeenCalledWith(expect.objectContaining({ operation: "takeover", phase: "observer-disconnect", exitCode: 1 }));
+    expect(JSON.stringify(diagnostic.mock.calls)).not.toContain("synthetic-secret");
+    expect(h.prepare).not.toHaveBeenCalled(); expect(h.send).not.toHaveBeenCalled();
+    expect(await readFile(join(h.root, "protected-input.json"), "utf8")).toContain("owned-browser");
+  });
+  it("retains the gate if protected preparation fails after observer disconnection", async () => {
+    const diagnostic = vi.fn();
+    h.prepare.mockRejectedValueOnce(new Error("synthetic-private-failure"));
+    expect(await run(123, diagnostic)).toEqual({status:"browser_blocked"});
+    expect(await readFile(join(h.root,"protected-input.json"),"utf8")).not.toContain("synthetic-private-failure");
+    expect(h.finish).not.toHaveBeenCalled();
+    expect(diagnostic).toHaveBeenCalledWith({ operation: "takeover", phase: "page-protect" });
+  });
   it("pauses the observer and revokes viewer access before restoring the shared page and clearing the gate", async () => {
     let complete!: (value: TakeoverResult) => void; h.done = new Promise(resolve => { complete = resolve; });
     const result = run();
@@ -69,8 +87,10 @@ describe("takeover ownership and teardown", () => {
     expect(h.finish).toHaveBeenCalledExactlyOnceWith("private");
   });
   it.each(["viewer", "page"])("retains the crash gate after uncertain %s cleanup", async failure => {
+    const diagnostic = vi.fn();
     (failure === "viewer" ? h.stop : h.finish).mockRejectedValue(new Error("synthetic-sensitive-error"));
-    expect(await run()).toEqual({ status: "browser_blocked" });
+    expect(await run(123, diagnostic)).toEqual({ status: "browser_blocked" });
+    expect(diagnostic).toHaveBeenCalledWith({ operation: "takeover", phase: failure === "viewer" ? "cleanup-handoff" : "cleanup-page" });
     expect(await readFile(join(h.root, "protected-input.json"), "utf8")).not.toContain("sensitive");
     expect(h.closeCdp).toHaveBeenCalled();
     if (failure === "viewer") expect(h.finish).toHaveBeenCalledWith("private");
@@ -81,12 +101,28 @@ describe("takeover ownership and teardown", () => {
     expect(h.spawn).not.toHaveBeenCalled(); expect(h.prepare).not.toHaveBeenCalled();
   });
   it("reports an existing crash gate as browser_blocked so stop-only recovery remains explicit", async () => {
+    const diagnostic = vi.fn();
     h.assert.mockRejectedValue(new Error("blocked"));
-    expect(await run()).toEqual({ status: "browser_blocked" }); expect(h.spawn).not.toHaveBeenCalled();
+    expect(await run(123, diagnostic)).toEqual({ status: "browser_blocked" }); expect(h.spawn).not.toHaveBeenCalled();
+    expect(diagnostic).toHaveBeenCalledExactlyOnceWith({ operation: "takeover", phase: "gate-existing" });
   });
-  const runApproved = () => runBrowserTakeover({ config: { instanceId: "test", telegramSurface: { type: "private" }, resourceRoot: process.cwd() } as BridgeInstanceConfig,
-    request: { session: "default", resumeUrl: "https://example.com/" }, chatId: 123, signal: new AbortController().signal, notifyWaiting() {},
+  const runApproved = (onDiagnostic?: (event: unknown) => void) => runBrowserTakeover({ config: { instanceId: "test", telegramSurface: { type: "private" }, resourceRoot: process.cwd() } as BridgeInstanceConfig,
+    request: { session: "default", resumeUrl: "https://example.com/" }, chatId: 123, signal: new AbortController().signal, notifyWaiting() {}, onDiagnostic,
     login: { session: "default", pageUrl: "https://example.com/login", resumeUrl: "https://example.com/", credentialItem: `source:${"a".repeat(26)}`, purpose: "Read account" } });
+  it("identifies private login preparation failure before credential approval", async () => {
+    const diagnostic = vi.fn();
+    h.privatePage.mockRejectedValueOnce(new Error("synthetic-secret"));
+    expect(await runApproved(diagnostic)).toEqual({ status: "unavailable" });
+    expect(diagnostic).toHaveBeenCalledExactlyOnceWith({ operation: "login", phase: "login-protect" });
+    expect(h.approve).not.toHaveBeenCalled(); expect(h.finish).toHaveBeenCalledWith("private");
+  });
+  it.each(["throw", "reject"])("preserves fail-closed cleanup when diagnostics %s", async failure => {
+    h.prepare.mockRejectedValueOnce(new Error("synthetic-secret"));
+    const sink = () => { if (failure === "throw") throw new Error("sink unavailable"); return Promise.reject(new Error("sink unavailable")); };
+    expect(await run(123, sink)).toEqual({ status: "browser_blocked" });
+    expect(await readFile(join(h.root, "protected-input.json"), "utf8")).toContain("owned-browser");
+    expect(h.send).not.toHaveBeenCalled();
+  });
   it("uses a provisioned endpoint without invoking Tailscale or sudo and closes it before releasing the page", async () => {
     vi.stubEnv("PI_TELEGRAM_TRUSTED_SOCKET", "/run/synthetic/socket");
     vi.stubEnv("PI_PRIVATE_BROWSER_BIND_ADDRESS", "10.253.250.2");

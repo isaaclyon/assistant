@@ -680,7 +680,7 @@ export function createMarkdownMemoryStore(options) {
     }
   }
 
-  async function deleteWithLocation({ id, ifRevision, confirmId } = {}) {
+  async function planDelete({ id, ifRevision, confirmId } = {}) {
     validateId(id);
     if (confirmId !== id) fail("CONFIRMATION_REQUIRED", "Forgetting requires confirmation");
     if (typeof ifRevision !== "string") fail("INVALID_INPUT", "Memory revision is required");
@@ -688,12 +688,131 @@ export function createMarkdownMemoryStore(options) {
     const { note } = await readLocated(location);
     assertVisible(note);
     if (note.revision !== ifRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
+    return { kind: "delete", id, location, relativePath: location.relativePath, preRevision: ifRevision, postRevision: null };
+  }
+
+  async function applyDelete(plan) {
+    // Re-verify the planned bytes immediately before removal, as applyReplace does.
     try {
-      await unlink(location.path);
-    } catch {
+      if (plan.preRevision !== undefined && plan.preRevision !== null) {
+        const currentRaw = await readFile(plan.location.path, "utf8");
+        if (digest(currentRaw) !== plan.preRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
+      }
+      await unlink(plan.location.path);
+    } catch (error) {
+      if (error instanceof MemoryError) throw error;
       fail("IO_ERROR", "Memory storage is unavailable");
     }
-    return { id, deleted: true, relativePath: location.relativePath };
+    return { id: plan.id, deleted: true, relativePath: plan.relativePath };
+  }
+
+  async function deleteWithLocation(request = {}) {
+    return applyDelete(await planDelete(request));
+  }
+
+  /** Replace an existing note only if its bytes still match the planned revision. */
+  async function applyReplace(plan) {
+    const tempPath = await writeTemp(dirname(plan.location.path), plan.id, plan.raw);
+    try {
+      const currentRaw = await readFile(plan.location.path, "utf8");
+      if (digest(currentRaw) !== plan.preRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
+      await rename(tempPath, plan.location.path);
+    } catch (error) {
+      await unlink(tempPath).catch(() => {});
+      if (error instanceof MemoryError) throw error;
+      fail("IO_ERROR", "Memory storage is unavailable");
+    }
+    const parsed = parseMarkdownMemoryNote(plan.raw, { id: plan.id, type: plan.location.type });
+    return { ...publicNote(parsed, plan.relativePath), ...(plan.extra ?? {}) };
+  }
+
+  function planAdd(request, { id: fixedId, timestamp: fixedTimestamp } = {}) {
+    const type = validateType(request?.type);
+    const status = validateStatus(Object.hasOwn(request ?? {}, "status") ? request.status : "active");
+    const title = validateTitle(request?.title);
+    const tags = validateTags(request?.tags);
+    const body = validateBody(request?.body ?? "");
+    const decay = request?.decay === undefined ? undefined : validateDecay(request.decay);
+    const scope = resolveNewScope(request);
+    const id = validateId(fixedId ?? randomUUID());
+    const timestamp = fixedTimestamp ?? now().toISOString();
+    validateTimestamp(timestamp);
+    const relativePath = join(MEMORY_TYPE_FOLDERS[type], `${id}.md`);
+    const raw = renderNote({ schema: NOTE_SCHEMA_VERSION, id, type, status, ...(decay ? { decay } : {}), ...scope, title, tags, created: timestamp, updated: timestamp, body });
+    return { kind: "create", id, type, relativePath, raw, preRevision: null, postRevision: digest(raw) };
+  }
+
+  async function applyAdd(plan) {
+    const { id, type, relativePath, raw } = plan;
+    await prepareRoot(true);
+    const directory = await prepareTypeDirectory(type, true);
+    const destination = join(root, relativePath);
+    if (await assertRegularFile(destination)) fail("DUPLICATE_ID", "Memory id is duplicated");
+    const tempPath = await writeTemp(directory, id, raw);
+    try {
+      await link(tempPath, destination);
+      await unlink(tempPath);
+    } catch {
+      await unlink(tempPath).catch(() => {});
+      fail("DUPLICATE_ID", "Memory id is duplicated");
+    }
+    const note = parseMarkdownMemoryNote(raw, { id, type });
+    return publicMetadata(note, relativePath);
+  }
+
+  async function planAddHappening({ id, ifRevision, date, text } = {}, { timestamp = now().toISOString() } = {}) {
+    validateId(id);
+    if (typeof ifRevision !== "string") fail("INVALID_INPUT", "Memory revision is required");
+    validateHappeningDate(date);
+    validateHappeningText(text);
+    const location = await locate(id);
+    const { note } = await readLocated(location);
+    assertVisible(note);
+    if (note.revision !== ifRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
+    const raw = renderNote({ ...note, body: appendHappening(note.body, { date, text }), updated: timestamp });
+    return { kind: "replace", id, location, relativePath: location.relativePath, raw, preRevision: ifRevision, postRevision: digest(raw), extra: { happening: { date, text } } };
+  }
+
+  async function planUpdate({ id, ifRevision, patch } = {}, { timestamp = now().toISOString() } = {}) {
+    if (typeof ifRevision !== "string" || !patch || typeof patch !== "object" || Array.isArray(patch)) {
+      fail("INVALID_INPUT", "Memory update is invalid");
+    }
+    const allowed = new Set(["status", "decay", "scope", "title", "tags", "body", "bodyEdits", "append"]);
+    if (Object.keys(patch).some((key) => !allowed.has(key))) fail("INVALID_INPUT", "Memory update is invalid");
+    if (Object.hasOwn(patch, "body") && Object.hasOwn(patch, "bodyEdits")) fail("INVALID_INPUT", "Choose body replacement or targeted edits");
+    const location = await locate(id);
+    const { note } = await readLocated(location);
+    assertVisible(note);
+    if (note.revision !== ifRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
+    if (Object.hasOwn(patch, "append") && (typeof patch.append !== "string" ||
+        !patch.append.trim() || patch.append.length > 200_000)) fail("INVALID_INPUT", "Append must contain nonempty Markdown");
+    const scope = Object.hasOwn(patch, "scope")
+      ? validateScope(patch.scope)
+      : note.scope;
+    if (scope === "personal" && view.memoryView !== "owner-and-household") {
+      fail("INVALID_SCOPE", "Personal memory is unavailable in this instance");
+    }
+    const updated = {
+      ...note,
+      scope,
+      ...(scope === "personal" ? { owner: view.principal } : { owner: undefined }),
+      status: Object.hasOwn(patch, "status") ? validateStatus(patch.status) : note.status,
+      // null clears the override so the type default applies again.
+      decay: Object.hasOwn(patch, "decay")
+        ? (patch.decay === null ? undefined : validateDecay(patch.decay)) : note.decay,
+      title: Object.hasOwn(patch, "title") ? validateTitle(patch.title) : note.title,
+      tags: Object.hasOwn(patch, "tags") ? validateTags(patch.tags) : note.tags,
+      body: Object.hasOwn(patch, "bodyEdits") ? applyBodyEdits(note.body, patch.bodyEdits)
+        : Object.hasOwn(patch, "body") ? validateBody(patch.body) : note.body,
+      updated: timestamp,
+    };
+    if (Object.hasOwn(patch, "append")) {
+      // Keep existing text intact; insert a separator only when needed.
+      updated.body = validateBody(updated.body +
+        (updated.body && !updated.body.endsWith("\n") ? "\n" : "") + patch.append);
+    }
+    const raw = renderNote(updated);
+    return { kind: "replace", id, location, relativePath: location.relativePath, raw, preRevision: ifRevision, postRevision: digest(raw), fromScope: note.scope };
   }
 
   const store = {
@@ -703,31 +822,23 @@ export function createMarkdownMemoryStore(options) {
     },
 
     async add(request) {
-      const type = validateType(request?.type);
-      const status = validateStatus(Object.hasOwn(request ?? {}, "status") ? request.status : "active");
-      const title = validateTitle(request?.title);
-      const tags = validateTags(request?.tags);
-      const body = validateBody(request?.body ?? "");
-      const decay = request?.decay === undefined ? undefined : validateDecay(request.decay);
-      const scope = resolveNewScope(request);
-      const id = validateId(randomUUID());
-      const timestamp = now().toISOString();
-      await prepareRoot(true);
-      const directory = await prepareTypeDirectory(type, true);
-      const relativePath = join(MEMORY_TYPE_FOLDERS[type], `${id}.md`);
-      const destination = join(root, relativePath);
-      if (await assertRegularFile(destination)) fail("DUPLICATE_ID", "Memory id is duplicated");
-      const raw = renderNote({ schema: NOTE_SCHEMA_VERSION, id, type, status, ...(decay ? { decay } : {}), ...scope, title, tags, created: timestamp, updated: timestamp, body });
-      const tempPath = await writeTemp(directory, id, raw);
-      try {
-        await link(tempPath, destination);
-        await unlink(tempPath);
-      } catch {
-        await unlink(tempPath).catch(() => {});
-        fail("DUPLICATE_ID", "Memory id is duplicated");
-      }
-      const note = parseMarkdownMemoryNote(raw, { id, type });
-      return publicMetadata(note, relativePath);
+      return applyAdd(planAdd(request));
+    },
+
+    /** Deterministic planning for operation receipts: no filesystem effect. */
+    async plan(command, request, options = {}) {
+      if (command === "add") return planAdd(request, options);
+      if (command === "update") return planUpdate(request, options);
+      if (command === "addHappening") return planAddHappening(request, options);
+      if (command === "delete") return planDelete(request);
+      fail("INVALID_COMMAND", "Unknown memory operation");
+    },
+
+    async apply(plan) {
+      if (plan.kind === "create") return applyAdd(plan);
+      if (plan.kind === "replace") return applyReplace(plan);
+      if (plan.kind === "delete") return applyDelete(plan);
+      fail("INVALID_INPUT", "Memory plan is invalid");
     },
 
     async read({ id } = {}) {
@@ -737,89 +848,12 @@ export function createMarkdownMemoryStore(options) {
       return publicNote(note, location.relativePath);
     },
 
-    async addHappening({ id, ifRevision, date, text } = {}) {
-      validateId(id);
-      if (typeof ifRevision !== "string") fail("INVALID_INPUT", "Memory revision is required");
-      validateHappeningDate(date);
-      validateHappeningText(text);
-      const location = await locate(id);
-      const { note } = await readLocated(location);
-      assertVisible(note);
-      if (note.revision !== ifRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
-      const updated = {
-        ...note,
-        body: appendHappening(note.body, { date, text }),
-        updated: now().toISOString(),
-      };
-      const raw = renderNote(updated);
-      const tempPath = await writeTemp(dirname(location.path), id, raw);
-      try {
-        const currentRaw = await readFile(location.path, "utf8");
-        if (digest(currentRaw) !== ifRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
-        await rename(tempPath, location.path);
-      } catch (error) {
-        await unlink(tempPath).catch(() => {});
-        if (error instanceof MemoryError) throw error;
-        fail("IO_ERROR", "Memory storage is unavailable");
-      }
-      const parsed = parseMarkdownMemoryNote(raw, { id, type: location.type });
-      return {
-        ...publicNote(parsed, location.relativePath),
-        happening: { date, text },
-      };
+    async addHappening(request) {
+      return applyReplace(await planAddHappening(request));
     },
 
-    async update({ id, ifRevision, patch } = {}) {
-      if (typeof ifRevision !== "string" || !patch || typeof patch !== "object" || Array.isArray(patch)) {
-        fail("INVALID_INPUT", "Memory update is invalid");
-      }
-      const allowed = new Set(["status", "decay", "scope", "title", "tags", "body", "bodyEdits", "append"]);
-      if (Object.keys(patch).some((key) => !allowed.has(key))) fail("INVALID_INPUT", "Memory update is invalid");
-      if (Object.hasOwn(patch, "body") && Object.hasOwn(patch, "bodyEdits")) fail("INVALID_INPUT", "Choose body replacement or targeted edits");
-      const location = await locate(id);
-      const { note } = await readLocated(location);
-      assertVisible(note);
-      if (note.revision !== ifRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
-      if (Object.hasOwn(patch, "append") && (typeof patch.append !== "string" ||
-          !patch.append.trim() || patch.append.length > 200_000)) fail("INVALID_INPUT", "Append must contain nonempty Markdown");
-      const scope = Object.hasOwn(patch, "scope")
-        ? validateScope(patch.scope)
-        : note.scope;
-      if (scope === "personal" && view.memoryView !== "owner-and-household") {
-        fail("INVALID_SCOPE", "Personal memory is unavailable in this instance");
-      }
-      const updated = {
-        ...note,
-        scope,
-        ...(scope === "personal" ? { owner: view.principal } : { owner: undefined }),
-        status: Object.hasOwn(patch, "status") ? validateStatus(patch.status) : note.status,
-        // null clears the override so the type default applies again.
-        decay: Object.hasOwn(patch, "decay")
-          ? (patch.decay === null ? undefined : validateDecay(patch.decay)) : note.decay,
-        title: Object.hasOwn(patch, "title") ? validateTitle(patch.title) : note.title,
-        tags: Object.hasOwn(patch, "tags") ? validateTags(patch.tags) : note.tags,
-        body: Object.hasOwn(patch, "bodyEdits") ? applyBodyEdits(note.body, patch.bodyEdits)
-          : Object.hasOwn(patch, "body") ? validateBody(patch.body) : note.body,
-        updated: now().toISOString(),
-      };
-      if (Object.hasOwn(patch, "append")) {
-        // Keep existing text intact; insert a separator only when needed.
-        updated.body = validateBody(updated.body +
-          (updated.body && !updated.body.endsWith("\n") ? "\n" : "") + patch.append);
-      }
-      const raw = renderNote(updated);
-      const tempPath = await writeTemp(dirname(location.path), id, raw);
-      try {
-        const currentRaw = await readFile(location.path, "utf8");
-        if (digest(currentRaw) !== ifRevision) fail("REVISION_CONFLICT", "Memory changed since it was read");
-        await rename(tempPath, location.path);
-      } catch (error) {
-        await unlink(tempPath).catch(() => {});
-        if (error instanceof MemoryError) throw error;
-        fail("IO_ERROR", "Memory storage is unavailable");
-      }
-      const parsed = parseMarkdownMemoryNote(raw, { id, type: location.type });
-      return publicNote(parsed, location.relativePath);
+    async update(request) {
+      return applyReplace(await planUpdate(request));
     },
 
     async delete(request) {

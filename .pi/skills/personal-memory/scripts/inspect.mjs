@@ -384,6 +384,7 @@ async function inspectMemoryVault({
   memoryView = "owner-and-household",
   sessionRoot,
   sessionRoots,
+  sourceResolver,
   validateSources = false,
   maxIssues = MAX_ISSUES,
   maxScannedNotes = MAX_SCANNED_NOTES,
@@ -398,7 +399,9 @@ async function inspectMemoryVault({
     !Array.isArray(forbiddenRoots) ||
     forbiddenRoots.some((path) => typeof path !== "string" || path.trim() === "") ||
     typeof validateSources !== "boolean" ||
+    (sourceResolver !== undefined && typeof sourceResolver !== "function") ||
     (validateSources &&
+      typeof sourceResolver !== "function" &&
       (!Array.isArray(effectiveSessionRoots) ||
         effectiveSessionRoots.length === 0 ||
         effectiveSessionRoots.some(
@@ -522,7 +525,19 @@ async function inspectMemoryVault({
     }
   }
 
-  if (validateSources) {
+  if (validateSources && typeof sourceResolver === "function") {
+    // Host-owned provenance (native history plus archived JSONL). Findings use the same codes.
+    const findings = await sourceResolver(
+      sourceAnchors.map(({ sessionId, entryId, timestamp }) => ({ sessionId, entryId, timestamp })),
+      { maxBytes: maxScannedSessionBytes, maxEntries: maxScannedSessionEntries },
+    );
+    for (const [position, anchor] of sourceAnchors.entries()) {
+      const code = findings[position] ?? null;
+      if (code === null) continue;
+      if (code === "SOURCE_SESSION_SCAN_LIMIT_EXCEEDED") scanLimited = true;
+      errors.push(issue(code, anchor.relativePath, false));
+    }
+  } else if (validateSources) {
     const sessions = await loadReferencedSessions(
       effectiveSessionRoots.map((path) => resolve(path)),
       sourceAnchors,
@@ -637,9 +652,11 @@ export async function lintMemoryVault(options) {
     ...options,
     sessionRoots:
       options?.sessionRoots ??
-      (options?.sessionRoot === undefined
-        ? [resolveBridgeSessionDirectory()]
-        : [options.sessionRoot]),
+      (options?.sourceResolver !== undefined
+        ? []
+        : options?.sessionRoot === undefined
+          ? [resolveBridgeSessionDirectory()]
+          : [options.sessionRoot]),
     validateSources: true,
   });
   return inspected.report;

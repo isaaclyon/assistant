@@ -70,7 +70,7 @@ async function readRequest(stdin) {
  * never a field read from a model/CLI request. Only the Telegram approval
  * handler supplies it after consuming an operation-bound, one-use token. */
 export async function executeMemoryOperation(command, request, {
-  env = process.env, cwd = process.cwd(), confirmed = false,
+  env = process.env, cwd = process.cwd(), confirmed = false, sourceResolver,
 } = {}) {
   if (!COMMANDS.has(command)) throw new MemoryError("INVALID_COMMAND", "Unknown memory operation");
   const root = resolveMemoryDirectory(env);
@@ -101,7 +101,8 @@ export async function executeMemoryOperation(command, request, {
   }
   if (command === "lint" || command === "core") {
     if (Object.keys(request).length > 0) throw new MemoryError("INVALID_INPUT", "Request must be empty");
-    const options = { root, forbiddenRoots, sessionRoots: resolveBridgeSessionDirectories(env), ...view };
+    const options = { root, forbiddenRoots, sessionRoots: resolveBridgeSessionDirectories(env), ...view,
+      ...(command === "lint" && sourceResolver ? { sourceResolver } : {}) };
     return command === "lint" ? lintMemoryVault(options) : compileCoreMemory(options);
   }
   if (command === "search" || command === "happenings") {

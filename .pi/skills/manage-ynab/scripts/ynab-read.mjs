@@ -113,11 +113,19 @@ async function budgetId() {
 
 export async function runYnab(args) {
   const bunBin = join(homedir(), ".bun", "bin");
-  const { stdout } = await execFileAsync(join(bunBin, "ynab"), args, {
-    timeout: 30_000,
-    maxBuffer: 1024 * 1024,
-    env: { ...process.env, PATH: `${bunBin}:${process.env.PATH ?? ""}` },
-  });
+  const options = { timeout: 30_000, maxBuffer: 1024 * 1024, env: process.env };
+  let result;
+  try {
+    result = await execFileAsync("ynab", args, options);
+  } catch (error) {
+    // Only a missing executable permits fallback. Auth/transport failures must
+    // not silently choose another installation or repeat the operation.
+    if (error?.code !== "ENOENT") throw error;
+    result = await execFileAsync(join(bunBin, "ynab"), args, {
+      ...options, env: { ...process.env, PATH: `${bunBin}:${process.env.PATH ?? ""}` },
+    });
+  }
+  const { stdout } = result;
   return JSON.parse(stdout);
 }
 

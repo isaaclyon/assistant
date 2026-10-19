@@ -108,3 +108,63 @@ enabled. Reboot clears manager authorization, so an interrupted enable sequence
 cannot bypass the surviving hold. This replaces the unit-only automatic rollback
 in ADR-0005 and ADR-0020. See the fleet runbook for explicit recovery and the
 required target-systemd smoke test.
+
+
+## Native recipient implementation
+
+The separate `durable-jobs-test` profile consumes the same v1 handoff exchange
+under the same private drain/transition locks. Its explicit recipient role reads
+only its own configured state directory and routes to its configured private
+chat. Legacy/native runtime generations never concurrently own one recipient;
+coexistence is across separately owned instances. Cross-UID exchange remains
+unsupported.
+
+A native reservation binds dispatch payload and authority. A job source identity
+retains dispatch/job/type/original-time metadata without synthetic Telegram
+message IDs. Public native submission with a stable request ID establishes
+admission before the file moves to `completed`. A native-owned surviving claim
+can reconcile its reservation and submission; historical claims with no native
+proof stay held. Changed or malformed bytes cannot authorize another request.
+The native document records run outcome separately; v1 acceptance still says
+nothing about external completion. Proactive output follows the native final
+ledger and its delivery ambiguity policy, with `NO_REPLY` suppressed.
+
+Canonical definitions, occurrence ledger and terminal identities keep their
+existing domain owners. The [C5 recipient guide](../pi-durable-c5-jobs.md) records
+recipient validation and open gates.
+
+## Native cron and one-shot coordinator
+
+The separate `durable-jobs-coordinator-test` profile adds cron/at publication by
+reusing the host-neutral scheduler. Its coordinator state stays outside every
+recipient state tree. Explicit self or same-UID target grants control each v1
+publication; cross-UID exchange remains unsupported. A lifetime SQLite lease
+excludes other native coordinators, while legacy/native transition still needs
+quiescent writers and one active owner. The legacy coordinator does not use this
+lease.
+
+Publication retains the materialized occurrence's full identity and original
+creation time. Restored unsupported work cannot publish. Definition edits and
+removal reconcile cancellation before recipient startup; invalid identities,
+unsafe trees or removed target grants can hold startup until explicitly resolved.
+Processing and accepted work remain recipient-owned.
+
+Fresh-runtime provenance, committed atomically with first ledger metadata only
+when legacy state is absent, allows restart after a rejected first definition
+file saves scheduler state. It does not mark definitions initialized or prove a
+historical one-shot ran. Untagged/unknown ledgers and interrupted offline legacy
+initialization retain their migration guard. This additive domain record keeps
+the version-1 occurrence and handoff identities intact.
+
+The [coordinator guide](../pi-durable-c5-coordinator.md) records offline evidence
+and the subsequent schedule and child migration gates.
+
+## Native heartbeat and webhook publication
+
+The separate `durable-jobs-schedules-test` profile extends the same coordinator
+with explicit heartbeat checker selection, scoped schedule helpers and optional
+loopback webhook ingestion. Existing domain owners retain cursor, definition and
+occurrence identity; HTTP 202 still establishes materialization only. The
+[schedule guide](../pi-durable-c5-schedules.md) records the four-way heartbeat and
+webhook admission matrix and SIGKILL publication barriers. Child execution and
+retention remain open; this evidence does not establish production migration.

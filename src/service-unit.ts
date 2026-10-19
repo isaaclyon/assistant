@@ -2,6 +2,7 @@ import { dirname, isAbsolute, join, normalize, sep } from "node:path";
 
 import type { BridgeInstanceConfig } from "./config.js";
 import { privateBrowserEndpoint } from "./private-browser-endpoint.js";
+import { runtimeEntrypoint } from "./runtime-entrypoint.js";
 
 function quote(value: string): string {
   return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
@@ -17,6 +18,8 @@ export interface InstanceServiceUnitOptions {
   nodePath: string;
   projectDir: string;
   releaseSha: string;
+  /** Explicit deployment input. Omitting this preserves legacy unit rendering. */
+  runtime?: { generation: "pi-durable"; configPath: string; configSha256?: string };
 }
 
 export interface RenderedInstanceServiceUnit {
@@ -30,11 +33,19 @@ export function renderInstanceServiceUnit({
   nodePath,
   projectDir,
   releaseSha,
+  runtime,
 }: InstanceServiceUnitOptions): RenderedInstanceServiceUnit {
   if (!/^[0-9a-f]{40}$/.test(releaseSha)) {
     throw new Error("Instance service unit requires a full release SHA");
   }
-  const executable = join(projectDir, "dist", "src", "daemon.js");
+  if (runtime && (runtime.generation !== "pi-durable" || !isAbsolute(runtime.configPath) ||
+      normalize(runtime.configPath) !== runtime.configPath || /[\s\0%$"\\]/.test(runtime.configPath))) {
+    throw new Error("Native service requires an explicit normalized configuration path");
+  }
+  if (runtime?.configSha256 !== undefined && !/^[a-f0-9]{64}$/.test(runtime.configSha256)) {
+    throw new Error("Native service configuration digest must be a SHA-256 hex digest");
+  }
+  const executable = runtimeEntrypoint(projectDir, runtime?.generation ?? "legacy");
   const path = [
     dirname(nodePath),
     "/usr/local/sbin",
@@ -46,7 +57,9 @@ export function renderInstanceServiceUnit({
   ].join(":");
   const unitName = `pi-telegram-bridge-${config.instanceId}.service`;
   const contents = `[Unit]\nDescription=Persistent Pi Telegram bridge (${config.displayName} / ${config.instanceId})\nDocumentation=https://github.com/llblab/pi-telegram\nWants=network-online.target\nAfter=network-online.target\n\n[Service]\nType=simple\nWorkingDirectory=${escapeUnitPath(config.resourceRoot)}\nExecCondition=${quote(nodePath)} ${quote(join(projectDir, "dist", "src", "recovery-start-check.js"))} ${quote(config.stateRoot)}\nExecStart=${quote(nodePath)} ${quote(executable)}\nRestart=on-failure\nRestartSec=5s\nTimeoutStopSec=30s\nUMask=0077\nEnvironment=${quote(`PATH=${path}`)}\nEnvironment=${quote(`PI_CODING_AGENT_DIR=${config.agentDir}`)}\nEnvironment=${quote(`PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST=${manifestPath}`)}\nEnvironment=${quote(`PI_TELEGRAM_BRIDGE_INSTANCE_ID=${config.instanceId}`)}\nEnvironment=${quote(`PI_TELEGRAM_BRIDGE_RESOURCE_ROOT=${config.resourceRoot}`)}\nEnvironment=${quote(`PI_TELEGRAM_BRIDGE_RELEASE_SHA=${releaseSha}`)}\nEnvironment=${quote(`PI_TELEGRAM_BRIDGE_STATE_ROOT=${config.stateRoot}`)}\nEnvironment=${quote(`PI_TELEGRAM_BRIDGE_CONFIG_ROOT=${config.configRoot}`)}\nEnvironmentFile=-${escapeUnitPath(config.environmentFilePath)}\n\n[Install]\nWantedBy=default.target\n`;
-  return { unitName, contents };
+  return { unitName, contents: runtime
+    ? contents.replace("[Install]", `Environment=${quote(`PI_DURABLE_CONFIG=${runtime.configPath}`)}\n${runtime.configSha256 ? `Environment=${quote(`PI_DURABLE_CONFIG_SHA256=${runtime.configSha256}`)}\n` : ""}\n[Install]`)
+    : contents };
 }
 
 export interface InstanceServiceUnitsOptions
@@ -77,6 +90,9 @@ export function renderIsolatedInstanceServiceUnit(
         ["root", "sudo", "wheel", "docker", "lxd", "adm"].includes(account)) {
       throw new Error("Isolated service requires an unprivileged named account");
     }
+  }
+  if (options.runtime && !options.runtime.configSha256) {
+    throw new Error("Isolated native service requires a pinned administrator configuration digest");
   }
   const { privateHome, config } = options;
   if (!/^pi-[a-z0-9-]{1,24}$/.test(options.networkNamespace) ||

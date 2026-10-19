@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.native.json",
+  "include": [
+    "src/durable/**/*.ts",
+    "src/recovery-start-check.ts",
+    "src/isolated-deploy-cli.ts",
+    "src/isolation-start-check.ts",
+    "src/trusted-broker-daemon.ts",
+    "src/isolation-network-service.ts",
+    "src/isolation-proxy-service.ts",
+    ".pi/extensions/subagents/inspection.ts",
+    ".pi/lib/mutation-lock.mjs",
+    ".pi/skills/personal-memory/scripts/*.mjs",
+    "src/jobs-cli.ts",
+    "src/price-watches.ts",
+    "src/checkers/*.ts"
+  ],
+  "exclude": [
+    "tests"
+  ],
+  "compilerOptions": {
+    "declaration": true
+  }
+}

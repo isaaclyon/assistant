@@ -1,5 +1,114 @@
 # Architecture
 
+## Native migration branch
+
+This branch builds `src/durable/` with a separate exact 1.3.0 dependency tree.
+`application.ts` composes the registry, explicit provider account, host and pinned
+fork transport; `daemon.ts` owns process lifetime. One OS writer owns the native
+WAL/FULL Harness database and retained front-buffer inbox. Source bindings,
+admission receipts, controls, final delivery and ordinary approvals persist
+across restart. The dedicated foundation profile has no domain tools or jobs.
+
+C3 adds the selected chat-and-memory profile: canonical Markdown/Git operation
+receipts, durable user confirmations, scoped native/archive history, request-only
+core/date/recall context and direct Telegram controls. Its dedicated live user
+checkpoint passed. See [ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md),
+[ADR-0053](docs/adr/0053-native-chat-memory-and-evidence.md), and the
+[C3 guide](docs/pi-durable-c3-chat-memory.md) for native boundaries and recovery.
+C4's first slice adds an explicit `durable-tools-test` profile with SDK-native
+file/shell tools, bounded repository inspection and public search/fetch. Read-only
+tools may replay after current authority checks; interrupted general writes and
+shell calls stay interrupted. The host owns execution-environment cleanup.
+See the [C4 tools guide](docs/pi-durable-c4-tools.md) for bounds and validation.
+The separate `durable-read-integrations-test` profile adds typed Calendar,
+Gmail, Contacts and Places reads with explicit private Google configuration.
+Workspace reads can replay after current authority checks. Metered Places calls
+run in an internal replay-unsafe nested task; the existing cache and attempt
+accounting remain domain-owned. `durable-cli-integrations-test` adds the existing
+YNAB and editable Messages-link skills through the replay-unsafe shell. Helpers
+resolve from the release while relative work stays in the workspace. An optional
+private Messages origin enters only this profile's shell environment and recovery
+signature; YNAB authentication remains under the runtime's OS identity. Unknown
+financial outcomes require read-only inspection before another attempt.
+`durable-places-test` adds the native private ranking application for Isaac.
+The Harness owns drafts, prompt bindings and one-use, message/epoch-bound
+callback claims; the existing private places SQLite store owns ranking and
+comparison progress. A claimed write with an unknown result never repeats its
+domain effect; recovery may repeat read commands. Direct Telegram menus and model handoffs use the same application
+service. The separate `durable-mutations-test` profile adds Calendar create/update
+and direct deletion confirmations, plus direct places cancel/delete/undo approvals.
+Native durable records own confirmation identity and presentation; domain code
+owns event validation, stable create IDs, revision/snapshot checks and read-only
+reconciliation. Unknown effects never authorize an automatic repeated mutation.
+`durable-browser-test` extends that profile for Isaac with native private input,
+OpenTable, multistep login, takeover and broker-only saved-login discovery. The
+host binds explicit browser paths, credential scope and broker/endpoints for one
+process lifetime. A registry-wide guard excludes tools during protected work and
+refuses entry while another tool is running. Cancellation drains domain cleanup
+before Harness close and environment release. All browser bundle calls are
+sequential and replay-unsafe; a crash keeps the stock-browser gate and reports
+an interrupted outcome. The retained domain owns private CDP and Mini App input;
+only whitelisted statuses/copy receipts reach the Harness. OpenTable email codes
+use the explicitly selected native Google runtime. The separate
+`durable-provider-test` profile adds authenticated `/fast` and `/usage` commands
+and weekend-planning guidance. Fast preferences and command identities persist
+in a native document; the host promotes saved changes only after native work,
+including retries, settles. A provider wrapper composes priority into the native
+wire payload. Usage reads the selected Codex OAuth account through a fixed,
+bounded endpoint and returns only formatted allowances. `durable-parity-test`
+adds the native hosted `web_run` adapter, provider retry/stall compatibility and
+reservation guidance. Hosted reference state uses a store/conversation identity;
+POST requests are replay-unsafe and never automatically resent after interruption.
+The wrapper classifies only the missing legacy transient errors and aborts idle
+provider streams; the native Harness owns retry budgets and delivery settlement.
+All integration tools use the existing private, redacted lifecycle diagnostics.
+`durable-jobs-test` starts C5 with a self-only v1 scheduled-job recipient. Native
+reservations and submission receipts reconcile claims across restart; historical
+claims without native proof stay held. Explicit job source IDs preserve original
+time, destination and human-idle behavior. The v1 `completed` directory proves
+admission only; native run outcome and final delivery are separate. Scheduled
+runs have final-only output. Read-only inspection exposes bounded status counts.
+`durable-jobs-coordinator-test` adds cron/at publication through the existing
+scheduler and occurrence ledger, in a coordinator directory outside recipient
+trees. Explicit same-UID targets constrain publication, and a lifetime SQLite
+lease excludes other native coordinators. Legacy/native switching still requires
+quiescent writers and one owner. Fresh-ledger provenance permits restart after a
+first rejected definition file without weakening historical migration guards.
+`durable-jobs-schedules-test` adds explicitly selected compiled checkers,
+loopback webhooks, scoped schedule helpers and temporary price watches. Native
+checker environments exclude ambient provider settings; Gmail uses only the
+selected Google configuration, and semantic schedules use a separate explicit
+judge key. The existing domain owners retain cursors and occurrence identities.
+`durable-jobs-children-test` adds native background orchestration with separate
+process-owned temporary child Harness stores. Stable IDs commit before spawn;
+OS writer/control leases govern read-safe restart, cancellation and retirement.
+One bounded report returns to the original conversation after parent idle.
+Seven-day creation-based cleanup commits a tombstone before verified store/file
+removal; main correlation evidence and bounded parent history remain durable.
+The child offline validation gate passed. See the [child guide](docs/pi-durable-c5-children.md),
+[C5 recipient](docs/pi-durable-c5-jobs.md),
+[coordinator](docs/pi-durable-c5-coordinator.md) and
+[schedule](docs/pi-durable-c5-schedules.md) guides.
+C6 adds frozen-copy migration inventory/preservation and explicit staged runtime
+activation. The offline migration output always remains held; it never imports
+legacy task stacks or authorizes resubmission. The administrator adapter reuses
+the mixed-manager hold/checkpoint/startup barrier, retains every peer's approved
+release, and keeps the broker release independent. Root-owned observations bind
+native scheduled completion and a controlled restart before deliberate
+advancement. The separate immutable release builder uses reviewed full commits
+and an external allowlist. See [ADR-0054](docs/adr/0054-stage-native-activation-with-retained-evidence.md)
+and the [C6 rehearsal guide](docs/pi-durable-c6-rehearsal.md).
+Live acceptance and production activation remain separate from disposable
+synthetic rehearsal evidence. The separately authorized one-bot native trial
+passes scheduled execution, controlled restart and a real human-message reply.
+Authenticated YNAB acceptance is skipped by user decision. Peer runtimes and
+the broker retain their legacy release; broader rollout and retirement require
+separate authorization. Mainline CI runs checks only, with no deployment job.
+
+The sections below describe the deployed legacy architecture. Its package,
+source patches and service path remain in the legacy release tree until the
+C6/C7 activation gates pass.
+
 ## Boundaries
 
 - **Host:** owns instance selection, process lifetime, Pi runtime creation, persistent session selection, signal handling, and service installation.
@@ -7,7 +116,7 @@
 - **pi-telegram:** owns Telegram pairing, routing, rendering and controls; in the ordinary user fleet it also owns upstream polling and offsets.
 - **Trusted broker (opt-in isolated deployment):** owns the personal bot token, upstream polling, durable updates, credential approvals and scoped 1Password access; Pi receives ordinary traffic through a restricted Unix socket.
 - **systemd:** owns one unit per instance, boot activation, restart policy, and logs.
-- **GitHub Actions:** owns post-merge validation and serialized production deployment through the server's repository-scoped runner.
+- **GitHub Actions:** owns pull-request and post-merge native validation. Production activation requires the explicit staged administrator procedure; CI does not deploy.
 - **Tailscale Serve:** owns tailnet-only HTTPS and static delivery for editable Messages links.
 
 The host loads a full-commit-pinned `isaaclyon/pi-telegram` fork through Pi's `DefaultResourceLoader` and binds extensions in RPC mode. A version- and source-checked postinstall patch replaces raw tool-call status labels with deterministic, privacy-safe activity descriptions; see [ADR-0007](docs/adr/0007-patch-telegram-tool-activity-labels.md). The RPC binding includes Pi's official command-context session actions (`waitForIdle`, `newSession`, `fork`, tree navigation, session switching, and reload). The fork's narrow process-local host capability delegates Telegram `/new` to `AgentSessionRuntime.newSession()` without exposing the runtime or retaining stale extension contexts. The host separates each instance's mutable `workspaceCwd` from the immutable `resourceRoot`, disables hierarchical discovery, and supplies only the selected profile from `.pi/capabilities.json`; see [ADR-0009](docs/adr/0009-isolate-telegram-agent-instructions.md) and [ADR-0020](docs/adr/0020-run-a-household-bot-fleet-from-one-release.md). Canonicalized resources must remain inside the release, and symlink escapes are rejected. Global Pi/Agents directories and workspace-local capabilities never execute in the bridge. Filesystem tool access itself is not restricted to the cwd.
@@ -409,3 +518,15 @@ Daemon shutdown gives that graceful disposal a bounded ten-second window. If an 
 ## Known limitation
 
 Inbound turns are crash-durable through the bridge inbox, but outbound Telegram replies are not queued durably. A failed send leaves the generated answer in Pi's persistent session for recovery or re-asking.
+
+## Planned runtime migration
+
+The [pi-durable migration plan](docs/pi-durable-migration-plan.md) records the
+approved target architecture and C0–C7 checkpoints. C0–C3 passed. C4 general
+file/shell/public-web tools, Google reads, CLI-backed YNAB/Messages skills and
+direct private places flows and guarded Calendar/places mutations are implemented
+on isolated native branches. Protected browser operations and native fast/usage
+controls, hosted web, retry/stall compatibility and reservation guidance are also
+implemented. Live integration acceptance and privileged builder/deployment
+coverage remain pending. The sections above the migration note describe legacy production,
+except for the explicit native branch overview. Production activation remains C7.

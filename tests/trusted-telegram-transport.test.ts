@@ -28,6 +28,30 @@ function fixture() {
 }
 
 describe("trusted Telegram transport", () => {
+  it.each([400,429])("preserves only safe rejection metadata for status %s", async status => {
+    const { transport, upstream } = fixture();
+    upstream.mockResolvedValue(new Response(JSON.stringify({
+      ok: false, error_code: status, description: "secret upstream error",
+      parameters: { retry_after: 3, migrate_to_chat_id: 999 }, token: "secret",
+    }), { status }));
+    const response = await transport.runtimeCall("sendMessage", { chat_id: 42, text: "test" });
+    expect(response.status).toBe(status);
+    expect(await response.json()).toEqual({ ok: false, error_code: status,
+      description: "Telegram request unavailable", ...(status === 429 ? { parameters: { retry_after: 3 } } : {}) });
+  });
+
+  it.each([
+    {status:502,payload:{ok:false,error_code:502}},
+    {status:400,payload:{ok:false,error_code:429}},
+    {status:400,payload:{ok:false}},
+  ])("keeps ambiguous upstream responses uncertain: $status", async ({status,payload}) => {
+    const { transport, upstream } = fixture();
+    upstream.mockResolvedValue(new Response(JSON.stringify(payload), {status}));
+    const response = await transport.runtimeCall("sendMessage", {chat_id:42,text:"test"});
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ok:false,error_code:502,description:"Telegram request unavailable"});
+  });
+
   it("keeps polling and approval callbacks outside the runtime proxy", async () => {
     const { store, transport, upstream, setUpdates } = fixture();
     const id = await transport.showApproval(details, 1000);

@@ -5,12 +5,12 @@ import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BridgeInstanceConfig } from "../src/config.js";
 
-const h = vi.hoisted(() => ({ root: "", exec: vi.fn(), spawn: vi.fn(), pageClose: vi.fn(), serverClose: vi.fn(), send: vi.fn(), done: Promise.resolve("submitted"), prepare: vi.fn(), serverOptions: undefined as any }));
+const h = vi.hoisted(() => ({ root: "", exec: vi.fn(), executable: vi.fn(), spawn: vi.fn(), pageClose: vi.fn(), serverClose: vi.fn(), send: vi.fn(), done: Promise.resolve("submitted"), prepare: vi.fn(), serverOptions: undefined as any }));
 vi.mock("node:util", () => ({ promisify: () => h.exec }));
 vi.mock("node:child_process", () => ({ execFile: vi.fn(), spawn: h.spawn }));
 vi.mock("../.pi/skills/agent-browser/scripts/stock-chrome.mjs", () => ({
   agentSessionName: () => "owned-agent-session", assertUnprotected: async () => {},
-  current: async () => ({ launchId: "owned-launch", port: 1234 }), executable: async () => "agent-browser",
+  current: async () => ({ launchId: "owned-launch", port: 1234 }), executable: h.executable,
   paths: () => ({ runtimeDir: h.root, protectedPath: join(h.root, "protected-input.json") }),
   withSessionLock: async (_session: string, work: () => unknown) => work(),
 }));
@@ -29,6 +29,7 @@ describe("protected operation lifecycle", () => {
     h.root = await mkdtemp(join(tmpdir(), "private-browser-operation-"));
     vi.stubEnv("XDG_RUNTIME_DIR", h.root); vi.stubEnv("PI_TELEGRAM_BRIDGE_INSTANCE_ID", "test");
     vi.stubGlobal("fetch", vi.fn(async () => new Response("ok")));
+    h.executable.mockResolvedValue("agent-browser");
     h.pageClose.mockResolvedValue(undefined); h.serverClose.mockResolvedValue(undefined);
     h.prepare.mockResolvedValue({ close: h.pageClose, submit: vi.fn() });
     h.send.mockResolvedValue(42); h.done = Promise.resolve("submitted");
@@ -43,10 +44,10 @@ describe("protected operation lifecycle", () => {
     h.spawn.mockImplementation(() => Object.assign(new EventEmitter(), { kill: vi.fn() }));
   });
   afterEach(async () => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); await rm(h.root, { recursive: true, force: true }); });
-  const run = (chatId = 123, signal = new AbortController().signal) => runPrivateBrowserInput({
+  const run = (chatId = 123, signal = new AbortController().signal, onDiagnostic?: (event: unknown) => void) => runPrivateBrowserInput({
     config: { instanceId: "test", telegramSurface: { type: "private" }, agentDir: "/unused", telegramProfile: "test", resourceRoot: "/release" } as BridgeInstanceConfig,
     request: { session: "default", pageUrl: "https://example.com/login", resumeUrl: "https://example.com/home", fields: [{ kind: "password", selector: "#password" }], submitSelector: "button" },
-    chatId, signal, notifyWaiting: vi.fn(),
+    chatId, signal, notifyWaiting: vi.fn(), onDiagnostic,
   });
   it("disconnects the owned observer before preparation and cleans resources before returning", async () => {
     expect(await run()).toEqual({ status: "submitted" });
@@ -55,10 +56,34 @@ describe("protected operation lifecycle", () => {
     await expect(readFile(join(h.root, "protected-input.json"))).rejects.toThrow();
     expect(h.send).toHaveBeenLastCalledWith("test-token", "editMessageText", expect.objectContaining({ message_id: 42, reply_markup: { inline_keyboard: [] } }));
   });
+  it("reports observer disconnection failure without exposing process output or clearing the gate", async () => {
+    const diagnostic = vi.fn(), previous = h.exec.getMockImplementation()!;
+    const failure = Object.assign(new Error("synthetic-secret-message"), { code: 1, stdout: "synthetic-secret-output", stderr: "synthetic-secret-error" });
+    h.exec.mockImplementation((binary, ...args) => binary === "agent-browser" ? Promise.reject(failure) : previous(binary, ...args));
+    expect(await run(123, new AbortController().signal, diagnostic)).toEqual({ status: "browser_blocked" });
+    expect(diagnostic).toHaveBeenCalledWith(expect.objectContaining({ operation: "input", phase: "observer-disconnect", exitCode: 1 }));
+    expect(JSON.stringify(diagnostic.mock.calls)).not.toContain("synthetic-secret");
+    expect(h.prepare).not.toHaveBeenCalled(); expect(h.send).not.toHaveBeenCalled();
+    expect(await readFile(join(h.root, "protected-input.json"), "utf8")).toContain("owned-launch");
+  });
   it("retains the gate when sensitive-document cleanup fails", async () => {
+    const diagnostic = vi.fn();
     h.pageClose.mockRejectedValue(new Error("synthetic-secret-123"));
+    expect(await run(123, new AbortController().signal, diagnostic)).toEqual({ status: "browser_blocked" });
+    expect(await readFile(join(h.root, "protected-input.json"), "utf8")).not.toContain("synthetic-secret-123");
+    expect(diagnostic).toHaveBeenCalledWith({ operation: "input", phase: "cleanup-page" });
+  });
+  it("still closes the sensitive document and retains the gate if listener cleanup fails", async () => {
+    h.serverClose.mockRejectedValueOnce(new Error("synthetic-secret-123"));
+    expect(await run()).toEqual({ status: "browser_blocked" });
+    expect(h.pageClose).toHaveBeenCalledOnce();
+    expect(await readFile(join(h.root, "protected-input.json"), "utf8")).not.toContain("synthetic-secret-123");
+  });
+  it("keeps the gate when observer disconnection or protected preparation is uncertain", async () => {
+    h.prepare.mockRejectedValueOnce(new Error("synthetic-secret-123"));
     expect(await run()).toEqual({ status: "browser_blocked" });
     expect(await readFile(join(h.root, "protected-input.json"), "utf8")).not.toContain("synthetic-secret-123");
+    expect(h.pageClose).not.toHaveBeenCalled();
   });
   it("binds the provisioned endpoint without acquiring host proxy authority", async () => {
     vi.stubEnv("PI_TELEGRAM_TRUSTED_SOCKET", "/run/synthetic/socket");
@@ -75,7 +100,7 @@ describe("protected operation lifecycle", () => {
     expect(await run(456)).toEqual({ status: "unavailable" }); expect(h.spawn).not.toHaveBeenCalled(); expect(h.prepare).not.toHaveBeenCalled();
   });
   it("handles preflight failure without publishing a form or retaining a clean gate", async () => {
-    h.prepare.mockRejectedValue(new Error("synthetic-site-content"));
+    h.executable.mockRejectedValueOnce(new Error("synthetic-site-content"));
     expect(await run()).toEqual({ status: "unavailable" }); expect(h.send).not.toHaveBeenCalled();
     await expect(readFile(join(h.root, "protected-input.json"))).rejects.toThrow();
   });

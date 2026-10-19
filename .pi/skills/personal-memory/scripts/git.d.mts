@@ -2,6 +2,7 @@ export interface MemoryGitMutation {
   action: "add" | "update" | "delete";
   id: string;
   relativePath: string;
+  operationKey?: string;
 }
 
 export interface MemoryGitOptions {
@@ -19,3 +20,11 @@ export function commitMemoryMutation(
   mutation: MemoryGitMutation,
   options?: MemoryGitOptions,
 ): Promise<{ committed: true } | { committed: false; code: "GIT_COMMIT_FAILED" }>;
+
+export function memoryOperationTrailer(operationKey: string): string;
+
+export function inspectMemoryGitOperation(
+  root: string,
+  operation: { relativePath: string; operationKey: string },
+  options?: MemoryGitOptions,
+): Promise<{ committed: boolean; pathDirty: boolean; otherStaged: boolean }>;

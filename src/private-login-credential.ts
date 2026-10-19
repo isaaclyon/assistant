@@ -1,9 +1,9 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import type { BridgeInstanceConfig } from "./config.js";
+import type { PrivateBrowserConfig } from "./private-browser-config.js";
 
 /** Existing scoped/domain-checked provider, with stdout kept inside the host. */
-export function privateLoginCredential(config: BridgeInstanceConfig, itemRef: string, url: string, signal: AbortSignal): Promise<{ username: string; password: string } | undefined> {
+export function privateLoginCredential(config: Pick<PrivateBrowserConfig, "resourceRoot" | "credentialScope">, itemRef: string, url: string, signal: AbortSignal): Promise<{ username: string; password: string } | undefined> {
   if (signal.aborted) return Promise.resolve(undefined);
   const env = Object.fromEntries(["HOME", "PATH", "LANG", "XDG_CONFIG_HOME", "PI_TELEGRAM_BRIDGE_CONFIG_ROOT", "ONEPASSWORD_CLI"]
     .filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]!]));

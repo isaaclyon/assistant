@@ -76,6 +76,9 @@ preserves entered state across those geometry changes.
 - Existing SSH handoff remains available when Telegram/Tailscale viewing cannot
   be used. Never expose its raw noVNC listener directly.
 
+The shared domain functions provide opt-in [host-only failure diagnostics](private-browser-input.md#host-only-failure-diagnostics).
+These content-free phases preserve the fixed tool results and stop-only recovery.
+
 ## Passkeys
 
 The viewer can show browser UI and extension prompts. It does not install,

@@ -2,6 +2,71 @@
   "version": 1,
   "resources": {
     "extensions": [
+      {"id":"native-background-children","path":".pi/native/background-children.mjs","enabled":true},
+      {"id":"native-web-run","path":".pi/native/web-run.mjs","enabled":true},
+      {"id":"native-fast","path":".pi/native/fast.mjs","enabled":true},
+      {"id":"native-usage","path":".pi/native/usage.mjs","enabled":true},
+      {"id":"native-private-browser","path":".pi/native/private-browser.mjs","enabled":true},
+      {
+        "id": "native-google-mutations",
+        "path": ".pi/native/google-mutations.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-places",
+        "path": ".pi/native/places.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-google-reads",
+        "path": ".pi/native/google-reads.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-public-web",
+        "path": ".pi/native/public-web.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-general-tools",
+        "path": ".pi/native/general-tools.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-core-memory",
+        "path": ".pi/native/core-memory.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-reload",
+        "path": ".pi/native/reload.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-restart",
+        "path": ".pi/native/restart.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-skills",
+        "path": ".pi/native/skills.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-debug",
+        "path": ".pi/native/debug.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-search",
+        "path": ".pi/native/search.mjs",
+        "enabled": true
+      },
+      {
+        "id": "native-memory",
+        "path": ".pi/native/memory.mjs",
+        "enabled": true
+      },
       {
         "id": "debug",
         "path": ".pi/extensions/debug.ts",
@@ -74,6 +139,22 @@
       }
     ],
     "skills": [
+      {"id":"native-reserve-restaurant","path":".pi/skills/native-reserve-restaurant/SKILL.md","enabled":true},
+      {
+        "id": "native-google-mutations",
+        "path": ".pi/skills/google-mutations/SKILL.md",
+        "enabled": true
+      },
+      {
+        "id": "native-google-read-tools",
+        "path": ".pi/skills/google-read-tools/SKILL.md",
+        "enabled": true
+      },
+      {
+        "id": "native-google-reads",
+        "path": ".pi/skills/google-reads/SKILL.md",
+        "enabled": true
+      },
       {
         "id": "agent-browser",
         "path": ".pi/skills/agent-browser/SKILL.md",
@@ -151,6 +232,52 @@
       }
     ],
     "instructions": [
+      {"id":"telegram-jobs-children-test","path":".pi/telegram/jobs-children-test.md","enabled":true},
+      {"id":"telegram-jobs-schedules-test","path":".pi/telegram/jobs-schedules-test.md","enabled":true},
+      {"id":"telegram-jobs-coordinator-test","path":".pi/telegram/jobs-coordinator-test.md","enabled":true},
+      {"id":"telegram-jobs-test","path":".pi/telegram/jobs-test.md","enabled":true},
+      {"id":"telegram-parity-test","path":".pi/telegram/parity-test.md","enabled":true},
+      {"id":"telegram-provider-test","path":".pi/telegram/provider-test.md","enabled":true},
+      {"id":"telegram-browser-test","path":".pi/telegram/browser-test.md","enabled":true},
+      {"id":"telegram-durable-personal-isaac","path":".pi/telegram/personal-isaac.md","enabled":true},
+      {"id":"telegram-durable-personal-emma","path":".pi/telegram/personal-emma.md","enabled":true},
+      {"id":"telegram-durable-household-shared","path":".pi/telegram/household-shared.md","enabled":true},
+      {"id":"telegram-durable-builder","path":".pi/telegram/builder.md","enabled":true},
+      {
+        "id": "telegram-mutations-test",
+        "path": ".pi/telegram/mutations-test.md",
+        "enabled": true
+      },
+      {
+        "id": "telegram-places-test",
+        "path": ".pi/telegram/places-test.md",
+        "enabled": true
+      },
+      {
+        "id": "telegram-cli-integrations-test",
+        "path": ".pi/telegram/cli-integrations-test.md",
+        "enabled": true
+      },
+      {
+        "id": "telegram-read-integrations-test",
+        "path": ".pi/telegram/read-integrations-test.md",
+        "enabled": true
+      },
+      {
+        "id": "telegram-tools-test",
+        "path": ".pi/telegram/tools-test.md",
+        "enabled": true
+      },
+      {
+        "id": "telegram-chat-memory-test",
+        "path": ".pi/telegram/chat-memory-test.md",
+        "enabled": true
+      },
+      {
+        "id": "durable-foundation-test",
+        "path": ".pi/telegram/durable-foundation-test.md",
+        "enabled": true
+      },
       {
         "id": "telegram-default",
         "path": ".pi/telegram/AGENTS.md",
@@ -159,6 +286,351 @@
     ]
   },
   "profiles": [
+    {
+      "id": "durable-jobs-children-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-mutations",
+        "native-places",
+        "native-private-browser",
+        "native-fast",
+        "native-usage",
+        "native-web-run",
+        "native-background-children"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-mutations",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "google-calendar",
+        "agent-browser",
+        "plan-weekend",
+        "native-reserve-restaurant",
+        "schedule-reminders-and-jobs",
+        "watch-prices"
+      ],
+      "instructions": "telegram-jobs-children-test"
+    },
+    {
+      "id": "durable-jobs-schedules-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-mutations",
+        "native-places",
+        "native-private-browser",
+        "native-fast",
+        "native-usage",
+        "native-web-run"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-mutations",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "google-calendar",
+        "agent-browser",
+        "plan-weekend",
+        "native-reserve-restaurant",
+        "schedule-reminders-and-jobs",
+        "watch-prices"
+      ],
+      "instructions": "telegram-jobs-schedules-test"
+    },
+    {
+      "id": "durable-jobs-coordinator-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-mutations",
+        "native-places",
+        "native-private-browser",
+        "native-fast",
+        "native-usage",
+        "native-web-run"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-mutations",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "google-calendar",
+        "agent-browser",
+        "plan-weekend",
+        "native-reserve-restaurant"
+      ],
+      "instructions": "telegram-jobs-coordinator-test"
+    },
+    {
+      "id": "durable-jobs-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-mutations",
+        "native-places",
+        "native-private-browser",
+        "native-fast",
+        "native-usage",
+        "native-web-run"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-mutations",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "google-calendar",
+        "agent-browser",
+        "plan-weekend",
+        "native-reserve-restaurant"
+      ],
+      "instructions": "telegram-jobs-test"
+    },
+    {
+      "id": "durable-parity-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-mutations",
+        "native-places",
+        "native-private-browser",
+        "native-fast",
+        "native-usage",
+        "native-web-run"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-mutations",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "google-calendar",
+        "agent-browser",
+        "plan-weekend",
+        "native-reserve-restaurant"
+      ],
+      "instructions": "telegram-parity-test"
+    },
+    {
+      "id": "durable-provider-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-mutations",
+        "native-places",
+        "native-private-browser",
+        "native-fast",
+        "native-usage"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-mutations",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "google-calendar",
+        "agent-browser",
+        "plan-weekend"
+      ],
+      "instructions": "telegram-provider-test"
+    },
+    {
+      "id": "durable-browser-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-mutations",
+        "native-places",
+        "native-private-browser"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-mutations",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "google-calendar",
+        "agent-browser"
+      ],
+      "instructions": "telegram-browser-test"
+    },
+    {
+      "id": "durable-mutations-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-mutations",
+        "native-places"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-mutations",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "google-calendar"
+      ],
+      "instructions": "telegram-mutations-test"
+    },
+    {
+      "id": "durable-places-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-reads",
+        "native-places"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-read-tools",
+        "check-weather",
+        "manage-ynab",
+        "message-link"
+      ],
+      "instructions": "telegram-places-test"
+    },
+    {
+      "id": "durable-cli-integrations-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-reads"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-read-tools",
+        "check-weather",
+        "manage-ynab",
+        "message-link"
+      ],
+      "instructions": "telegram-cli-integrations-test"
+    },
+    {
+      "id": "durable-read-integrations-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-reads"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-reads",
+        "check-weather"
+      ],
+      "instructions": "telegram-read-integrations-test"
+    },
+    {
+      "id": "durable-tools-test",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web"
+      ],
+      "skills": [
+        "personal-memory"
+      ],
+      "instructions": "telegram-tools-test"
+    },
+    {
+      "id": "durable-chat-memory-test",
+      "extensions": ["native-core-memory", "native-search", "native-memory", "native-reload", "native-restart", "native-skills", "native-debug"],
+      "skills": ["personal-memory"],
+      "instructions": "telegram-chat-memory-test"
+    },
+    {
+      "id": "durable-foundation-test",
+      "extensions": [],
+      "skills": [],
+      "instructions": "durable-foundation-test"
+    },
     {
       "id": "personal-isaac",
       "extensions": ["core-memory", "reload", "restart", "fast", "usage", "debug", "skills", "search", "memory", "places", "google-workspace", "subagents", "private-browser-input"],
@@ -221,6 +693,126 @@
         "track-improvement-ideas"
       ],
       "instructions": "telegram-default"
+    },
+    {
+      "id": "durable-personal-isaac",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-google-mutations",
+        "native-places",
+        "native-private-browser",
+        "native-fast",
+        "native-usage",
+        "native-web-run",
+        "native-background-children"
+      ],
+      "skills": [
+        "personal-memory",
+        "native-google-mutations",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "google-calendar",
+        "agent-browser",
+        "plan-weekend",
+        "native-reserve-restaurant",
+        "schedule-reminders-and-jobs",
+        "watch-prices"
+      ],
+      "instructions": "telegram-durable-personal-isaac"
+    },
+    {
+      "id": "durable-personal-emma",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-private-browser",
+        "native-fast",
+        "native-usage",
+        "native-web-run",
+        "native-background-children"
+      ],
+      "skills": [
+        "personal-memory",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "agent-browser",
+        "plan-weekend",
+        "schedule-reminders-and-jobs",
+        "watch-prices"
+      ],
+      "instructions": "telegram-durable-personal-emma"
+    },
+    {
+      "id": "durable-household-shared",
+      "extensions": [
+        "native-core-memory",
+        "native-search",
+        "native-memory",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-fast",
+        "native-usage",
+        "native-web-run",
+        "native-background-children"
+      ],
+      "skills": [
+        "personal-memory",
+        "check-weather",
+        "manage-ynab",
+        "message-link",
+        "agent-browser",
+        "plan-weekend",
+        "schedule-reminders-and-jobs",
+        "watch-prices"
+      ],
+      "instructions": "telegram-durable-household-shared"
+    },
+    {
+      "id": "durable-builder",
+      "extensions": [
+        "native-search",
+        "native-reload",
+        "native-restart",
+        "native-skills",
+        "native-debug",
+        "native-general-tools",
+        "native-public-web",
+        "native-private-browser",
+        "native-fast",
+        "native-usage",
+        "native-web-run",
+        "native-background-children"
+      ],
+      "skills": [
+        "agent-browser",
+        "check-weather",
+        "extend-this-agent",
+        "schedule-reminders-and-jobs",
+        "watch-prices",
+        "track-improvement-ideas"
+      ],
+      "instructions": "telegram-durable-builder"
     }
   ]
 }

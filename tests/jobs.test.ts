@@ -297,6 +297,7 @@ describe("startJobScheduler", () => {
         eventId: `at:emma-reminder:${Date.parse("2026-07-18T15:00:00Z")}`,
         occurrenceId: expect.stringMatching(/^emma-reminder-[a-f0-9]{64}$/),
         definitionFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+        createdAt: expect.any(Number),
       },
     );
   });

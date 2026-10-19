@@ -56,8 +56,16 @@ export async function prepareMemoryGitAutocommit(root, options = {}) {
   }
 }
 
-/** Commit only one trusted store-produced path; never push or include other paths. */
-export async function commitMemoryMutation(root, { action, id, relativePath }, options = {}) {
+/** Stable, injection-free identifier for an operation's commit trailer. */
+export function memoryOperationTrailer(operationKey) {
+  if (!/^[0-9a-f]{64}$/.test(operationKey)) unavailable();
+  return `Memory-Operation: ${operationKey}`;
+}
+
+/** Commit only one trusted store-produced path; never push or include other paths.
+ * An optional operationKey adds a trailer so a lost acknowledgement can be found
+ * again without creating a second commit. */
+export async function commitMemoryMutation(root, { action, id, relativePath, operationKey }, options = {}) {
   const gitOptions = { env: options.env ?? process.env, timeoutMs: options.timeoutMs };
   try {
     await git(root, ["add", "-A", "--", relativePath], gitOptions);
@@ -68,11 +76,36 @@ export async function commitMemoryMutation(root, { action, id, relativePath }, o
       "--only",
       "-m",
       `memory: ${action} ${id}`,
+      ...(operationKey ? ["-m", memoryOperationTrailer(operationKey)] : []),
       "--",
       relativePath,
     ], gitOptions);
     return { committed: true };
   } catch {
     return { committed: false, code: "GIT_COMMIT_FAILED" };
+  }
+}
+
+/** Read-only view used to reconcile one operation's optional Git commit. */
+export async function inspectMemoryGitOperation(root, { relativePath, operationKey }, options = {}) {
+  const gitOptions = { env: options.env ?? process.env, timeoutMs: options.timeoutMs };
+  try {
+    const log = await git(root, [
+      "log", "-n", "1", "--fixed-strings", `--grep=${memoryOperationTrailer(operationKey)}`, "--format=%H",
+    ], gitOptions).catch((error) => {
+      // An unborn branch has no history and therefore no matching commit.
+      if (/does not have any commits yet/.test(String(error?.stderr))) return { stdout: "" };
+      throw error;
+    });
+    const status = await git(root, ["status", "--porcelain", "--", relativePath], gitOptions);
+    const staged = await git(root, ["diff", "--cached", "--name-only", "-z"], gitOptions);
+    const stagedPaths = staged.stdout.split("\0").filter(Boolean);
+    return {
+      committed: log.stdout.trim() !== "",
+      pathDirty: status.stdout.trim() !== "",
+      otherStaged: stagedPaths.some((path) => path !== relativePath),
+    };
+  } catch {
+    unavailable();
   }
 }

@@ -8,6 +8,7 @@ import { isDeepStrictEqual } from "node:util";
 import {
   createHeartbeatRunner,
   type HeartbeatCheckerArgs,
+  type JsonObject,
   parseHeartbeatFields,
   runCompiledHeartbeatChecker,
   type StatefulHeartbeatDefinition,
@@ -80,6 +81,10 @@ export interface ParseJobsFileOptions {
   validTargets?: ReadonlySet<string>;
   requireTargets?: boolean;
   compatibilityTarget?: string;
+  /** Rejects any declared job type outside this set before reconciliation. */
+  allowedTypes?: ReadonlySet<JobDefinition["type"]>;
+  /** Rejects any heartbeat checker outside this set before reconciliation. */
+  allowedCheckerIds?: ReadonlySet<string>;
 }
 
 export function parseJobsFile(
@@ -129,6 +134,15 @@ export function parseJobsFile(
       return;
     }
     seenIds.add(id);
+    if (
+      options.allowedTypes !== undefined &&
+      typeof entry.type === "string" &&
+      ["cron", "at", "heartbeat", "webhook"].includes(entry.type) &&
+      !options.allowedTypes.has(entry.type as JobDefinition["type"])
+    ) {
+      errors.push(`${label} (${id}): job type "${entry.type}" is not supported by this scheduler`);
+      return;
+    }
     const targetRequired = parsed.version === 3 || options.requireTargets === true;
     let target = entry.target;
     if (target === undefined && targetRequired) {
@@ -228,6 +242,10 @@ export function parseJobsFile(
         const schedule = requireSchedule();
         const fields = parseHeartbeatFields(entry, `${label} (${id})`, errors);
         if (schedule === undefined || fields === undefined) return;
+        if (options.allowedCheckerIds !== undefined && !options.allowedCheckerIds.has(fields.checker.id)) {
+          errors.push(`${label} (${id}): checker "${fields.checker.id}" is not supported by this scheduler`);
+          return;
+        }
         jobs.push({
           id,
           type: "heartbeat",
@@ -337,6 +355,8 @@ export interface JobSchedulerOptions {
   validTargets?: ReadonlySet<string>;
   requireTargets?: boolean;
   compatibilityTarget?: string;
+  allowedTypes?: ReadonlySet<JobDefinition["type"]>;
+  allowedCheckerIds?: ReadonlySet<string>;
   nowMs?: () => number;
   tickIntervalMs?: number;
   checkTimeoutMs?: number;
@@ -344,6 +364,7 @@ export interface JobSchedulerOptions {
     checkerId: string,
     timeoutMs: number,
     args?: HeartbeatCheckerArgs,
+    cursor?: JsonObject | null,
   ) => Promise<CheckResult>;
   judge?: SemanticJudge;
 }
@@ -355,6 +376,8 @@ export interface JobDispatch {
   eventId: string;
   occurrenceId?: string;
   definitionFingerprint?: string;
+  /** Original materialization time (ms), stable across publication retries. */
+  createdAt?: number;
 }
 
 export interface JobScheduler {
@@ -375,6 +398,8 @@ export async function startJobScheduler({
   validTargets,
   requireTargets,
   compatibilityTarget,
+  allowedTypes,
+  allowedCheckerIds,
   nowMs = Date.now,
   tickIntervalMs = 30_000,
   checkTimeoutMs = 60_000,
@@ -395,6 +420,8 @@ export async function startJobScheduler({
     ...(validTargets === undefined ? {} : { validTargets }),
     ...(requireTargets === undefined ? {} : { requireTargets }),
     ...(compatibilityTarget === undefined ? {} : { compatibilityTarget }),
+    ...(allowedTypes === undefined ? {} : { allowedTypes }),
+    ...(allowedCheckerIds === undefined ? {} : { allowedCheckerIds }),
   };
   const dispatchFor = (occurrence: JobOccurrence): JobDispatch => ({
     jobId: occurrence.jobId,
@@ -403,6 +430,7 @@ export async function startJobScheduler({
     eventId: occurrence.eventId,
     occurrenceId: occurrence.id,
     definitionFingerprint: occurrence.definitionFingerprint,
+    createdAt: occurrence.createdAt,
   });
   let attempted = new Set<string>();
   const publish = async (occurrence: JobOccurrence): Promise<boolean> => {

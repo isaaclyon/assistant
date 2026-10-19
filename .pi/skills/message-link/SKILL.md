@@ -28,7 +28,7 @@ opens Messages automatically.
 
    ```bash
    printf '%s\n' '{"to":"+18018851827","label":"Emma","body":"Proposed text"}' \
-     | node .pi/skills/message-link/scripts/messages-link.mjs
+     | node "${PI_TELEGRAM_BRIDGE_RESOURCE_ROOT:-$PWD}/.pi/skills/message-link/scripts/messages-link.mjs"
    ```
 
 3. Return the generated HTTPS URL as a normal Markdown link, named for the

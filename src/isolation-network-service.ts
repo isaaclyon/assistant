@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
-import { mkdir, open, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rm } from "node:fs/promises";
 import { promisify } from "node:util";
 import { assertAdministratorPath } from "./isolation-admin-path.js";
-import { isolationNetworkCleanup, isolationNetworkCommands, validateIsolationNetwork, type IsolationNetworkConfig } from "./isolation-network.js";
+import { isolationNetworkCleanup, isolationNetworkCommands, parseNamespaceNames, validateIsolationNetwork, type IsolationNetworkConfig } from "./isolation-network.js";
 
 const exec = promisify(execFile);
 const [action, filename] = process.argv.slice(2);
@@ -24,12 +24,17 @@ if (action === "start") {
     run("/usr/sbin/ip", ["-j", "netns", "list"]), run("/usr/sbin/ip", ["-j", "link", "show"]),
     run("/usr/sbin/iptables", ["--wait", "5", "-S"]),
   ]);
-  if (JSON.parse(namespaces.stdout).some((entry: { name: string }) => entry.name === config.namespace) ||
+  if (parseNamespaceNames(namespaces.stdout).includes(config.namespace) ||
       JSON.parse(links.stdout).some((entry: { ifname: string }) => [config.hostInterface, `${config.hostInterface}p`].includes(entry.ifname)) ||
       rules.stdout.includes(`PI_${config.hostInterface.toUpperCase()}_`)) {
     throw new Error("Isolation network names already exist; inspect before provisioning");
   }
-  // Reserve ownership before the first mutation. Interrupted or ambiguous work
+  // iproute2 inherits the unit's private umask on first provisioning. Runtime
+  // start checks need directory traversal to inspect the selected namespace.
+  await mkdir('/run/netns',{recursive:true,mode:0o755});
+  await assertAdministratorPath('/run/netns');
+  await chmod('/run/netns',0o755);
+  // Reserve ownership before the first namespace or firewall mutation. Interrupted or ambiguous work
   // retains this record and cannot be silently retried against existing objects.
   const journal = await open(journalPath, "wx", 0o600);
   try {

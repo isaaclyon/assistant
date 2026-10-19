@@ -85,3 +85,41 @@ canonical ranking data, so it stays outside the ranking database.
   any WAL files manually.
 - SQLite is canonical for this feature; a JSON export is portable but does not
   preserve resumable interactions or comparison history.
+
+
+## Native C4 integration addendum
+
+The isolated `durable-places-test` profile follows
+[ADR-0052](0052-native-durable-runtime-foundation.md): the Harness root document
+`assistant.places-native` owns pre-insertion drafts, prompt bindings and callback
+claims. This replaces `places-add-draft.json` for that native profile; the legacy
+profile continues using the file described above. A native draft survives reset,
+reload and restart until an insertion starts or the user starts a replacement
+add flow. Interaction capabilities expire after ten minutes and are invalidated
+by reset/reload. Native state does not import legacy drafts or callbacks; C6 owns
+that migration and retention rehearsal.
+
+The canonical ranking database, schema and `PlacesApplication` boundary remain
+the same. A durable claim precedes each direct domain write. Because Harness and
+places stores commit independently, an unknown write result is never executed
+again automatically; recovery presents an interruption notice and inspection
+controls. Read commands may run again. Prompt message-ID tombstones remain after
+full prompt records are pruned, so delayed private replies stay out of model
+history. Unknown send receipts use exact authenticated bot-prompt references to
+consume replies without authorizing effects. Tombstone storage growth is a C6
+measurement gate; removing IDs requires preserving that reply-capture guarantee.
+
+The earlier `durable-places-test` profile retains its non-destructive surface.
+The separate `durable-mutations-test` profile adds cancel, delete and undo through
+direct user-only confirmations. `PlacesApplication.prepareConfirmation` takes
+the deletion snapshot once; `confirmPrepared` applies that original snapshot or
+insertion revision under the existing domain checks. The native Confirm
+capability stores this prepared request, and Confirm/Cancel invalidate each
+other. The model may request a preview but cannot obtain a token or invoke the
+approved effect. Ordinary restart preserves valid capabilities; reset/reload,
+expiry and unknown preview delivery cannot authorize a mutation. A claimed
+unknown mutation remains interrupted and requires inspection.
+
+Legacy approval rules and the canonical store/schema remain unchanged. See the
+[C4 guide](../pi-durable-c4-tools.md#guarded-mutation-integration-slice) for
+selection, recovery and validation limits.
