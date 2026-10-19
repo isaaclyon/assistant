@@ -229,6 +229,9 @@ limit fails before committing; checker batches must leave room for the prompt.
 ### Rules
 
 For price monitoring, use the [watch-prices skill](../watch-prices/SKILL.md).
+It covers both configured price checkers and scheduled browser/research checks.
+An unfamiliar retailer is a reason to test those methods, not to refuse a watch
+solely because it has no dedicated adapter.
 It owns source verification, thresholds, and temporary watch manifests; this
 skill owns scheduling and publication acknowledgement. Individual watches do
 not belong in tracked skills or checker source.
