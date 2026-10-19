@@ -105,6 +105,32 @@ test('final effects are single-send and missing acknowledgement remains uncertai
  await expect(transport.deliver({chatId:7},'hello')).rejects.toMatchObject({outcome:'uncertain',definitelyNotSent:false});expect(sends).toBe(1);
 });
 
+test.each([
+ {status:429,payload:{ok:false,error_code:429,parameters:{retry_after:2}},definitelyNotSent:true,retryAfterMs:2000},
+ {status:429,payload:{ok:false,error_code:429,parameters:{retry_after:-1}},definitelyNotSent:true,retryAfterMs:60000},
+ {status:400,payload:{ok:false,error_code:400},definitelyNotSent:true,retryAfterMs:60000},
+ {status:400,payload:{ok:false},definitelyNotSent:false,retryAfterMs:undefined},
+ {status:502,payload:{ok:false,error_code:502},definitelyNotSent:false,retryAfterMs:undefined},
+ {status:502,payload:{ok:false,error_code:429},definitelyNotSent:false,retryAfterMs:undefined},
+ {status:400,payload:'invalid JSON',definitelyNotSent:false,retryAfterMs:undefined},
+ {status:0,payload:null,definitelyNotSent:false,retryAfterMs:undefined},
+])('classifies rejection $status without retrying inside the send',async fixtureCase=>{
+ const f=await fixture();let sends=0;
+ const transport=createNativeTelegramTransport({mode:'ordinary',...f,cwd:f.dir,botId:1,allowedUserId:7,
+ fetch:async(input,init)=>{
+  if(String(input).endsWith('/getMe'))return ok({id:1});
+  if(String(input).endsWith('/getUpdates'))return pending(init?.signal);
+  sends++;
+  if(!fixtureCase.status)throw new Error('connection lost');
+  return new Response(typeof fixtureCase.payload==='string'?fixtureCase.payload:JSON.stringify(fixtureCase.payload),{status:fixtureCase.status});
+ }});
+ cleanups.push(()=>transport.stop());await transport.start({accept:async()=>{}});
+ await expect(transport.deliver({chatId:7},'answer')).rejects.toMatchObject({
+  definitelyNotSent:fixtureCase.definitelyNotSent,retryAfterMs:fixtureCase.retryAfterMs,
+ });
+ expect(sends).toBe(1);
+});
+
 test('ordinary outbound effects recheck pairing and never send after revocation',async()=>{
  const f=await fixture();let sends=0;
  const transport=createNativeTelegramTransport({mode:'ordinary',...f,cwd:f.dir,botId:1,allowedUserId:7,

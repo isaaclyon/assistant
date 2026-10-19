@@ -4,7 +4,7 @@ export type FinalRequest={target:Target;text:string;identity:string};
 export type DeliveryReceipt={messageId:number};
 export type FinalSender=(request:FinalRequest)=>Promise<DeliveryReceipt>;
 export type DeliveryState='sending'|'delivered'|'retryable'|'uncertain'|'suppressed';
-type Segment={text:string;status:DeliveryState;receipt?:DeliveryReceipt};
+type Segment={text:string;status:DeliveryState;receipt?:DeliveryReceipt;retryAt?:number};
 type Delivery={target:Target;answerId?:EntryId;segments:Segment[]};
 export const Deliveries=defineDoc({kind:'bridge.deliveries',version:1,scope:'conversation',history:'latest',fork:'initial',initial:()=>({items:{} as Record<string,Delivery>})});
 export function splitFinal(text:string):string[]{
@@ -13,7 +13,7 @@ export function splitFinal(text:string):string[]{
   if(chunk)chunks.push(chunk);return chunks;
 }
 /** Called on one serialized host line; surviving sending intents are never resent. */
-export async function reconcileDeliveries(p:IngressRuntime,send:FinalSender) {
+export async function reconcileDeliveries(p:IngressRuntime,send:FinalSender,now:()=>number=Date.now) {
   const bindings=await p.harness.snapshot(Bindings,p.root.id,context);
   for(const [key,binding] of Object.entries(bindings?.sources??{})){
     if(binding.deliveryComplete||binding.cancelled)continue;
@@ -43,11 +43,18 @@ export async function reconcileDeliveries(p:IngressRuntime,send:FinalSender) {
       }
       if(segment.status==='uncertain')break;
       if(segment.status!=='retryable')continue;
+      if(segment.retryAt!==undefined&&segment.retryAt>now())break;
       await p.root.commit(async tx=>{(await tx.doc(Deliveries,p.root.id)).items[identity]!.segments[index]!.status='sending';},context);
-      let status:DeliveryState='delivered',receipt:DeliveryReceipt|undefined;
+      let status:DeliveryState='delivered',receipt:DeliveryReceipt|undefined,retryAt:number|undefined;
       try{receipt=await send({target,text:segment.text,identity:`${identity}:${index}`});if(!receipt||!Number.isSafeInteger(receipt.messageId)||receipt.messageId<=0)throw new Error('Missing delivery acknowledgement');}
-      catch(error){status=typeof error==='object'&&error!==null&&'definitelyNotSent' in error&&error.definitelyNotSent===true?'retryable':'uncertain';receipt=undefined;}
-      await p.root.commit(async tx=>{const value=(await tx.doc(Deliveries,p.root.id)).items[identity]!.segments[index]!;value.status=status;if(receipt)value.receipt=receipt;},context);
+      catch(error){
+        status=typeof error==='object'&&error!==null&&'definitelyNotSent' in error&&error.definitelyNotSent===true?'retryable':'uncertain';receipt=undefined;
+        if(status==='retryable'&&typeof error==='object'&&error!==null&&'retryAfterMs' in error){
+          const delay=error.retryAfterMs;
+          if(typeof delay==='number'&&Number.isSafeInteger(delay)&&delay>0&&delay<=86_400_000)retryAt=now()+delay;
+        }
+      }
+      await p.root.commit(async tx=>{const value=(await tx.doc(Deliveries,p.root.id)).items[identity]!.segments[index]!;value.status=status;if(receipt)value.receipt=receipt;if(retryAt!==undefined)value.retryAt=retryAt;else delete value.retryAt;},context);
       if(status!=='delivered')break;
     }
     await p.root.commit(async tx=>{const item=(await tx.doc(Deliveries,p.root.id)).items[identity]!;if(item.segments.every(s=>s.status==='delivered'||s.status==='suppressed'||s.status==='uncertain'))(await tx.doc(Bindings,p.root.id)).sources[key]!.deliveryComplete=true;},context);

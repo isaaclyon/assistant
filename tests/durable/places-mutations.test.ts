@@ -8,7 +8,7 @@ import { openNodeSqliteDatabase } from '@earendil-works/pi-durable/storage/sqlit
 import { SqliteStorage } from '@earendil-works/pi-durable/storage/sqlite';
 import type { NativeConfig } from '../../src/durable/config.js';
 import type { DurableHost } from '../../src/durable/host.js';
-import { Bindings, context } from '../../src/durable/ingress.js';
+import { Bindings, context, fingerprint, sourceKey } from '../../src/durable/ingress.js';
 import { PlacesNative, createNativePlaces } from '../../src/durable/places.js';
 import type { Presentation } from '../../src/durable/telegram-ui.js';
 import { UiRejectedError, type UiOrigin } from '../../src/durable/telegram-bridge.js';
@@ -29,7 +29,12 @@ async function setup(options: { principal?: NativeConfig['principal'] } = {}) {
   const db = await openNodeSqliteDatabase(join(dir, 'native.sqlite'));
   const harness = await Harness.open(await SqliteStorage.open(db), { models: createModels(), registry: createRegistry() }, context);
   const root = await harness.root(context);
-  await root.commit(async tx => { const state = await tx.doc(Bindings, root.id); state.epoch = 1; state.epochs['1'] = root.id; }, context);
+  const envelope = { instance: 'test', principal: config.principal, bot: 'bot', chatId: 2, messageIds: [1], originalAt: Date.now(), content: 'Manage my places' };
+  await root.commit(async tx => {
+    const state = await tx.doc(Bindings, root.id); state.epoch = 1; state.epochs['1'] = root.id;
+    state.sources[sourceKey(envelope)] = { conversationId: root.id, epoch: 1, fingerprint: fingerprint(envelope),
+      chatId: 2, threadId: null, originalAt: envelope.originalAt, principal: config.principal, proactive: false, envelope };
+  }, context);
   const control = { time: Date.now(), commitGate: undefined as Promise<void> | undefined, failReceipt: false, failNextPresent: false, failCommit: undefined as undefined | ((n: number) => 'before' | 'after' | undefined), commits: 0, hostReady: true };
   const wrapped = {
     id: root.id,

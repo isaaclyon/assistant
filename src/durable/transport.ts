@@ -21,7 +21,7 @@ export type NativeTelegramOptions = { botId: number; allowedUserId: number } & (
 
 export class TelegramDeliveryError extends Error {
   readonly definitelyNotSent: boolean;
-  constructor(public readonly outcome: 'failed' | 'uncertain', message: string) { super(message); this.definitelyNotSent = outcome === 'failed'; }
+  constructor(public readonly outcome: 'failed' | 'uncertain', message: string, public readonly retryAfterMs?: number) { super(message); this.definitelyNotSent = outcome === 'failed'; }
 }
 
 export function createNativeTelegramTransport(options: NativeTelegramOptions) {
@@ -68,7 +68,17 @@ export function createNativeTelegramTransport(options: NativeTelegramOptions) {
     } catch { throw new TelegramDeliveryError('uncertain', 'Telegram acknowledgement unavailable'); }
     let payload: any;
     try { payload = await response.json(); } catch { throw new TelegramDeliveryError('uncertain', 'Telegram acknowledgement invalid'); }
-    if (!response.ok || payload?.ok !== true) throw new TelegramDeliveryError('uncertain', 'Telegram request unavailable');
+    if (!response.ok || payload?.ok !== true) {
+      // Only a complete, matching client rejection proves that no message was accepted.
+      // Do not retry here: the final-delivery ledger persists the deadline across restart.
+      if (response.status >= 400 && response.status < 500 && payload?.ok === false && payload.error_code === response.status) {
+        const seconds = payload.parameters?.retry_after;
+        const delay = response.status === 429 && Number.isSafeInteger(seconds) && seconds >= 0 && seconds <= 86_400
+          ? Math.max(1000, seconds * 1000) : 60_000;
+        throw new TelegramDeliveryError('failed', 'Telegram request rejected', delay);
+      }
+      throw new TelegramDeliveryError('uncertain', 'Telegram request unavailable');
+    }
     return payload.result;
   }
   function validateConfig() {

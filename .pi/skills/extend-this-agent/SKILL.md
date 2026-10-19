@@ -44,11 +44,11 @@ type-checked via `npm run check` (`tsconfig.extensions.json`). Working examples:
 2. For runtime-boundary changes, read `ARCHITECTURE.md` and `docs/adr/` first. Record a durable new decision in an ADR when appropriate.
 3. Add a failing behavior test first when a test harness exists, then make the smallest implementation that passes.
 4. Keep credentials and `~/.pi/agent/telegram.json` secret. Never broaden `src/host.ts` resource filtering to load global or ancestor capabilities.
-5. Run `npm run check:changed` and `npm run build` after code changes. The changed-file check keeps type checks and ordinary tests, and includes browser integration tests when their code, dependencies, or test infrastructure change. `PI_TEST_BASE` sets the comparison revision (default `origin/main`); missing history runs the full suite. Use `npm run check` to force all tests. For a skill-only documentation change, inspect links and frontmatter; the full checks are optional unless another file changed.
+5. Run `npm run check:changed` and `npm run build` after code changes. The native `check:changed` command runs the full `npm run check` suite, including browser integration tests. For a skill-only documentation change, inspect links and frontmatter; the full checks are optional unless another file changed.
 6. Explain what changed and any deployment requirement. For a completed,
    validated coding change, the standing coding publish instruction authorizes
    committing, merging, and the repository's normal deployment workflow; do not
    enable, restart, or reconfigure the live service as a separate operational
    action unless the user explicitly asks.
 
-Changes become available to the running Telegram agent only after they are committed, merged, and deployed by the repository workflow. A local interactive Pi may use `/reload` for repo-local skills and extensions.
+Changes become available to the running Telegram agent only after they are committed, merged, and explicitly deployed. The main workflow runs checks only. Native deployment uses the staged administrator procedure in `docs/pi-durable-c6-rehearsal.md`. A local interactive Pi may use `/reload` for repo-local skills and extensions.

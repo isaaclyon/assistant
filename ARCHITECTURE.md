@@ -98,8 +98,12 @@ native scheduled completion and a controlled restart before deliberate
 advancement. The separate immutable release builder uses reviewed full commits
 and an external allowlist. See [ADR-0054](docs/adr/0054-stage-native-activation-with-retained-evidence.md)
 and the [C6 rehearsal guide](docs/pi-durable-c6-rehearsal.md).
-Live provider/browser/CLI acceptance and production activation remain separate
-from disposable synthetic rehearsal evidence.
+Live acceptance and production activation remain separate from disposable
+synthetic rehearsal evidence. The separately authorized one-bot native trial
+passes scheduled execution, controlled restart and a real human-message reply.
+Authenticated YNAB acceptance is skipped by user decision. Peer runtimes and
+the broker retain their legacy release; broader rollout and retirement require
+separate authorization. Mainline CI runs checks only, with no deployment job.
 
 The sections below describe the deployed legacy architecture. Its package,
 source patches and service path remain in the legacy release tree until the
@@ -112,7 +116,7 @@ C6/C7 activation gates pass.
 - **pi-telegram:** owns Telegram pairing, routing, rendering and controls; in the ordinary user fleet it also owns upstream polling and offsets.
 - **Trusted broker (opt-in isolated deployment):** owns the personal bot token, upstream polling, durable updates, credential approvals and scoped 1Password access; Pi receives ordinary traffic through a restricted Unix socket.
 - **systemd:** owns one unit per instance, boot activation, restart policy, and logs.
-- **GitHub Actions:** owns post-merge validation and serialized production deployment through the server's repository-scoped runner.
+- **GitHub Actions:** owns pull-request and post-merge native validation. Production activation requires the explicit staged administrator procedure; CI does not deploy.
 - **Tailscale Serve:** owns tailnet-only HTTPS and static delivery for editable Messages links.
 
 The host loads a full-commit-pinned `isaaclyon/pi-telegram` fork through Pi's `DefaultResourceLoader` and binds extensions in RPC mode. A version- and source-checked postinstall patch replaces raw tool-call status labels with deterministic, privacy-safe activity descriptions; see [ADR-0007](docs/adr/0007-patch-telegram-tool-activity-labels.md). The RPC binding includes Pi's official command-context session actions (`waitForIdle`, `newSession`, `fork`, tree navigation, session switching, and reload). The fork's narrow process-local host capability delegates Telegram `/new` to `AgentSessionRuntime.newSession()` without exposing the runtime or retaining stale extension contexts. The host separates each instance's mutable `workspaceCwd` from the immutable `resourceRoot`, disables hierarchical discovery, and supplies only the selected profile from `.pi/capabilities.json`; see [ADR-0009](docs/adr/0009-isolate-telegram-agent-instructions.md) and [ADR-0020](docs/adr/0020-run-a-household-bot-fleet-from-one-release.md). Canonicalized resources must remain inside the release, and symlink escapes are rejected. Global Pi/Agents directories and workspace-local capabilities never execute in the bridge. Filesystem tool access itself is not restricted to the cwd.

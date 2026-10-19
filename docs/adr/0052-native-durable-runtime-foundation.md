@@ -48,7 +48,12 @@ is inspected rather than repeated.
 
 Final answers are discovered from authoritative completed submissions. Stable
 segments carry delivery intent and acknowledged message IDs. A definite
-pre-send failure is retryable; a send with missing acknowledgement or a surviving
+pre-send failure or matching parsed Telegram client rejection is retryable.
+The final-delivery ledger persists rejection retry deadlines across restart.
+Rate limits use a bounded Telegram retry interval; other client rejections use
+a sixty-second delay. Rejected segments remain pending until delivery succeeds
+or an operator repairs the cause; they have no automatic attempt limit.
+A send with missing acknowledgement or a surviving
 sending intent becomes uncertain. Streaming previews are best effort and never
 prove final delivery. Proactive `NO_REPLY` is suppressed. Native storage cannot
 make an external Telegram send exactly once.

@@ -1,35 +1,36 @@
 # Pi Telegram Bridge Host
 
-> This durable migration branch extends the accepted native chat-and-memory
-> MVP with general tools, bounded public web, typed Google reads and the YNAB/
-> editable Messages-link skills, plus direct private place rankings, guarded Calendar/places changes and protected
-> browser operations, native fast-mode/subscription-usage controls, hosted web
-> search, provider retry compatibility and protected reservation guidance, in
-> separate test profiles. Start with the [C4 guide](docs/pi-durable-c4-tools.md) for
-> selection, private configuration, recovery and validation. C4 remains open.
-> The [C5 recipient guide](docs/pi-durable-c5-jobs.md) adds a separate scheduled
-> handoff admission profile. The [coordinator guide](docs/pi-durable-c5-coordinator.md)
-> adds cron/at publication and mixed-runtime admission/restart coverage.
-> The [schedule guide](docs/pi-durable-c5-schedules.md) adds selected heartbeat
-> checkers, loopback webhooks, temporary watches and scoped schedule helpers.
-> The [child guide](docs/pi-durable-c5-children.md) adds process-owned child
-> Harnesses, original-conversation reporting and temporary-store retirement.
-> The [C6 guide](docs/pi-durable-c6-rehearsal.md) covers the four full durable
-> profiles (`durable-personal-isaac`, `durable-personal-emma`,
-> `durable-household-shared`, `durable-builder`), the held frozen-copy migration
-> inventory, the immutable release builder and explicit staged activation. C6 is
-> in progress: the local check, build and four disposable Linux rehearsal modes
-> pass. A separate Linux browser run passes all 43 selected tests. Real broker,
-> credential approval/copy, sign-in and private Mini App handback also pass.
-> Repeat Linux CI passes after the earlier intermittent browser-test failures.
-> Authenticated CLI acceptance remains open.
-> No production rollout has run (C7).
-> Root scripts build and test `src/durable/` and shared domain contracts. C1
-> remains prototype evidence. The description below documents the legacy fleet.
+The native `pi-durable` runtime is the mainline implementation. It includes
+chat, memory, typed integrations, protected browser operations, schedules and
+process-owned background tasks. The legacy runtime remains available for
+mixed-runtime deployment and recovery.
+
+## Native runtime and deployment status
+
+The separately authorized one-bot production trial passes scheduled execution,
+controlled restart and a real human-message reply. Authenticated YNAB acceptance
+is skipped by user decision. No broader fleet rollout or legacy retirement is
+authorized.
+
+- [C4 integrations](docs/pi-durable-c4-tools.md): tools, private configuration and domain recovery.
+- [C5 schedules](docs/pi-durable-c5-schedules.md): coordinator, checkers and webhooks.
+- [C5 children](docs/pi-durable-c5-children.md): temporary child Harnesses and original-conversation reports.
+- [C6 activation](docs/pi-durable-c6-rehearsal.md): immutable releases, held migration, staged activation and trial evidence.
+
+`npm run check:changed` runs the full native check suite.
+`npm run build` builds the native application and administrator tools.
+Pull requests and pushes to `main` run checks only. A merge does not deploy,
+restart services or change the active release.
+
+## Retained legacy reference
+
+The runtime shape, setup and operations below describe the retained legacy
+fleet and shared domain behavior. Use the C6 activation guide for native
+deployment. Legacy deployment commands cannot activate a native release.
 
 A systemd-supervised SDK host for a [commit-pinned `pi-telegram` fork](https://github.com/isaaclyon/pi-telegram/commit/dc84d2038ce80d83406f1ea767df2fd99906cc3c). It runs a manifest-defined household fleet whose bots share one immutable capability release while keeping conversations, workspaces, credentials, and memory views distinct.
 
-## Runtime shape
+## Legacy runtime shape
 
 ```text
 one systemd user service per instance
@@ -51,7 +52,7 @@ secrets, omit sensitive sign-in/credential output, and truncate long results.
 They are plain Telegram messages and do not enter the model's conversation.
 Status reports failed sends and messages dropped when the bounded queue fills.
 
-## Initial setup
+## Legacy initial setup
 
 Pi updates arrive as a weekly grouped Dependabot PR after a three-day release
 cooldown. Exact version pins, SDK compatibility checks, and review precede the
@@ -101,7 +102,7 @@ User lingering is required for the service to run without an active login. It is
 loginctl show-user "$USER" -p Linger
 ```
 
-## Operations
+## Legacy operations
 
 ```bash
 systemctl --user status 'pi-telegram-bridge-*.service'
@@ -135,24 +136,17 @@ an HTTP request. Setup, health, and lifecycle details are in
 
 ## Deploying updates
 
-Pull requests run `.github/workflows/deploy.yml` checks on GitHub-hosted CI. Merges to `main` rerun those checks, then the `assistant-production` self-hosted runner on `lyon-server` deploys the green commit and verifies every instance's systemd user service. Deployment refuses to run without the instance manifest. The single runner and a shared deployment lock serialize activation; superseded queued revisions exit successfully instead of rolling production backward. A failed check prevents deployment. The runner itself is managed by `github-actions-assistant.service`; check it with `systemctl --user status github-actions-assistant.service` on the server.
+`.github/workflows/deploy.yml` validates pull requests and pushes to `main`.
+It has no production deployment job.
 
-### Manual fallback
+Native activation requires an immutable release and an explicit staged
+administrator invocation. Follow the [C6 activation guide](docs/pi-durable-c6-rehearsal.md).
+The procedure preserves peer releases, checkpoint evidence and failure holds.
+Each runtime transition requires its own authorization.
 
-To ship a new commit to the box running the service, push to `origin/main`, then from a machine with SSH access:
-
-```bash
-npm run deploy
-```
-
-`scripts/deploy.sh` connects over SSH and invokes the same exact-SHA, immutable-release, locked deployment path used by Actions. It deploys only commits on `origin/main`, preserves tracked live edits by refusing to overwrite them, and applies the same recovery barrier and readiness checks. Activation failures hold services disabled with a paired state/application-binary checkpoint; see the [recovery runbook](docs/household-fleet.md#recovery-checkpoints-and-failure-holds). The target is overridable:
-
-| Variable | Default |
-| --- | --- |
-| `DEPLOY_HOST` | `lyon-server` |
-| `DEPLOY_PATH` | `/home/isaaclyon/projects/assistant` |
-
-The script sources nvm on the remote before invoking `node`/`npm`, since the nvm-managed toolchain is not on a non-interactive SSH `PATH`.
+Legacy deployment scripts remain historical operational references in
+[the fleet guide](docs/household-fleet.md). They are not the mainline release
+procedure. Do not use them to update the mixed native/legacy fleet.
 
 ## Configuration
 

@@ -3,14 +3,14 @@ name: Native runtime checks
 on:
   pull_request:
   push:
-    branches: [feat/durable-c2, feat/durable-c3]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# C2/C3 use an isolated native release tree. C6 supplies and rehearses activation;
-# the inherited legacy whole-fleet deployment job must not run on this branch.
+# Main and pull requests validate the native release. Deployment requires an
+# explicit staged administrator invocation; merges must never restart the fleet.
 jobs:
   test:
     runs-on: ubuntu-latest

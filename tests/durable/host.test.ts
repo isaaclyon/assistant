@@ -8,7 +8,7 @@ import { Type } from '@earendil-works/pi-ai';
 import { AgentDoc, createRegistry, defineExtension, defineTool } from '@earendil-works/pi-durable';
 import { DurableHost, HostState, type HostConfig, type HostControl } from '../../src/durable/host.js';
 import { accept, admit, Bindings, context, sourceKey, type SourceEnvelope } from '../../src/durable/ingress.js';
-import { Deliveries, splitFinal, type FinalRequest } from '../../src/durable/delivery.js';
+import { Deliveries, reconcileDeliveries, splitFinal, type FinalRequest } from '../../src/durable/delivery.js';
 const cleanup:Array<()=>Promise<unknown>>=[];
 afterEach(async()=>{for(const close of cleanup.splice(0).reverse())await close();});
 async function directory(){const path=await mkdtemp(join(tmpdir(),'durable-host-'));cleanup.push(()=>rm(path,{recursive:true,force:true}));return path;}
@@ -60,6 +60,23 @@ it.each(['uncertain','retryable'] as const)('reconciles %s delivery and does not
   expect(calls).toBe(status==='retryable'?2:1);
   const items=Object.values((await next.h.runtime.harness.snapshot(Deliveries,next.h.runtime.root.id,context))!.items);
   expect(items[0]!.segments[0]!.status).toBe(status==='retryable'?'delivered':'uncertain');
+});
+
+it('retains a definite-rejection retry deadline across reopen',async()=>{
+ const path=await directory();const {h}=await host(path);
+ await accept(h.runtime,envelope());await (await admit(h.runtime,envelope()))!.wait(context);
+ let time=Date.now(),calls=0;
+ const send=async()=>{if(++calls===1)throw Object.assign(new Error('rate limited'),{definitelyNotSent:true,retryAfterMs:60000});return {messageId:7};};
+ await reconcileDeliveries(h.runtime,send,()=>time);expect(calls).toBe(1);
+ await h.close();const next=await host(path);
+ await reconcileDeliveries(next.h.runtime,send,()=>time);expect(calls).toBe(1);
+ const binding=Object.values((await next.h.runtime.harness.snapshot(Bindings,next.h.runtime.root.id,context))!.sources)[0]!;
+ expect(binding.deliveryComplete).not.toBe(true);
+ time+=60000;await reconcileDeliveries(next.h.runtime,send,()=>time);expect(calls).toBe(2);
+ await reconcileDeliveries(next.h.runtime,send,()=>time);expect(calls).toBe(2);
+ const items=Object.values((await next.h.runtime.harness.snapshot(Deliveries,next.h.runtime.root.id,context))!.items);
+ expect(items[0]!.segments[0]).toMatchObject({status:'delivered',receipt:{messageId:7}});
+ expect(items[0]!.segments[0]).not.toHaveProperty('retryAt');
 });
 
 it('suppresses proactive NO_REPLY and empty final, but delivers human literal NO_REPLY',async()=>{

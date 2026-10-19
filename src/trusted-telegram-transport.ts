@@ -23,9 +23,15 @@ export class TrustedTelegramTransport {
         method: "POST", redirect: "error", signal: AbortSignal.timeout(35_000),
         ...(body instanceof FormData ? { body } : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
       });
-      // Discard upstream headers and errors, which are outside our public schema.
+      // Discard upstream headers and error bodies. Preserve only bounded rejection metadata.
       const result: unknown = await response.json();
-      if (!record(result) || result.ok !== true) return json({ ok: false, error_code: 502, description: "Telegram request unavailable" }, 502);
+      if (record(result) && result.ok === false && response.status >= 400 && response.status < 500 && result.error_code === response.status) {
+        const seconds = record(result.parameters) ? result.parameters.retry_after : undefined;
+        const retry = response.status === 429 && typeof seconds === "number" && Number.isSafeInteger(seconds) && seconds >= 0 && seconds <= 86_400
+          ? { parameters: { retry_after: seconds } } : {};
+        return json({ ok: false, error_code: response.status, description: "Telegram request unavailable", ...retry }, response.status);
+      }
+      if (!response.ok || !record(result) || result.ok !== true) return json({ ok: false, error_code: 502, description: "Telegram request unavailable" }, 502);
       return json({ ok: true, result: result.result });
     } catch { return json({ ok: false, error_code: 502, description: "Telegram request unavailable" }, 502); }
   }

@@ -103,7 +103,11 @@ and create retries join the same operation. Missing receipts, changed notes and
 unprovable outcomes stay uncertain. Delete checks the revision again immediately
 before unlink. Receipt paths, enums and symlinks are validated on recovery.
 Operation IDs must be globally unique within a vault; receipt files remain as
-deduplication evidence.
+deduplication evidence. An identical update joins its existing uncertain
+operation. A crash between receipt creation and Markdown replacement can leave
+that update uncertain even when the note retains its original revision.
+Inspect the receipt and canonical note before any separately authorized repair;
+an identical retry does not repeat the write.
 
 Optional local Git completion is a separate effect, recognized by its operation
 trailer. An unknown Git outcome cannot authorize another Markdown mutation.

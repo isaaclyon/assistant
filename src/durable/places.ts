@@ -149,7 +149,7 @@ export function createNativePlaces(options: NativePlacesOptions) {
     const cid = state.epochs[epoch];
     if (conversationId !== undefined && cid !== conversationId) return undefined;
     const sources = Object.values(state.sources).filter(source => cid !== undefined && source.conversationId === cid && !source.cancelled);
-    if (sources.some(source => source.principal !== config.principal || source.chatId !== allowed || source.threadId !== null)) return undefined;
+    if ((conversationId !== undefined && !sources.length) || sources.some(source => source.principal !== config.principal || source.chatId !== allowed || source.threadId !== null)) return undefined;
     return { epoch };
   }
   const originOk = (request: UiOrigin) => request.actorId === allowed && request.principal === config.principal && request.target.chatId === allowed && request.target.threadId === undefined;
