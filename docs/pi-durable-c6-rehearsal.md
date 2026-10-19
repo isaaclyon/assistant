@@ -433,6 +433,36 @@ Check `tailscale serve status --json` before choosing a private test endpoint.
 The text status can omit foreground configurations. The occupied-port guard
 refuses the existing foreground mappings before any network change.
 
+### Separately authorized one-bot production trial
+
+A separately authorized personal-bot trial activates immutable native release
+`7d1ebb6`. The first attempt reaches its command limit before native startup.
+A matching pre-start restore precedes the successful guarded activation.
+The paired checkpoint and selected external backups verify before
+startup. All twelve existing jobs load, and the pause configuration and webhook
+secret remain unchanged. The engineering peer and broker retain their existing
+legacy release. This trial does not authorize another runtime transition.
+
+The scheduled canary reaches native admission, run completion and submission
+completion. Stopped inspection verifies that exact work. A controlled restart
+then reaches stable readiness with a distinct process ID at the same native
+release. The retained observation and root evidence cross-check successfully.
+The runtime, peer and broker are active and enabled with no maintenance hold.
+
+The first observation exposes an administrator checker mismatch: the SDK returns
+a numeric submission ID, while the evidence validator expects a string. Reviewed
+administrator helper `4e5acda` normalizes that exact ID and explicitly resumes the
+matching held observation. It repeats inspection before startup and retains the
+restart evidence. The production native release remains `7d1ebb6` throughout;
+observation recovery does not rewind the checkpoint or resubmit work.
+
+The fix passes type checking, 1,392 tests and a build, with 39 platform/browser
+tests skipped. A focused 34-test check also verifies the real native inspector's
+proof through the administrator parser. An independent read-only safety review
+finds no material issue. Human confirmation of an ordinary personal-bot reply
+remains open. Authenticated YNAB acceptance stays deferred, so full C6 acceptance,
+fleet advancement and legacy retirement remain open.
+
 ### Repeat the offline checks
 
 1. Run `npm run check:changed` and confirm that the check passes.
