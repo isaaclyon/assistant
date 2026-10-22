@@ -215,6 +215,15 @@ The Codex adapter defaults to normal mode for the bridge's `openai-codex` model,
 
 ## Personal memory
 
+The personal-agent instructions define useful follow-through, selective
+notifications, continuity, and safe recovery within already authorized work.
+They do not enable new monitoring by themselves. The Isaac personal profile also
+records standing authorization to retain clear, reusable working corrections as
+private preference notes, so the user need not repeat them. This is not permission
+to infer preferences from behavior or collect unrelated personal facts. Other
+profiles require their own explicit authorization. The memory skill owns the
+save, correction, recall, and confirmation safeguards.
+
 The assistant stores explicitly requested personal memories as plain Markdown
 in `~/.local/share/pi-telegram-bridge/memory` (override with
 `PI_TELEGRAM_MEMORY_DIR`). Supported V1 domains: people, preferences, events,

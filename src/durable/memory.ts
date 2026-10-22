@@ -91,7 +91,7 @@ export const memoryToolParameters = Type.Object({
 export const MEMORY_TOOL_DESCRIPTION = 'Create, read, update, list, delete, or share Markdown memories. Create with a draft to review possible duplicates, then commit its draftToken. Updates use exact oldText/newText edits, append, and metadata set with a required revision. Delete/share open user-only confirmation buttons.';
 /** Usage guidance for the instruction/skill bundle; the native tool shape has no guideline field. */
 export const MEMORY_TOOL_GUIDELINES = [
-  'Use assistant_memory for full-note reads and changes. Persist only memories the user explicitly asks to save.',
+  'Use assistant_memory for full-note reads and changes. Persist only memories explicitly authorized by the user, including clear reusable working corrections covered by an explicit standing request. Do not infer preferences from behavior or extend that authorization to unrelated personal facts.',
   'Create with draft, inspect possibleDuplicates, then create with draftToken for a distinct note. Update an existing note when it covers the same fact. Reuse the token on retries; tokens expire after ten minutes or session reset.',
   'Notes rank by usage. Person, preference, recipe, and reference notes are durable; list, event, and purchase notes fade when unused. Set decay to fading for a time-bound fact or idea of a durable type, or durable for a list or event that stays relevant; null restores the type default.',
   'Read before updating. Supply revision and edits (unique oldText/newText), append (Markdown at the end), and/or set (metadata). Edits run sequentially, then append, then one atomic save. Preserve unrelated content. Reread on conflict; restart list pagination on CURSOR_CONFLICT.',
