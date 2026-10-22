@@ -1,6 +1,6 @@
 ---
 name: personal-memory
-description: "Stores, recalls, corrects, and forgets explicitly requested personal memories such as people, preferences, events, lists, recipes, purchases, and reference notes. Use when the user asks to remember or retrieve personal information across conversations."
+description: "Stores, recalls, corrects, and forgets explicitly requested personal memories such as people, preferences, events, lists, recipes, purchases, and reference notes. Use when the user asks to remember or retrieve personal information across conversations, or provides reusable working corrections under explicit standing memory authorization."
 ---
 
 # Personal Memory
@@ -94,8 +94,22 @@ changed.
 ## Remember
 
 - Persist only when the user explicitly asks to remember/save something or
-  explicitly accepts an offer to remember it. Never silently retain incidental
-  statements, infer preferences, or derive facts from behavior.
+  explicitly accepts an offer to remember it. An explicit standing request to
+  retain generalized dos and don'ts authorizes clear, reusable working
+  instructions and corrections within that user's scope, without asking again
+  for each save. It does not authorize inferring preferences from behavior or
+  retaining incidental statements, secrets, third-party facts, or unrelated
+  personal details. Without standing authorization, ask before saving.
+- For authorized working preferences, search and read before writing; update a
+  matching `preference` note rather than accumulating duplicate rules. Save the
+  narrow rule and applicable scope, not the surrounding private conversation.
+  Ask if a correction could be a one-time exception rather than a lasting rule.
+  Briefly acknowledge a verified save. Later explicit corrections supersede
+  earlier rules in the same scope; preserve unrelated content. Stop this
+  accumulation if authorization is withdrawn.
+- Recall relevant working preferences when handling similar tasks. They guide
+  behavior but never override safety, required approvals, or higher-priority
+  instructions. Deletion and sharing retain their existing confirmation gates.
 - Refuse to store credentials, auth tokens, full card numbers, or other
   secrets. Store purchase and reference notes only on explicit request.
 - Use `create` with a draft before committing its token. If an existing note clearly covers the
