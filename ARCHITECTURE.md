@@ -104,6 +104,11 @@ passes scheduled execution, controlled restart and a real human-message reply.
 Authenticated YNAB acceptance is skipped by user decision. Peer runtimes and
 the broker retain their legacy release; broader rollout and retirement require
 separate authorization. Mainline CI runs checks only, with no deployment job.
+Native host metadata schema 2 separates instruction revisions from versioned
+runtime contracts. Settled-work instruction upgrades preserve conversation
+history and model choices. Schema-1 stores require an exact reconstructed
+predecessor signature from an explicitly selected immutable release; see
+[ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md).
 
 The sections below describe the deployed legacy architecture. Its package,
 source patches and service path remain in the legacy release tree until the

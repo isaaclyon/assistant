@@ -64,3 +64,13 @@ test('a pinned configuration digest is enforced on every load and isolated broke
  await expect(loadPinnedNativeConfig(f.path,{PI_DURABLE_CONFIG_SHA256:pin})).rejects.toThrow(/pinned administrator digest/);
  await expect(loadNativeConfig(f.path)).resolves.toMatchObject({account:'rewritten-account'});
 });
+
+test('instruction upgrade selects one distinct canonical sibling release by full SHA',async()=>{
+ const f=await fixture(),prior='b'.repeat(40);
+ f.config.resourceRoot=join(f.root,f.config.releaseSha);await mkdir(f.config.resourceRoot);
+ await mkdir(join(f.root,prior));(f.config as any).instructionUpgradeFrom=prior;await f.save();
+ expect((await loadNativeConfig(f.path)).instructionUpgradeFrom).toBe(prior);
+ (f.config as any).instructionUpgradeFrom='../escape';await f.save();await expect(loadNativeConfig(f.path)).rejects.toThrow(/instructionUpgradeFrom/);
+ (f.config as any).instructionUpgradeFrom=f.config.releaseSha;await f.save();await expect(loadNativeConfig(f.path)).rejects.toThrow(/distinct/);
+ (f.config as any).instructionUpgradeFrom='c'.repeat(40);await symlink(join(f.root,prior),join(f.root,'c'.repeat(40)));await f.save();await expect(loadNativeConfig(f.path)).rejects.toThrow(/canonical/);
+});

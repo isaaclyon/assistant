@@ -20,6 +20,8 @@ export interface NativeBundleModule { default(context?: unknown): Promise<Native
 export interface NativeRegistryOptions {
   resourceRoot: string;
   profileId: string;
+  /** Explicit predecessor used only to reconstruct the legacy content-bound signature. */
+  previousResourceRoot?: string;
   /** Must resolve the current principal/target/epoch from host state for this invocation, including recovery. */
   authorize(toolName: string, api: ToolExecutionApi, context: Context): Promise<void>;
   executionGuard?: <T>(toolName:string,work:()=>Promise<T>)=>Promise<T>;
@@ -88,8 +90,19 @@ export async function loadNativeRegistry(options: NativeRegistryOptions) {
       registry.install(defineExtension({ ...bundle.contributions, name: bundle.name, tools }));
       extensionNames.push(bundle.name);
     }
-    const signature = createHash('sha256').update(JSON.stringify({ profileId: options.profileId, extensionNames, bundleVersions, toolNames, toolSignatures, instructions, skills: skills.map(s => s.content) })).digest('hex');
-    return { registry, instructions, skills, extensionNames, toolNames, signature, close };
+    const contract = { profileId: options.profileId, extensionNames, bundleVersions, toolNames, toolSignatures };
+    const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    const signature = hash({ ...contract, instructions, skills: skills.map(s => s.content) });
+    const compatibilitySignature = hash(contract);
+    let previousSignature: string | undefined;
+    if (options.previousResourceRoot) {
+      // Read selected text only: never execute predecessor code. Reconstruct with CURRENT
+      // versions/schemas so a changed contract cannot match the stored legacy signature.
+      const prior = await loadCapabilityProfile(options.previousResourceRoot, options.profileId);
+      previousSignature = hash({ ...contract, instructions: await readFile(prior.instructionsPath, 'utf8'),
+        skills: await Promise.all(prior.skillPaths.map(path => readFile(path, 'utf8'))) });
+    }
+    return { registry, instructions, skills, extensionNames, toolNames, signature, compatibilitySignature, previousSignature, close };
   } catch (error) {
     try { await close(); } catch (cleanup) { throw new AggregateError([error, cleanup], 'Native registry construction failed'); }
     throw error;

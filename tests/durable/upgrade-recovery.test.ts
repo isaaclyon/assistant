@@ -117,3 +117,50 @@ it('a failed shutdown keeps the OS writer lease until the process ends', async (
   const probe = new DatabaseSync(join(dir, 'writer.lock.db'));
   try { expect(() => probe.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE')).toThrow(); } finally { probe.close(); }
 });
+
+it('migrates an exact legacy signature and refreshes existing instructions without replacing model preferences', async()=>{
+ const {configure,AgentDoc}=await import('@earendil-works/pi-durable');
+ const {HostState}=await import('../../src/durable/host.js');
+ const dir=await directory(),first=await open(dir,'v1');
+ const cid=await first.host.runtime.root.commit(async tx=>{
+  const c=await tx.createConversation({ownership:{kind:'ownerless'}});
+  await configure(tx,c.id,{instructions:'old instructions',thinkingLevel:'low'});
+  (await tx.doc(Bindings,first.host.runtime.root.id)).epochs['0']=c.id;return c.id;
+ },context);
+ await first.host.close();
+ const nextCompatibility={...compatibility,releaseSchema:2,registrySignature:'contract-only'};
+ const next=await open(dir,'v1',{compatibility:nextCompatibility,previousCompatibility:compatibility,instructionRevision:'new-revision',agent:{instructions:'new instructions'}});
+ // Inspection/construction alone must not migrate the store.
+ expect((await next.host.runtime.harness.snapshot(AgentDoc,cid,context))?.instructions).toBe('old instructions');
+ await next.host.validateRecovery();
+ expect(await next.host.runtime.harness.snapshot(AgentDoc,cid,context)).toMatchObject({instructions:'new instructions',thinkingLevel:'low'});
+ expect((await next.host.runtime.harness.snapshot(HostState,next.host.runtime.root.id,context))?.compatibility).toEqual(nextCompatibility);
+ await next.host.close();
+ const reopened=await open(dir,'v1',{compatibility:nextCompatibility,instructionRevision:'later-revision',agent:{instructions:'later instructions'}});
+ await reopened.host.validateRecovery();
+ expect((await reopened.host.runtime.harness.snapshot(AgentDoc,cid,context))?.instructions).toBe('later instructions');
+});
+
+it('refuses a legacy instruction transition with unfinished work and preserves its metadata',async()=>{
+ const dir=await directory();await seedPending(dir);
+ const before=await stateOf(dir);
+ const next=await open(dir,'v1',{compatibility:{...compatibility,releaseSchema:2,registrySignature:'new'},previousCompatibility:compatibility,instructionRevision:'new',agent:{instructions:'new'}});
+ await expect(next.host.validateRecovery()).rejects.toThrow('settled');
+ expect(next.calls).toEqual({transportStart:0,sends:0,reconcileSources:0});
+ await next.host.close();expect(await stateOf(dir)).toEqual(before);
+});
+
+it('rejects mismatched legacy proof rather than replacing metadata',async()=>{
+ const dir=await directory();const first=await open(dir,'v1');await first.host.close();
+ await expect(open(dir,'v1',{compatibility:{...compatibility,releaseSchema:2,registrySignature:'new'},previousCompatibility:{...compatibility,registrySignature:'wrong'},instructionRevision:'new'})).rejects.toThrow('Incompatible');
+ const original=await open(dir,'v1');await original.host.validateRecovery();
+});
+
+it('does not apply new instructions across an uncertain external delivery',async()=>{
+ const {Deliveries}=await import('../../src/durable/delivery.js');
+ const dir=await directory();const first=await open(dir,'v1',{instructionRevision:'old',agent:{instructions:'old'}});
+ await first.host.runtime.root.commit(async tx=>{(await tx.doc(Deliveries,first.host.runtime.root.id)).items.synthetic={target:{chatId:10},segments:[{text:'synthetic',status:'uncertain'}]};},context);
+ await first.host.close();
+ const next=await open(dir,'v1',{instructionRevision:'new',agent:{instructions:'new'}});
+ await expect(next.host.start()).rejects.toThrow('settled');expect(next.calls.transportStart).toBe(0);
+});

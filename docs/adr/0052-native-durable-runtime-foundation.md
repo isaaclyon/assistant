@@ -68,7 +68,22 @@ the host and C3 history reader own access checks on that evidence.
 
 The host checks runtime schema, selected profile, instance identity and registry
 signature before scheduling recovery. Missing definitions and incompatible
-selections block startup. Provider credentials stay in an explicitly selected
+selections block startup. Host metadata schema 2 separates the registry's tool
+and bundle contract from its instruction revision. Text-only instruction and
+skill updates require settled tasks, submissions, local inbox work, controls,
+and delivery. They atomically update stored conversation instructions and the
+revision, preserving model/thinking choices and conversation history. Inspection
+alone does not apply that update.
+
+Schema 1 retains a content-bound hash. Its one-time upgrade requires an explicit
+`instructionUpgradeFrom` full SHA in the pinned instance configuration. The host
+reads selected text from that retained sibling release without executing its
+code and reconstructs the old hash with the current tool schemas, replay modes,
+and handler/bundle versions. Only an exact stored match permits the transition;
+no operator-supplied replacement hash or generic compatibility bypass exists.
+Administrator preflight binds that SHA to the prior runtime map and refuses
+simultaneous configuration changes. Subsequent schema-2 releases bind the
+immutable release parent rather than the changing child-process release path. Provider credentials stay in an explicitly selected
 private store; the Pi-auth adapter uses the existing proper-lockfile protocol
 so legacy and native processes can coordinate refresh. It preserves unrelated
 provider records and disables ambient credential fallback. Native account

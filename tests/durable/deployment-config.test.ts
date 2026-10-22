@@ -34,6 +34,15 @@ it('checks native paths, owner, principal and self-only broker jobs without impo
  await save({...value,capabilityProfile:'durable-jobs-coordinator-test'});
  expect((await assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket)).digest).not.toBe(bound.digest);
  for(const change of [{principal:'emma'},{releaseSha:'b'.repeat(40)},{resourceRoot:root},{stateDir:root},{jobsRole:'disabled'},{transport:{mode:'ordinary'}},{capabilityProfile:'durable-personal-emma'},{capabilityProfile:'durable-household-shared'},{capabilityProfile:'durable-unknown'},{capabilityProfile:'durable-browser-test'},{group:{chatId:-1,actors:{isaac:42,emma:43}}},{transport:{mode:'broker',socketPath:socket,botId:0,allowedUserId:42}},{coordinator:{...value.coordinator,targets:['personal','builder']}},{coordinator:{...value.coordinator,coordinatorStateDir:root}}]){await save({...value,...change});await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket)).rejects.toThrow();}
+ const priorSha='b'.repeat(40),priorPath=join(root,'previous.json');
+ const prior={...selection,releaseSha:priorSha,nativeConfigPath:priorPath};
+ await writeFile(priorPath,JSON.stringify({...value,releaseSha:priorSha,resourceRoot:join(releaseRoot,priorSha)}),{mode:0o600});
+ await save({...value,instructionUpgradeFrom:priorSha});
+ await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,undefined,prior)).resolves.toBeDefined();
+ await save({...value,instructionUpgradeFrom:priorSha,account:'different-account'});
+ await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,undefined,prior)).rejects.toThrow(/configuration/);
+ await save({...value,instructionUpgradeFrom:'c'.repeat(40)});
+ await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,undefined,prior)).rejects.toThrow(/predecessor/);
  await save(value);await chmod(filename,0o644);await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket)).rejects.toThrow(/private/);
 });
 

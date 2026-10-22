@@ -17,7 +17,7 @@ import { actorOf, chatIdOf } from './surface.js';
 import { createGroupNew } from './group-new.js';
 import { nativeMemoryEnvironment } from './environment.js';
 import { confirmationPresentation, formatDiagnostics, type DiagnosticSection } from './telegram-ui.js';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { createTypeSafeJudge, TYPESAFE_API_KEY_FILE_ENV, type SemanticJudge } from '../semantic-judge.js';
 import { createNativeConversationRouter } from './routing.js';
@@ -272,7 +272,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    if(['reload','restart','skills','debug',...(providerEnabled?['fast','usage']:[])].includes(name))return {name,version:1,tools:[],close:async()=>{}};
    throw new Error('Unknown native bundle');
   };
-  const load=()=>loadNativeRegistry({resourceRoot:config.resourceRoot,profileId:config.capabilityProfile,bundleContext:{bundle},...(browserGuard?{executionGuard:browserGuard.run}:{}),authorize:async(_name,api,ctx)=>{
+  const load=()=>loadNativeRegistry({resourceRoot:config.resourceRoot,...(config.instructionUpgradeFrom?{previousResourceRoot:join(dirname(config.resourceRoot),config.instructionUpgradeFrom)}:{}),profileId:config.capabilityProfile,bundleContext:{bundle},...(browserGuard?{executionGuard:browserGuard.run}:{}),authorize:async(_name,api,ctx)=>{
    const binding=await api.commit(tx=>nativeBinding(tx,requireHost(),config,api.conversationId),ctx);
    if(!binding)throw new Error('Current native authority rejected');
   }});
@@ -358,13 +358,25 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    return (await readFile(path,'utf8')).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/,'').trim();
   }}:{})});
   const bridge=transport;
-  const signature=createHash('sha256').update(JSON.stringify({registry:resources.signature,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,...(config.group?{group:config.group}:{}),...(config.routing?{routing:config.routing}:{}),memory:config.memory??null,...(jobsEnabled?{jobs:{role:config.jobsRole,stateDir:config.stateDir,...(coordinatorEnabled?{coordinator:config.coordinator}:{})}}:{}),...(googleEnabled?{google:config.google}:{} ),...(cliEnabled?{cli:config.cli??{}}:{}),...(browserEnabled?{browser:config.browser}:{}),...(childrenEnabled?{children:{workspaceCwd:config.workspaceCwd,resourceRoot:config.resourceRoot,account:config.account,credentialPath:config.credentialPath,settingsPath:config.settingsPath}}:{})})).digest('hex');
+  const legacySignature=(registry:string,resourceRoot:string)=>createHash('sha256').update(JSON.stringify({registry,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,...(config.group?{group:config.group}:{}),...(config.routing?{routing:config.routing}:{}),memory:config.memory??null,...(jobsEnabled?{jobs:{role:config.jobsRole,stateDir:config.stateDir,...(coordinatorEnabled?{coordinator:config.coordinator}:{})}}:{}),...(googleEnabled?{google:config.google}:{} ),...(cliEnabled?{cli:config.cli??{}}:{}),...(browserEnabled?{browser:config.browser}:{}),...(childrenEnabled?{children:{workspaceCwd:config.workspaceCwd,resourceRoot,account:config.account,credentialPath:config.credentialPath,settingsPath:config.settingsPath}}:{})})).digest('hex');
+  // Release relocation is not an authority change. Bind the immutable release parent,
+  // all non-content contracts, and the complete configured execution identity.
+  const signature=createHash('sha256').update(JSON.stringify({
+   legacy:legacySignature(resources.compatibilitySignature,dirname(config.resourceRoot)),
+   transport:config.transport,workspaceCwd:config.workspaceCwd,account:config.account,
+   credentialPath:config.credentialPath,settingsPath:config.settingsPath,
+  })).digest('hex');
+  const previousCompatibility=resources.previousSignature&&config.instructionUpgradeFrom?{
+   runtimeGeneration:'pi-durable-1.3.0',releaseSchema:1,profile:config.capabilityProfile,
+   registrySignature:legacySignature(resources.previousSignature,join(dirname(config.resourceRoot),config.instructionUpgradeFrom)),
+  }:undefined;
   // The reader delegates to the active registry after a safe idle reload.
   const registry={snapshot:()=>resources!.registry.snapshot(),subscribe:(listener:()=>void)=>{registryListeners.add(listener);return()=>{registryListeners.delete(listener);};}};
   host=await DurableHost.create({stateDir:config.historyDir,inboxPath:config.inboxPath,models:provider.models,registry,
    ...(executionEnvironment?{env:({cwd})=>{if(cwd!==config.workspaceCwd)throw new Error('Tool working directory differs from selected workspace');return executionEnvironment;}}:{}),
    agent:{model:provider.model,thinkingLevel:provider.thinkingLevel,cwd:config.workspaceCwd,instructions:[resources.instructions,...resources.skills.map(s=>s.content)].join('\n\n')},
-   compatibility:{runtimeGeneration:'pi-durable-1.3.0',releaseSchema:1,profile:config.capabilityProfile,registrySignature:signature},
+   compatibility:{runtimeGeneration:'pi-durable-1.3.0',releaseSchema:2,profile:config.capabilityProfile,registrySignature:signature},
+   instructionRevision:resources.signature,...(previousCompatibility?{previousCompatibility}:{}),
    onEpochChange:async(tx,previous,nextEpoch)=>{browser?.cancel();for(const id of previous){if(memoryModule)await memoryModule.invalidateMemoryState(tx,operations,id,String(nextEpoch),'new');else await operations.invalidate(tx,id,String(nextEpoch),'new');}},
    onConversation:async cid=>{await visible?.attach(cid);},
    ...(fast?{beforeAdmission:fast.settle}:{}),
