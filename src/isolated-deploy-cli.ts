@@ -205,7 +205,7 @@ async function preflight(): Promise<void> {
       PI_TELEGRAM_BRIDGE_CONFIG_ROOT: runtime.configRoot, PI_TELEGRAM_BRIDGE_RESOURCE_ROOT: runtimeRelease };
     const config = resolveBridgeInstanceConfig(manifest, runtime.instanceId, env, runtime.home, runtimeRelease);
     await validateCredentialEnvironmentFile(config.environmentFilePath, config.credentialScope, runtime.uid);
-    const nativeBinding=selected?.runtime==='pi-durable'?await assertNativeDeploymentBinding(selected,runtime,config,policy.releaseRoot,runtime===personal?socketPath:undefined,await existingTelegramIdentity(runtime,config)):undefined;
+    const nativeBinding=selected?.runtime==='pi-durable'?await assertNativeDeploymentBinding(selected,runtime,config,policy.releaseRoot,runtime===personal?socketPath:undefined,await existingTelegramIdentity(runtime,config),activation?.previous.find(entry=>entry.instanceId===runtime.instanceId)):undefined;
     await loadCapabilityProfile(runtimeRelease,nativeBinding?.capabilityProfile??config.capabilityProfile);
     await assertFirstNativeInbox(runtime,config);
     if (runtime === personal) {
@@ -224,7 +224,8 @@ async function preflight(): Promise<void> {
     const service: ManagedService = { name: unit.unitName, manager: runtime, path: join(runtime.manager === "system" ? "/etc/systemd/system" : join(runtime.home, ".config/systemd/user"), unit.unitName) };
     if(activation){
       const previous=activation.previous.find(entry=>entry.instanceId===runtime.instanceId)!,installed=await readFile(service.path,'utf8');
-      assertInstalledRuntimeSelection(installed,previous,policy.releaseRoot);
+      const previousBinding=previous.runtime==='pi-durable'?await assertNativeDeploymentBinding(previous,runtime,config,policy.releaseRoot,runtime===personal?socketPath:undefined,await existingTelegramIdentity(runtime,config)):undefined;
+      assertInstalledRuntimeSelection(installed,previous,policy.releaseRoot,previousBinding?.digest);
       if(sameRuntimeMap([previous],[selected!])&&installed!==unit.contents)throw new Error('Unchanged peer unit differs from the administrator rendering');
     }
     services.push(service); candidates.push({ runtime, config, unit, service,...(nativeBinding?{nativeConfigDigest:nativeBinding.digest}:{}) });

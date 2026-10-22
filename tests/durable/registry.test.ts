@@ -62,3 +62,25 @@ it('rejects duplicate task definitions within one bundle and closes its resource
   await expect(loadNativeRegistry({resourceRoot:root,profileId:'test',authorize:async()=>{},importer:async()=>({default:()=>({name:'selected',version:1,tools:[],contributions:{tasks:[task,task]},close:async()=>{closed++;}})})})).rejects.toThrow('Duplicate');
   expect(closed).toBe(1);
 });
+
+it('separates instruction revisions from replay compatibility and verifies an explicit legacy release', async () => {
+  const oldRoot=await fixture(),newRoot=await fixture();
+  const importer=async()=>({default:()=>({name:'selected',version:1,tools:[],close:async()=>{}})});
+  const old=await loadNativeRegistry({resourceRoot:oldRoot,profileId:'test',authorize:async()=>{},importer});
+  await writeFile(join(newRoot,'instructions.md'),'New working guidance');
+  await writeFile(join(newRoot,'SKILL.md'),'New skill guidance');
+  const next=await loadNativeRegistry({resourceRoot:newRoot,previousResourceRoot:oldRoot,profileId:'test',authorize:async()=>{},importer});
+  try {
+    expect(next.signature).not.toBe(old.signature);
+    expect(next.compatibilitySignature).toBe(old.compatibilitySignature);
+    expect(next.previousSignature).toBe(old.signature);
+    expect(next.compatibilitySignature).toMatch(/^[a-f0-9]{64}$/);
+  } finally { await next.close();await old.close(); }
+});
+
+it.each(['version','parameters','replay'] as const)('keeps %s changes incompatible even with legacy instruction proof',async(change)=>{
+ const root=await fixture();
+ const load=(changed:boolean)=>loadNativeRegistry({resourceRoot:root,previousResourceRoot:root,profileId:'test',authorize:async()=>{},importer:async()=>({default:()=>({name:'selected',tools:[{version:changed&&change==='version'?2:1,tool:defineTool({name:'echo',description:'Echo',parameters:changed&&change==='parameters'?Type.Object({value:Type.Number()}):Type.Object({text:Type.String()}),replay:changed&&change==='replay'?'unsafe':'safe',execute:async()=>textToolResult('ok')})}],close:async()=>{}})})});
+ const old=await load(false),next=await load(true);
+ try{expect(next.compatibilitySignature).not.toBe(old.compatibilitySignature);expect(next.previousSignature).not.toBe(old.signature);}finally{await next.close();await old.close();}
+});

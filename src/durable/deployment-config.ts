@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { BridgeInstanceConfig } from '../config.js';
@@ -10,7 +11,7 @@ import { profilePolicy } from './profiles.js';
 /** Inspect configuration as data. Never import or execute candidate release code
  * before the paired checkpoint and irreversible startup barrier. Full native
  * schema/provider validation remains the runtime's own startup responsibility. */
-export async function assertNativeDeploymentBinding(selection:RuntimeSelection,runtime:ManagedRuntime,config:BridgeInstanceConfig,releaseRoot:string,socketPath?:string,telegramIdentity?:{botId:number;allowedUserId:number}):Promise<{capabilityProfile:string;digest:string}> {
+export async function assertNativeDeploymentBinding(selection:RuntimeSelection,runtime:ManagedRuntime,config:BridgeInstanceConfig,releaseRoot:string,socketPath?:string,telegramIdentity?:{botId:number;allowedUserId:number},previous?:RuntimeSelection):Promise<{capabilityProfile:string;digest:string}> {
  if(selection.runtime!=='pi-durable'||!selection.nativeConfigPath)throw new Error('Native deployment selection is required');
  const expectedJobsRole=config.jobsRole==='target-only'?'recipient':config.jobsRole;
  const filename=selection.nativeConfigPath,meta=await lstat(filename);
@@ -18,6 +19,14 @@ export async function assertNativeDeploymentBinding(selection:RuntimeSelection,r
  const bytes=await readFile(filename);
  let value:Record<string,unknown>;try{value=JSON.parse(bytes.toString('utf8'));}catch{throw new Error('Invalid native deployment configuration');}
  if(!value||typeof value!=='object'||Array.isArray(value)||value.version!==1||value.runtime!=='pi-durable'||value.instanceId!==runtime.instanceId||value.principal!==config.principal||value.releaseSha!==selection.releaseSha||value.resourceRoot!==join(releaseRoot,selection.releaseSha)||value.workspaceCwd!==config.workspaceCwd||value.stateDir!==config.stateDir||value.jobsRole!==expectedJobsRole)throw new Error('Native configuration differs from the administrator deployment binding');
+ if(value.instructionUpgradeFrom!==undefined&&previous&&previous.releaseSha!==selection.releaseSha){
+  if(previous.runtime!=='pi-durable'||!previous.nativeConfigPath||value.instructionUpgradeFrom!==previous.releaseSha)throw new Error('Instruction upgrade predecessor differs from the installed map');
+  const info=await lstat(previous.nativeConfigPath);
+  if(!info.isFile()||info.nlink!==1||info.uid!==runtime.uid||(info.mode&0o777)!==0o600||info.size>128_000||await realpath(previous.nativeConfigPath)!==previous.nativeConfigPath)throw new Error('Unsafe previous instruction configuration');
+  const prior=JSON.parse(await readFile(previous.nativeConfigPath,'utf8'));
+  const withoutRelease=(input:Record<string,unknown>)=>Object.fromEntries(Object.entries(input).filter(([key])=>!['releaseSha','resourceRoot','instructionUpgradeFrom'].includes(key)));
+  if(!isDeepStrictEqual(withoutRelease(prior),withoutRelease(value)))throw new Error('Instruction upgrade cannot change runtime configuration');
+ }
  const profile=value.capabilityProfile,policy=typeof profile==='string'?profilePolicy(profile):undefined;
  if(typeof profile!=='string'||!policy)throw new Error('Native capability profile is not explicit');
  // Production profiles map one to one from the legacy profile. Test profiles stay on their private surface.

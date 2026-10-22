@@ -1,4 +1,4 @@
-import { AgentDoc, Harness, InboxDoc, LiveDoc, defineDoc, type AgentChange, type ConversationId, type HarnessOptions, type SubmissionId, type TaskId, type Tx } from '@earendil-works/pi-durable';
+import { AgentDoc, configure, Harness, InboxDoc, LiveDoc, defineDoc, type AgentChange, type ConversationId, type HarnessOptions, type SubmissionId, type TaskId, type Tx } from '@earendil-works/pi-durable';
 import { InboxStorageError, openHostStorage } from './storage.js';
 import { accept, admit, Bindings, context, normalize, type IngressRuntime, type InputAdapter, type SourceEnvelope, type Target } from './ingress.js';
 import { reconcileDeliveries, type FinalSender } from './delivery.js';
@@ -14,7 +14,7 @@ export interface HostTransport {
 }
 export type HostCompatibility={runtimeGeneration:string;releaseSchema:number;profile:string;registrySignature:string};
 type ControlRecord={control:HostControl;conversationId:ConversationId|null;taskIds:TaskId[];submissionIds:SubmissionId[];status:'pending'|'executing'|'done'|'uncertain'|'rejected'};
-export const HostState=defineDoc({kind:'bridge.host',version:1,scope:'conversation',history:'latest',fork:'initial',initial:()=>({compatibility:null as HostCompatibility|null,controls:{} as Record<string,ControlRecord>})});
+export const HostState=defineDoc({kind:'bridge.host',version:1,scope:'conversation',history:'latest',fork:'initial',initial:()=>({compatibility:null as HostCompatibility|null,instructionRevision:null as string|null,controls:{} as Record<string,ControlRecord>})});
 export interface HostConfig {
   stateDir:string;
   inboxPath?:string;
@@ -22,6 +22,9 @@ export interface HostConfig {
   registry:HarnessOptions['registry'];
   agent:AgentChange;
   compatibility:HostCompatibility;
+  /** Exact reconstructed v1 metadata, not an arbitrary ignore-compatibility flag. */
+  previousCompatibility?:HostCompatibility;
+  instructionRevision?:string;
   transport:HostTransport;
   /** Checks instance, bot, principal and target, on acceptance and recovery. */
   policy:(envelope:SourceEnvelope,phase?:'recovery')=>void|Promise<void>;
@@ -63,7 +66,17 @@ export class DurableHost {
     try{
       harness=await Harness.open(store.storage,{models:config.models,registry:config.registry,env:config.env,settings:{...config.settings,followUpMode:'one-at-a-time',steeringMode:'one-at-a-time'}},context);
       const root=await harness.root(context,{agent:config.agent});
-      await root.commit(async tx=>{const state=await tx.doc(HostState,root.id);if(state.compatibility&&JSON.stringify(state.compatibility)!==JSON.stringify(config.compatibility))throw new Error('Incompatible native host metadata');state.compatibility=config.compatibility;},context);
+      await root.commit(async tx=>{
+        const state=await tx.doc(HostState,root.id);
+        if(state.compatibility&&JSON.stringify(state.compatibility)!==JSON.stringify(config.compatibility)){
+          const previous=config.previousCompatibility;
+          if(!previous||!config.instructionRevision||previous.releaseSchema!==1||config.compatibility.releaseSchema!==2||
+            previous.runtimeGeneration!==config.compatibility.runtimeGeneration||previous.profile!==config.compatibility.profile||
+            JSON.stringify(state.compatibility)!==JSON.stringify(previous))throw new Error('Incompatible native host metadata');
+        }
+        // Existing stores are migrated only by validateRecovery, never by inspection.
+        if(!state.compatibility){state.compatibility=config.compatibility;state.instructionRevision=config.instructionRevision??null;}
+      },context);
       const host=new DurableHost(config,{harness,root,store,agent:config.agent,...(config.onEpochChange?{onEpochChange:config.onEpochChange}:{})});
       harness.subscribeClose(()=>{if(!host.closing)host.fatal(new Error('Native storage/session closed unexpectedly'));});
       harness.subscribeCommits(publication=>{
@@ -95,10 +108,31 @@ export class DurableHost {
     const active = state?.epochs[String(state.epoch)];
     if (active !== undefined) await this.config.onConversation?.(active);
   }
+  private async updateInstructions(){
+    const {harness,root,store}=this.runtime;
+    const state=await harness.snapshot(HostState,root.id,context);
+    const changed=JSON.stringify(state?.compatibility)!==JSON.stringify(this.config.compatibility)||
+      (this.config.instructionRevision!==undefined&&state?.instructionRevision!==this.config.instructionRevision);
+    if(!changed)return;
+    const recovery=await inspectRecovery(this.runtime);
+    const bindings=await harness.snapshot(Bindings,root.id,context);
+    if(store.inbox.pending().length||recovery.inspection.tasks.length||recovery.inspection.submissions.length||recovery.uncertain.length||
+      Object.values(bindings?.sources??{}).some(s=>!s.deliveryComplete&&!s.cancelled)||
+      Object.values(state?.controls??{}).some(c=>c.status!=='done'&&c.status!=='rejected'))
+      throw new Error('Instruction upgrade requires settled work and delivery; retain the previous release');
+    await root.commit(async tx=>{
+      const metadata=await tx.doc(HostState,root.id);
+      const sources=await tx.doc(Bindings,root.id);
+      for(const cid of new Set([root.id,...Object.values(sources.epochs)]))
+        await configure(tx,cid,{instructions:this.config.agent.instructions??null});
+      metadata.compatibility=this.config.compatibility;
+      metadata.instructionRevision=this.config.instructionRevision??null;
+    },context);
+  }
   /** Narrow read-only inbox inspection. Full startup uses validateRecovery. */
   validateInbox():Promise<void>{return this.serialize(()=>assertInboxBound(this.runtime));}
   /** Validate all stored authority and task migrations before another scheduler starts. */
-  validateRecovery():Promise<void>{return this.serialize(async()=>{this.assertOpen();await this.preflight();this.validated=true;});}
+  validateRecovery():Promise<void>{return this.serialize(async()=>{this.assertOpen();await this.preflight();await this.updateInstructions();this.validated=true;});}
   private signalReconcile(){
     if(this.closing||this.failed||!this.started)return;
     this.dirty=true;
@@ -106,7 +140,7 @@ export class DurableHost {
   }
   async start(){
     this.assertOpen();if(this.started)return;
-    if(!this.validated){await this.preflight();this.validated=true;}
+    if(!this.validated){await this.preflight();await this.updateInstructions();this.validated=true;}
     // Callbacks are bound only after validation. Sender is supplied before recovery.
     try{
       await this.config.transport.start(e=>this.receive(e),c=>this.control(c));
@@ -119,7 +153,7 @@ export class DurableHost {
   /** Resolves after binding AND inbox persistence. Admission runs after acceptance. */
   async receive(input:SourceEnvelope){
     this.assertOpen();const envelope=normalize(input);await this.config.policy(envelope);
-    try{await this.serialize(async()=>{this.assertOpen();if(!this.validated){await this.preflight();this.validated=true;}const accepted=await accept(this.runtime,envelope,this.config.idleMs);await this.config.onConversation?.(accepted.binding.conversationId);});}
+    try{await this.serialize(async()=>{this.assertOpen();if(!this.validated){await this.preflight();await this.updateInstructions();this.validated=true;}const accepted=await accept(this.runtime,envelope,this.config.idleMs);await this.config.onConversation?.(accepted.binding.conversationId);});}
     catch(error){if(error instanceof InboxStorageError)this.fatal(error);throw error;}
     void this.reconcile().catch(error=>this.fatal(error));
   }
@@ -127,7 +161,7 @@ export class DurableHost {
     if(this.reconcilePending)return this.reconcilePending;
     const work=this.serialize(async()=>{
       this.assertOpen();
-      if(!this.validated){await this.preflight();this.validated=true;}
+      if(!this.validated){await this.preflight();await this.updateInstructions();this.validated=true;}
       this.dirty=false;
       await this.recoverControls();
       await this.config.beforeAdmission?.();
@@ -199,7 +233,7 @@ export class DurableHost {
   }
   async control(control:HostControl){
     this.assertOpen();if(!control.requestId||!control.principal)throw new Error('Control identity required');await this.config.controlPolicy(control);
-    const work=this.serialize(async()=>{this.assertOpen();if(!this.validated){await this.preflight();this.validated=true;}await this.prepareControl(control);await this.recoverControls();});
+    const work=this.serialize(async()=>{this.assertOpen();if(!this.validated){await this.preflight();await this.updateInstructions();this.validated=true;}await this.prepareControl(control);await this.recoverControls();});
     return new Promise<void>((resolve,reject)=>{
       const timeout=setTimeout(()=>{const error=new Error('Control cancellation deadline exceeded');this.fatal(error);reject(error);},this.config.closeTimeoutMs??10_000);
       work.then(()=>{clearTimeout(timeout);resolve();},error=>{clearTimeout(timeout);reject(error);});

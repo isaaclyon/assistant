@@ -200,6 +200,33 @@ and broker trees against those retained digests. An unchanged peer unit must
 exactly match the administrator rendering. A retained stage ID cannot be replayed
 as a new activation.
 
+## Instruction-only native upgrades
+
+Instruction and skill wording is separate from schema-2 runtime compatibility.
+Tool names, schemas, replay modes, handler/bundle versions, profile and configured
+authority remain compatibility gates. The immutable release parent stays bound;
+changing the selected child-process release directory alone is not an authority
+change. Stored conversation instructions refresh at startup without resetting
+history or model/thinking choices.
+
+For an existing schema-1 store, set `instructionUpgradeFrom` to its currently
+installed full release SHA in the new private configuration. Preserve all other
+configuration except `releaseSha` and `resourceRoot`. Keep the old immutable
+release available. The administrator verifies the predecessor map and prior
+configuration pin. The runtime reconstructs the old signature from the old
+selected instruction/skill text and current versioned tool contracts; a mismatch
+still refuses startup. The field grants no permission to change tools or
+identity. After migration, later deployments may omit this one-time field.
+
+Before an instruction change, let tasks, submissions, accepted local inbox work,
+controls, and external delivery settle under the existing release. Uncertain
+outcomes require explicit reconciliation, not deletion. Broker-held updates are
+not replayed or discarded by the migration. The host applies the revision and
+stored instructions in one commit before transport/schedulers start. The
+inspector does not apply an upgrade. A failed startup still retains the existing
+maintenance hold and no-rewind boundary; never replace metadata by hand to force
+compatibility.
+
 ## Canary observation and deliberate advancement
 
 Observation is a separate administrator invocation. Its private selection file
