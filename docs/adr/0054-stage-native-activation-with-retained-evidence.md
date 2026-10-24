@@ -53,6 +53,15 @@ selected release. The full configured interval starts at initial readiness.
 Retain the proof, observation and digest. Advancement requires the exact previous
 map chain and its observation, then a new explicit stage invocation.
 
+Completion notification is a separate external-effect boundary after observation
+has succeeded and its hold is removed. The fixed administrator-selected engineering
+bot receives a scoped release/instance notice, not a claim that all peers upgraded.
+A private stage receipt records intent before send and confirmation or uncertainty
+afterwards. No uncertain send repeats automatically. Notification failure cannot
+re-enter recovery or restart healthy services. A notification-only invocation can
+verify retained evidence and current readiness without repeating observation.
+GitHub's check-only workflow and a merged commit are never deployment proof.
+
 Frozen-copy migration is a separate preservation operation. Inventory and apply
 retain canonical bytes, historical anchors, domain stores, Telegram/broker
 ownership evidence and browser gates. Unknown old work remains quarantined.

@@ -118,6 +118,18 @@ validated.
 
 ## Final report
 
-Report the branch, commit(s), PR URL, merge commit, PR and post-merge CI/deploy
-results, cleanup performed, fixes pushed after opening the PR, and anything
-still blocked.
+Do not wait for the user to ask whether the code deployed. Lead with one explicit
+status: **Code deployed: `<short SHA>` — `<affected bot/component>`**, **Merged,
+not deployed**, or **Blocked**. Name the live verification for a deployment;
+passing CI or merging is not deployment. Standalone utility installs need the
+same explicit completion notice, without implying that every bot runtime changed.
+
+For a self-upgrade that finishes after this turn, arrange the independent,
+post-verification notice before ending the turn. Native `stage-observe` emits a
+receipt-backed completion notice after its checks; do not send a duplicate if
+confirmed. Inspect unknown notification outcomes instead of retrying blindly.
+A failed notification must not restart or roll back healthy deployed services.
+
+Then report the relevant branch, commit(s), PR URL, merge commit, PR and post-merge
+CI/deploy results, cleanup performed, fixes pushed after opening the PR, and
+anything still blocked.
