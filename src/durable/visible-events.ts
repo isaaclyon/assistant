@@ -13,6 +13,8 @@ export interface VisibleEventsOptions {
   stream: { update(target: Target, turn: string, text: string): void; finish(target: Target, turn: string): Promise<void> };
   /** Optional friendly tool-activity message port, bound to the private target. Same preview authority as text. */
   activity?: ToolActivityPort;
+  /** Best-effort Telegram chat action; never persisted or replayed. */
+  typing?: (target: Target, signal: AbortSignal) => Promise<unknown>;
   /** Working directory used to shorten paths in activity labels. */
   cwd?: string;
   activityIntervalMs?: number;
@@ -32,7 +34,7 @@ const textOf = (blocks: unknown): Map<number, string> => {
 export function createVisibleEvents(options: VisibleEventsOptions) {
   const target: Target = { chatId: chatIdOf(options.config) };
   let chain: Promise<unknown> = Promise.resolve();
-  let observer: { id: number; cid: ConversationId; watch: AgentEventStream; turns: Set<string>; activity?: ToolActivity | undefined; settle: () => Promise<void> } | undefined;
+  let observer: { id: number; cid: ConversationId; watch: AgentEventStream; turns: Set<string>; stopTyping: () => void; activity?: ToolActivity | undefined; settle: () => Promise<void> } | undefined;
   let nextObserver = 0, closed = false;
   let lastConversation: ConversationId | undefined;
   const safeDebug = (title: string, value: unknown) => { try { options.debug(title, value); } catch { /* diagnostics are optional */ } };
@@ -46,6 +48,7 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
 
   async function stop(current: NonNullable<typeof observer>) {
     if (observer === current) observer = undefined;
+    current.stopTyping();
     await current.watch.stop().catch(() => undefined);
     await current.activity?.finish().catch(() => undefined);
   }
@@ -68,18 +71,40 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
   }
 
   async function start(cid: ConversationId, watch: AgentEventStream) {
-    const me: NonNullable<typeof observer> = { id: ++nextObserver, cid, watch, turns: new Set<string>(), settle: async () => {} };
+    const me: NonNullable<typeof observer> = { id: ++nextObserver, cid, watch, turns: new Set<string>(), stopTyping: () => {}, settle: async () => {} };
     if (options.activity) me.activity = createToolActivity({ port: options.activity, target, ...(options.cwd ? { cwd: options.cwd } : {}), ...(options.activityIntervalMs ? { intervalMs: options.activityIntervalMs } : {}) });
     observer = me; lastConversation = cid;
     let preview = await previewInputs(watch.snapshot.run?.inputs);
+    let typingTimer: ReturnType<typeof setTimeout> | undefined;
+    let typingController: AbortController | undefined;
+    me.stopTyping = () => {
+      if (typingTimer) clearTimeout(typingTimer);
+      typingTimer = undefined;
+      typingController?.abort(); typingController = undefined;
+    };
+    const startTyping = () => {
+      if (!options.typing || !preview || observer !== me || typingController) return;
+      const controller = new AbortController(); typingController = controller;
+      const pulse = async () => {
+        if (controller.signal.aborted || observer !== me) return;
+        try { await options.typing!(target, controller.signal); } catch { /* best effort */ }
+        if (!controller.signal.aborted && observer === me) {
+          typingTimer = setTimeout(() => { void pulse(); }, 4000); typingTimer.unref?.();
+        }
+      };
+      void pulse();
+    };
+    if (watch.snapshot.run) startTyping();
     const refreshPreview = async () => {
       if (!requiresSourceBinding() || !preview) return;
       // A run can gain inputs at a tool boundary without another run_start.
       // The attach snapshot is fixed. Read public live state before publishing
       // the next turn and keep suppression sticky until the next run.
       preview = false;
-      const live = await options.host().runtime.harness.snapshot(LiveDoc, cid, context);
-      preview = await previewInputs(live?.run?.inputs);
+      try {
+        const live = await options.host().runtime.harness.snapshot(LiveDoc, cid, context);
+        preview = await previewInputs(live?.run?.inputs);
+      } finally { if (!preview) me.stopTyping(); }
     };
     let seq = 0, turn = '', finished = false, texts = new Map<number, string>(), last = '';
     const newTurn = () => { turn = `${me.id}:${++seq}`; finished = false; texts = new Map(); last = ''; };
@@ -101,12 +126,13 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
       if (observer !== me) return;
       switch (event.type) {
         case 'snapshot':
+          me.stopTyping();
           await me.activity?.finish(); // Overflow may have dropped tool ends.
           // Watch overflow replaces queued events with a new atomic snapshot.
           preview = false; preview = await previewInputs(event.run?.inputs);
-          await refreshPreview(); newTurn(); texts = textOf(event.generation?.message?.content); publish(); break;
-        case 'run_start': preview = false; preview = await previewInputs(event.inputs); safeDebug('durable run', { event: 'run_start', inputs: event.inputs.length }); break;
-        case 'run_end': await me.activity?.finish(); preview = !requiresSourceBinding(); safeDebug('durable run', { event: 'run_end', inputs: event.inputs.length }); break;
+          await refreshPreview(); if (event.run) startTyping(); newTurn(); texts = textOf(event.generation?.message?.content); publish(); break;
+        case 'run_start': me.stopTyping(); preview = false; preview = await previewInputs(event.inputs); startTyping(); safeDebug('durable run', { event: 'run_start', inputs: event.inputs.length }); break;
+        case 'run_end': me.stopTyping(); await me.activity?.finish(); preview = !requiresSourceBinding(); safeDebug('durable run', { event: 'run_end', inputs: event.inputs.length }); break;
         case 'turn_start': await refreshPreview(); newTurn(); safeDebug('durable turn', { event: 'turn_start' }); break;
         case 'turn_end': safeDebug('durable turn', { event: 'turn_end' }); break;
         case 'message_start': {
@@ -136,6 +162,7 @@ export function createVisibleEvents(options: VisibleEventsOptions) {
     const partial = watch.snapshot.generation?.message;
     if (partial) { newTurn(); texts = textOf(partial.content); publish(); }
     me.settle = async () => {
+      me.stopTyping();
       finished = true; // Late events of this turn are dropped until the next turn or message starts.
       await me.activity?.finish().catch(() => undefined);
       const turns = [...me.turns]; me.turns.clear();

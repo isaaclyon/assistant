@@ -289,3 +289,59 @@ test('full profiles keep child completion previews and activity hidden when sche
  s.live.run={inputs:['human']};await s.emit(0,{type:'run_end',inputs:['child']},{type:'run_start',inputs:['human']},{type:'message_start',message:asst([{type:'text',text:'HUMAN'}])});
  expect(s.stream.update.mock.calls.map(call=>call[2])).toEqual(['HUMAN']);await v.close();
 });
+
+test('typing covers human runs through tools and retries, stops at run end and shutdown', async () => {
+ reset(); vi.useFakeTimers();
+ try {
+  const {host,config,stream,debug}=setup();
+  const typing=vi.fn(async()=>{});
+  const visible=createVisibleEvents({host:()=>host,config,stream,debug,typing});
+  await visible.attach('c1' as never);
+  expect(typing).not.toHaveBeenCalled();
+  await watches[0]!.listener!([{type:'run_start',inputs:[]}],{});
+  expect(typing).toHaveBeenCalledTimes(1);
+  await watches[0]!.listener!([{type:'tool_execution_start',toolCallId:'a',toolName:'read'},{type:'auto_retry_start',attempt:1}],{});
+  await vi.advanceTimersByTimeAsync(4000);
+  expect(typing).toHaveBeenCalledTimes(2);
+  await watches[0]!.listener!([{type:'run_end',inputs:[]}],{});
+  await vi.advanceTimersByTimeAsync(8000);
+  expect(typing).toHaveBeenCalledTimes(2);
+  await watches[0]!.listener!([{type:'run_start',inputs:[]}],{});
+  await visible.close();
+  await vi.advanceTimersByTimeAsync(8000);
+  expect(typing).toHaveBeenCalledTimes(3);
+ } finally {vi.useRealTimers();}
+});
+
+
+test('typing suppresses recovered proactive work and aborts in-flight pulse on finish', async () => {
+ reset();
+ const s=setup();s.config.jobsRole='recipient';
+ (s.state as any).sources={job:{proactive:true},human:{proactive:false}};
+ s.host.runtime.harness.submission=async(id:string)=>({status:async()=>({requestId:id})});
+ snapshots.c1={run:{inputs:['job']}};
+ const typing=vi.fn(async(_t:unknown,_signal:AbortSignal)=>{});
+ const visible=createVisibleEvents({host:()=>s.host,config:s.config,stream:s.stream,debug:s.debug,typing});
+ await visible.attach('c1' as never);expect(typing).not.toHaveBeenCalled();
+ await s.emit(0,{type:'run_start',inputs:['job']});expect(typing).not.toHaveBeenCalled();
+ await s.emit(0,{type:'run_start',inputs:['human']});expect(typing).toHaveBeenCalledTimes(1);
+ const signal=typing.mock.calls[0]![1];expect(signal.aborted).toBe(false);
+ await visible.finish();expect(signal.aborted).toBe(true);
+ expect(typing).toHaveBeenCalledTimes(1);
+ await visible.close();
+});
+
+test('typing failures stay best effort; a late request cannot rearm after observer closure', async () => {
+ reset();vi.useFakeTimers();
+ try {
+  const s=setup();const gate=Promise.withResolvers<void>();
+  const typing=vi.fn().mockRejectedValueOnce(new Error('offline')).mockImplementationOnce(()=>gate.promise);
+  const visible=createVisibleEvents({host:()=>s.host,config:s.config,stream:s.stream,debug:s.debug,typing});
+  await visible.attach('c1' as never);
+  await s.emit(0,{type:'run_start',inputs:[]});
+  await vi.advanceTimersByTimeAsync(4000);expect(typing).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(12000);expect(typing).toHaveBeenCalledTimes(2);
+  await visible.close();gate.resolve();
+  await vi.advanceTimersByTimeAsync(12000);expect(typing).toHaveBeenCalledTimes(2);
+ } finally {vi.useRealTimers();}
+});

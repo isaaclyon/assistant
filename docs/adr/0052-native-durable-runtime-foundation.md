@@ -55,7 +55,13 @@ a sixty-second delay. Rejected segments remain pending until delivery succeeds
 or an operator repairs the cause; they have no automatic attempt limit.
 A send with missing acknowledgement or a surviving
 sending intent becomes uncertain. Streaming previews are best effort and never
-prove final delivery. Proactive `NO_REPLY` is suppressed. Native storage cannot
+prove final delivery. The same transient observer refreshes Telegram's typing
+chat action during human-requested runs (including tools and provider retries).
+Run settlement, observer replacement and shutdown cancel its timer and outstanding
+request. Recovered proactive runs remain silent. Typing is best effort, uses the
+transport's current ownership/pairing checks, and never enters the delivery ledger;
+Telegram may retain the last action briefly after refresh stops.
+Proactive `NO_REPLY` is suppressed. Native storage cannot
 make an external Telegram send exactly once.
 
 ### Authority and extension lifecycle

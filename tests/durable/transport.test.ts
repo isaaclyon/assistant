@@ -34,6 +34,8 @@ test('ordinary acceptance commits before named-profile offset advances; native p
  expect(offsets).toEqual([0]);expect(JSON.parse(await readFile(f.configPath,'utf8')).profiles.work.lastUpdateId).toBeUndefined();
  release();await vi.waitFor(()=>expect(offsets).toEqual([0,11]));
  const saved=JSON.parse(await readFile(f.configPath,'utf8'));expect(saved.profiles.work.lastUpdateId).toBe(10);expect(saved.lastUpdateId).toBeUndefined();
+ await transport.typing({chatId:7,threadId:3});
+ expect(sends.at(-1)).toEqual({method:'sendChatAction',body:{chat_id:7,message_thread_id:3,action:'typing'}});
  await transport.preview({chatId:7,threadId:3},'hello');expect(await transport.deliver({chatId:7,threadId:3},'**hello**',9)).toBe(22);
  expect(sends.at(-1)).toMatchObject({method:'sendRichMessage',body:{chat_id:7,message_thread_id:3,reply_parameters:{message_id:9}}});
  expect(sends.filter(s=>s.method==='sendRichMessage')).toHaveLength(1);
@@ -48,6 +50,7 @@ test('valid external owner waits, dead owner recovers, delivery before ownership
  const fetcher=vi.fn(async(input:RequestInfo|URL,init?:RequestInit)=>String(input).endsWith('/getMe')?ok({id:1}):pending(init?.signal));
  const transport=createNativeTelegramTransport({mode:'ordinary',...f,cwd:f.dir,botId:1,allowedUserId:7,fetch:fetcher});cleanups.push(()=>transport.stop());
  expect(await transport.start({accept:async()=>{}})).toBe('waiting-owner');expect(fetcher).not.toHaveBeenCalled();
+ await expect(transport.typing({chatId:7})).rejects.toMatchObject({definitelyNotSent:true});
  await expect(transport.deliver({chatId:7},'hello')).rejects.toMatchObject({definitelyNotSent:true});
  await writeFile(f.locksPath,JSON.stringify({'@llblab/pi-telegram':{pid:2147483647,cwd:'/dead'}}));
  void transport.reconcile();await vi.waitFor(()=>expect(fetcher).toHaveBeenCalledTimes(2));

@@ -14,7 +14,7 @@ import { actorOf, chatIdOf } from './surface.js';
 /** The ingest surface the bridge uses. The parent constructs it with the instance actor authorization. */
 export type NativeMediaIngest=Pick<MediaIngest,'receive'|'recover'|'collect'|'requeue'|'done'|'nextDueAt'>;
 export type RawTransport = Pick<ReturnType<typeof createNativeTelegramTransport>, 'start'|'stop'|'deliver'|'answerCallback'> &
-  Partial<Pick<ReturnType<typeof createNativeTelegramTransport>, 'present'|'edit'|'preview'|'media'>>;
+  Partial<Pick<ReturnType<typeof createNativeTelegramTransport>, 'present'|'edit'|'preview'|'media'|'typing'>>;
 const object=(value:unknown):Record<string,unknown>|undefined=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:undefined;
 const integer=(value:unknown):value is number=>typeof value==='number'&&Number.isSafeInteger(value);
 
@@ -147,6 +147,7 @@ export function bridgeTelegram(config:NativeConfig,raw:RawTransport,onTransportF
  stream:{update(target:Target,turn:string,text:string):void;finish(target:Target,turn:string):Promise<void>};
  /** Transient tool-activity message port for the private instance target. Absent when the raw transport cannot send. */
  activity:ToolActivityPort;
+ typing(target:Target,signal:AbortSignal):Promise<unknown>;
 } {
  const allowed=(target:Target)=>target.chatId===chatIdOf(config)&&target.threadId===undefined;
  const only=(target:Target)=>{if(!allowed(target))throw Object.assign(new Error('Delivery target outside instance authority'),{definitelyNotSent:true});};
@@ -357,6 +358,7 @@ export function bridgeTelegram(config:NativeConfig,raw:RawTransport,onTransportF
    only(target);if(!raw.present)throw Object.assign(new Error('Presentation port unavailable'),{definitelyNotSent:true});
    return {messageId:await raw.present(target,presentation)};
   }},
+  typing:async(target,signal)=>{only(target);if(!signal.aborted)await raw.typing?.(target,signal);},
   stream:{update:(target,turn,text)=>streamer.update(target,turn,text),finish:(target,turn)=>streamer.finish(target,turn)},
   activity:{
    // Private chat only (like previews); every call passes the transport's pairing and field policy.

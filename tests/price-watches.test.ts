@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { afterEach, expect, it } from "vitest";
 import { managePriceWatch } from "../src/price-watches.js";
 import { jobsContentHash } from "../src/jobs.js";
+// These are local fixture projections, never delegated operations on a live scheduler.
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 const watch = { source: { kind: "shopify", url: "https://shop.example.com/products/sample", id: "123", currency: "USD" }, baselineCents: "5000",
@@ -11,7 +12,7 @@ const watch = { source: { kind: "shopify", url: "https://shop.example.com/produc
   job: { target: "isaac", schedule: "0,5 9 * * *", rule: { type: "condition", operator: "less-than", target: 8001, for: "1s", notify: "once-per-episode" }, onTrigger: { type: "prompt", prompt: "Verify before alert" } } };
 it("stores task data under temporary, projects generic arguments, and preserves pending retirement", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "price-watch-")); roots.push(stateDir);
-  const options = { stateDir, validateReload: false };
+  const options = { stateDir, env: {}, validateReload: false };
   const result = await managePriceWatch({ operation: "upsert", id: "sample", watch }, options);
   expect(result).toMatchObject({ ok: true, publication: { status: "pending" } });
   const path = join(stateDir, "temporary/price-watches/sample/watch.json");
@@ -29,7 +30,7 @@ it("stores task data under temporary, projects generic arguments, and preserves 
 });
 it("requires explicit lifecycle and rejects traversal before creating jobs", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "price-watch-")); roots.push(stateDir);
-  const options = { stateDir, validateReload: false };
+  const options = { stateDir, env: {}, validateReload: false };
   await expect(managePriceWatch({ operation: "upsert", id: "../escape", watch }, options)).rejects.toThrow();
   await expect(managePriceWatch({ operation: "upsert", id: "sample", watch: { ...watch, endCondition: "" } }, options)).rejects.toThrow();
   await expect(readFile(join(stateDir, "jobs.json"), "utf8")).rejects.toThrow();

@@ -186,6 +186,11 @@ export function createNativeTelegramTransport(options: NativeTelegramOptions) {
       if (!Number.isSafeInteger(receipt?.message_id)) throw new TelegramDeliveryError('uncertain', 'Telegram receipt missing');
       return receipt.message_id as number;
     },
+    /** Ephemeral chat action; cancellation stops an outstanding request. */
+    async typing(target: TelegramTarget, signal?: AbortSignal) {
+      await call('sendChatAction', { chat_id: target.chatId, action: 'typing',
+        ...(target.threadId === undefined ? {} : { message_thread_id: target.threadId }) }, signal);
+    },
     async preview(target: TelegramTarget, text: string) {
       target = { ...target };
       const id = key(target);
