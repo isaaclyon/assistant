@@ -48,6 +48,34 @@ the saved edit in place and the host running its last accepted definitions.
 Neither outcome proves a reminder will fire. Do not pass secrets in command-line arguments;
 stdin keeps structured requests out of process listings.
 
+## Delegated management from a recipient bot
+
+When the host supplies `PI_TELEGRAM_SCHEDULE_CLIENT`, the same immutable-release
+jobs helper forwards definition requests to an explicitly authorized coordinator.
+Do not override this setting, infer a coordinator path, read another bot's state,
+or enable another scheduler. No private key contents belong in chat or arguments.
+
+Start with `{"operation":"list"}`. A delegated response contains the grant's
+`jobPrefix`, `targets`, `jobTypes`, up to 20 `{job, revision}` summaries without prompts, and
+`nextOffset` for pagination. Only cron and one-time prompt jobs are supported;
+heartbeat/checker selection, webhook secrets and price-watch manifests remain
+coordinator-local. Do not use the direct-file listing instructions below when
+working through a delegated client.
+
+Create with `expectedRevision: null`. Before editing or removing, call
+`{"operation":"inspect","id":"<granted-job-id>"}` and pass its exact `revision`
+as `expectedRevision`. Keep the ID inside the granted prefix and the recipient
+inside `targets`. `upsert` still requires a complete definition. Conflicts require
+fresh inspection and reconciliation, not blindly replacing the newer version.
+Delegated writes do not prune unrelated one-time jobs.
+
+Only `publication.status: accepted` proves activation of the exact saved bytes.
+Inspection returns the current saved job, revision, publication status and its
+scheduler run/fired markers—not recipient completion. A timeout or disconnected
+response may follow a successful save. Never automatically retry; inspect the
+same job first. Handoff inspection/recovery stays local to this instance and is
+never forwarded. See [the operations guide](../../../docs/delegated-schedules.md).
+
 ## Listing jobs and status
 
 When the user asks what jobs, schedules, reminders, heartbeats, or triggers are

@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import type { NativeCoordinatorConfig } from './coordinator.js';
+import { parseScheduleClient, readScheduleKey, type ScheduleClientConfig } from '../schedule-control-client.js';
+import { parseScheduleControl } from '../schedule-control-server.js';
 import { SUPPORTED_NATIVE_CHECKER_IDS } from './schedules.js';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { isNativeMemoryProfile, requireProfilePolicy } from './profiles.js';
@@ -44,6 +46,8 @@ export interface NativeConfig {
  cli?: { messagesBaseUrl?: string };
  browser?: NativeBrowserConfig;
  coordinator?: NativeCoordinatorConfig;
+ /** Delegated definition management; confers no coordinator or recipient-file access. */
+ scheduleClient?: ScheduleClientConfig;
  /** Exact household group surface; absent for private profiles. */
  group?: GroupSurface;
  historyDir: string; inboxPath: string; runtimeMetadataPath: string;
@@ -88,7 +92,7 @@ export async function loadNativeConfig(path:string,options:{expectedSha256?:stri
  if(options.expectedSha256!==undefined&&createHash('sha256').update(bytes).digest('hex')!==options.expectedSha256)throw new Error('Native configuration differs from its pinned administrator digest');
  let raw:unknown; try{raw=JSON.parse(bytes.toString('utf8'));}catch{throw new Error('Invalid native configuration JSON');}
  const value=record(raw,'Native configuration');
- fields(value,['version','runtime','instanceId','principal','releaseSha','resourceRoot','workspaceCwd','stateDir','capabilityProfile','account','credentialPath','settingsPath','jobsRole','idleHours','transport','memory','routing','google','cli','browser','coordinator','group','instructionUpgradeFrom'],'Native configuration');
+ fields(value,['version','runtime','instanceId','principal','releaseSha','resourceRoot','workspaceCwd','stateDir','capabilityProfile','account','credentialPath','settingsPath','jobsRole','idleHours','transport','memory','routing','google','cli','browser','coordinator','scheduleClient','group','instructionUpgradeFrom'],'Native configuration');
  if(value.version!==1||value.runtime!=='pi-durable') throw new Error('Unsupported native runtime or configuration version');
  const idleHours=value.idleHours??0;
  if(typeof idleHours!=='number'||!Number.isFinite(idleHours)||idleHours<0||idleHours>8760)throw new Error('Invalid idleHours');
@@ -113,7 +117,7 @@ export async function loadNativeConfig(path:string,options:{expectedSha256?:stri
  if(!stateStat.isDirectory() || (stateStat.mode&0o077)!==0 || (process.getuid && stateStat.uid!==process.getuid())) throw new Error('Native state directory must be private and owned by this runtime');
  let coordinator:NativeCoordinatorConfig|undefined;
  if(value.jobsRole==='coordinator'){
-  const selected=record(value.coordinator,'coordinator');fields(selected,['stateRoot','coordinatorStateDir','targets','scope',...(policy.schedules!=='forbidden'?['schedules']:[])],'coordinator');
+  const selected=record(value.coordinator,'coordinator');fields(selected,['stateRoot','coordinatorStateDir','targets','scope','control',...(policy.schedules!=='forbidden'?['schedules']:[])],'coordinator');
   if(policy.schedules==='required'&&selected.schedules===undefined)throw new Error('Coordinator schedules are required by the selected native profile');
   const requestedRoot=absolute(selected.stateRoot,'coordinator stateRoot'),requestedCoordinator=absolute(selected.coordinatorStateDir,'coordinator state directory');
   for(const directory of [requestedRoot,requestedCoordinator])if(!(await lstat(directory)).isDirectory())throw new Error('Coordinator paths must be real directories');
@@ -132,6 +136,7 @@ export async function loadNativeConfig(path:string,options:{expectedSha256?:stri
    if(await realpath(directory)!==resolve(directory))throw new Error('Coordinator directory ancestry must be canonical');
   }
   coordinator={stateRoot:resolve(stateRoot),coordinatorStateDir:resolve(coordinatorStateDir),targets,scope:selected.scope};
+  if(selected.control!==undefined)coordinator.control=parseScheduleControl(selected.control,targets);
   if(policy.schedules!=='forbidden'&&selected.schedules!==undefined){
    const schedules=record(selected.schedules,'coordinator schedules');fields(schedules,['checkerIds','judgeKeyFile','webhook'],'coordinator schedules');
    const supported:readonly string[]=SUPPORTED_NATIVE_CHECKER_IDS;
@@ -147,6 +152,12 @@ export async function loadNativeConfig(path:string,options:{expectedSha256?:stri
    coordinator.schedules={checkerIds,...(judgeKeyFile?{judgeKeyFile}:{}),...(webhook?{webhook}:{})};
   }
  }else if(value.coordinator!==undefined)throw new Error('Coordinator configuration requires the coordinator role');
+ let scheduleClient:ScheduleClientConfig|undefined;
+ if(value.scheduleClient!==undefined){
+  if(!policy.general||value.jobsRole==='coordinator')throw new Error('Delegated schedule client requires a non-coordinator general-tools profile');
+  scheduleClient=parseScheduleClient(value.scheduleClient);
+  await readScheduleKey(scheduleClient.keyFile);
+ }
  let memory: NativeMemoryConfig | undefined;
  if (policy.memory!=='none') {
   const selected = record(value.memory, 'memory');
@@ -254,7 +265,7 @@ export async function loadNativeConfig(path:string,options:{expectedSha256?:stri
   if(transport.mode==='broker'&&!browser.endpoints)throw new Error('Broker browser requires provisioned private endpoints');
   if(transport.mode==='ordinary'&&(resolve(transport.configPath)!==resolve(browser.agentDir,'telegram.json')||transport.profile!==browser.telegramProfile))throw new Error('Browser and native Telegram profiles differ');
  }
- return {...(instructionUpgradeFrom?{instructionUpgradeFrom}:{}),version:1,runtime:'pi-durable',instanceId:text(value.instanceId,'instanceId',/^[a-z0-9][a-z0-9-]{0,63}$/),principal:principal as NativeConfig['principal'],releaseSha:text(value.releaseSha,'releaseSha',/^[a-f0-9]{40}$/),resourceRoot,workspaceCwd,stateDir,capabilityProfile,account:text(value.account,'account',/^[a-zA-Z0-9._-]{1,128}$/),credentialPath:absolute(value.credentialPath,'credentialPath'),settingsPath:absolute(value.settingsPath,'settingsPath'),jobsRole:value.jobsRole as NativeConfig['jobsRole'],idleHours,transport,...(memory ? { memory } : {}),...(routing?{routing}:{}),...(google?{google}:{}),...(cli?{cli}:{}),...(browser?{browser}:{}),...(coordinator?{coordinator}:{}),...(group?{group}:{}),historyDir:join(stateDir,'durable'),inboxPath:join(stateDir,'inbox.db'),runtimeMetadataPath:join(stateDir,'runtime.json')};
+ return {...(instructionUpgradeFrom?{instructionUpgradeFrom}:{}),version:1,runtime:'pi-durable',instanceId:text(value.instanceId,'instanceId',/^[a-z0-9][a-z0-9-]{0,63}$/),principal:principal as NativeConfig['principal'],releaseSha:text(value.releaseSha,'releaseSha',/^[a-f0-9]{40}$/),resourceRoot,workspaceCwd,stateDir,capabilityProfile,account:text(value.account,'account',/^[a-zA-Z0-9._-]{1,128}$/),credentialPath:absolute(value.credentialPath,'credentialPath'),settingsPath:absolute(value.settingsPath,'settingsPath'),jobsRole:value.jobsRole as NativeConfig['jobsRole'],idleHours,transport,...(memory ? { memory } : {}),...(routing?{routing}:{}),...(google?{google}:{}),...(cli?{cli}:{}),...(browser?{browser}:{}),...(coordinator?{coordinator}:{}),...(scheduleClient?{scheduleClient}:{}),...(group?{group}:{}),historyDir:join(stateDir,'durable'),inboxPath:join(stateDir,'inbox.db'),runtimeMetadataPath:join(stateDir,'runtime.json')};
 }
 
 /** Entrypoint loader. The unit's pinned digest is checked on every start. A

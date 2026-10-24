@@ -29,6 +29,9 @@ export function createNativeExecutionEnvironment(config:NativeConfig) {
   shellEnv.PI_TELEGRAM_MESSAGES_BASE_URL=config.cli.messagesBaseUrl;
  }
  if(profilePolicy(config.capabilityProfile)?.browser){for(const [key,value] of Object.entries(nativeBrowserEnvironment(config))){if(value!==undefined)shellEnv[key]=value;}}
+ if(config.scheduleClient){
+  shellEnv.PI_TELEGRAM_SCHEDULE_CLIENT=JSON.stringify(config.scheduleClient);
+ }
  if(config.jobsRole==='coordinator'&&config.coordinator?.schedules){
   shellEnv.PI_TELEGRAM_JOBS_DIR=config.coordinator.coordinatorStateDir;
   shellEnv.PI_TELEGRAM_BRIDGE_STATE_ROOT=config.coordinator.stateRoot;

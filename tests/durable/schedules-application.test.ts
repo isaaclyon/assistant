@@ -23,7 +23,7 @@ async function execute(config:Parameters<typeof createNativeExecutionEnvironment
  try{const result=await environment.exec(command,{timeout:10,onOutput:chunk=>{stdout+=Buffer.from(chunk).toString('utf8');}},context);expect(result.ok).toBe(true);if(result.ok)expect(result.value.exitCode).toBe(0);return stdout.trim();}
  finally{await environment.cleanup(context);}
 }
-const send=(path:string,input:unknown)=>`printf '%s' '${JSON.stringify(input)}' | "${process.execPath}" "$PI_TELEGRAM_BRIDGE_RESOURCE_ROOT/${path}"`;
+const send=(path:string,input:unknown)=>`printf '%s' '${JSON.stringify(input)}' | "${process.execPath}" --disable-warning=ExperimentalWarning "$PI_TELEGRAM_BRIDGE_RESOURCE_ROOT/${path}"`;
 
  test('schedule profile validates explicit selections and rejects additions to earlier profiles',async()=>{
   const s=await setup('durable-jobs-schedules-test');
@@ -72,4 +72,32 @@ const send=(path:string,input:unknown)=>`printf '%s' '${JSON.stringify(input)}' 
   const modules=['jobs-cli','price-watches',...['web-page-items','retail-product-price','gmail-inbox','ynab-unapproved'].map(id=>'checkers/'+id)];
   for(const module of modules)expect(await readFile(join(release,'dist','src',module+'.js'),'utf8')).toBeTruthy();
   await promisify(execFile)(process.execPath,['--input-type=module','-e',`await Promise.all(${JSON.stringify(modules.map(module=>join(release,'dist','src',module+'.js')))}.map(path=>import(path)))`],{timeout:10_000});
+ });
+
+ test('recipient shell delegates through compiled helper without coordinator paths or ambient authority',async()=>{
+  const coordinator=await setup('durable-jobs-schedules-test');
+  const keyFile=join(coordinator.directory,'schedule-client.key');await writeFile(keyFile,'a'.repeat(64),{mode:0o600});
+  const socketPath=join(coordinator.directory,'schedule.sock');
+  coordinator.config.coordinator!.control={socketPath,grants:[{keyFile,jobPrefix:'delegated-',targets:['test']}]};
+  await coordinator.open([],false,{coordinator:{tickIntervalMs:20}});
+  const recipient=await setup('durable-jobs-test');recipient.config.scheduleClient={socketPath,keyFile,serverUid:process.getuid!()};
+  const {historyDir,inboxPath,runtimeMetadataPath,...raw}=recipient.config;
+  const configPath=join(recipient.directory,'config.json');await writeFile(configPath,JSON.stringify(raw),{mode:0o600});
+  expect((await loadNativeConfig(configPath)).scheduleClient).toEqual(recipient.config.scheduleClient);
+  const config={...recipient.config,resourceRoot:release};
+  vi.stubEnv('PI_TELEGRAM_JOBS_DIR','/untrusted');vi.stubEnv('PI_TELEGRAM_SCHEDULE_CLIENT','/untrusted');
+  const actual=JSON.parse(await execute(config,`"${process.execPath}" -e 'console.log(JSON.stringify({client:process.env.PI_TELEGRAM_SCHEDULE_CLIENT,jobs:process.env.PI_TELEGRAM_JOBS_DIR,manifest:process.env.PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST}))'`));
+  expect(actual).toEqual({client:JSON.stringify(config.scheduleClient)});
+  const helper='.pi/skills/schedule-reminders-and-jobs/scripts/jobs-cli.mjs';
+  const result=JSON.parse(await execute(config,send(helper,{operation:'add_at',id:'delegated-check',target:'test',at:'2999-01-01T00:00:00Z',prompt:'Synthetic check',expectedRevision:null})));
+  expect(result).toMatchObject({ok:true,publication:{status:'accepted'}});expect(result).not.toHaveProperty('stateDir');
+  const listing=JSON.parse(await execute(config,send(helper,{operation:'list'})));
+  expect(listing.jobs[0]).toMatchObject({job:{id:'delegated-check'},revision:result.revision});
+  expect(JSON.parse(await execute(config,send(helper,{operation:'inspect_handoffs'})))).toMatchObject({ok:true});
+  const {scheduleClient,...withoutClient}=config;
+  expect(await execute(withoutClient,'printf "%s" "${PI_TELEGRAM_SCHEDULE_CLIENT-unset}"')).toBe('unset');
+  await writeFile(configPath,JSON.stringify({...raw,scheduleClient:{...raw.scheduleClient,serverUid:-1}}));
+  await expect(loadNativeConfig(configPath)).rejects.toThrow(/schedule client/);
+  await writeFile(configPath,JSON.stringify({...raw,jobsRole:'coordinator',scheduleClient:raw.scheduleClient}));
+  await expect(loadNativeConfig(configPath)).rejects.toThrow();
  });

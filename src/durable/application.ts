@@ -363,6 +363,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   // all non-content contracts, and the complete configured execution identity.
   const signature=createHash('sha256').update(JSON.stringify({
    legacy:legacySignature(resources.compatibilitySignature,dirname(config.resourceRoot)),
+   ...(config.scheduleClient?{scheduleClient:config.scheduleClient}:{}),
    transport:config.transport,workspaceCwd:config.workspaceCwd,account:config.account,
    credentialPath:config.credentialPath,settingsPath:config.settingsPath,
   })).digest('hex');

@@ -138,7 +138,14 @@ Use schedule-reminders-and-jobs and watch-prices for scheduling and temporary
 price monitoring. Resolve every tracked helper from the immutable release:
 `node "$PI_TELEGRAM_BRIDGE_RESOURCE_ROOT/.pi/skills/schedule-reminders-and-jobs/scripts/jobs-cli.mjs"`
 and `node "$PI_TELEGRAM_BRIDGE_RESOURCE_ROOT/dist/src/price-watches.js"`.
-Send one JSON request on stdin. The shell's explicit `PI_TELEGRAM_JOBS_DIR`
+Send one JSON request on stdin. If the host supplies `PI_TELEGRAM_SCHEDULE_CLIENT`,
+the jobs helper delegates cron/at definition management to its authorized
+coordinator. Start with list to discover granted prefixes/targets; use inspect
+and exact expectedRevision for edits/removal, or null for creation. Do not read
+another bot's scheduler files or invent client configuration. A lost response
+requires inspection, not automatic retry. The delegated interface does not grant
+heartbeat, webhook, watch-manifest or cross-instance recovery access.
+Otherwise the shell's explicit `PI_TELEGRAM_JOBS_DIR`
 identifies the coordinator directory; never infer it from the workspace, a global
 manifest or a user's chat text. Recipient recovery remains bound to the active
 instance's own state directory. Distinguish a saved edit from host acceptance:

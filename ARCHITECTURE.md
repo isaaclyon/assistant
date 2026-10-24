@@ -110,6 +110,15 @@ history and model choices. Schema-1 stores require an exact reconstructed
 predecessor signature from an explicitly selected immutable release; see
 [ADR-0052](docs/adr/0052-native-durable-runtime-foundation.md).
 
+An optional delegated schedule-management socket separates definition management
+from coordinator ownership. Explicit key/prefix/recipient grants allow another
+runtime to list, inspect and revision-safely manage cron/at prompt jobs without
+sharing coordinator state or credentials. The existing coordinator retains
+publication and recipient grants; no cross-UID handoff protocol is added.
+Client/grant configuration remains an administrator-provisioned authority change.
+See [ADR-0055](docs/adr/0055-delegate-schedule-definition-management.md) and
+[delegated schedules](docs/delegated-schedules.md).
+
 The sections below describe the deployed legacy architecture. Its package,
 source patches and service path remain in the legacy release tree until the
 C6/C7 activation gates pass.
