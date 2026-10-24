@@ -45,7 +45,17 @@ type-checked via `npm run check` (`tsconfig.extensions.json`). Working examples:
 3. Add a failing behavior test first when a test harness exists, then make the smallest implementation that passes.
 4. Keep credentials and `~/.pi/agent/telegram.json` secret. Never broaden `src/host.ts` resource filtering to load global or ancestor capabilities.
 5. Run `npm run check:changed` and `npm run build` after code changes. The native `check:changed` command runs the full `npm run check` suite, including browser integration tests. For a skill-only documentation change, inspect links and frontmatter; the full checks are optional unless another file changed.
-6. Explain what changed and any deployment requirement. For a completed,
+6. Proactively report the finish line; never leave the user asking whether code
+   deployed. After verified activation, lead with **Code deployed: `<short SHA>` —
+   `<affected bot/component>`**, followed by the live check. Apply this to
+   standalone utility installs as well as runtime releases. If only merged, say
+   **Merged, not deployed** and give the remaining step; tests, CI, saved files or
+   a queued cutover are not live verification. For self-upgrades, arrange a
+   post-verification notice outside the retiring process before ending the turn.
+   Native `stage-observe` sends a receipt-backed notice automatically; inspect its
+   notification outcome and avoid duplicating confirmed messages. An uncertain
+   send must not be automatically retried. Explain what changed and any deployment
+   requirement. For a completed,
    validated coding change, the standing coding publish instruction authorizes
    committing, merging, and the repository's normal deployment workflow; do not
    enable, restart, or reconfigure the live service as a separate operational

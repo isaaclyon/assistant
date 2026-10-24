@@ -285,6 +285,35 @@ prove arbitrary external exactly-once effects, Telegram client display or live
 provider/browser authorization. The interval measures elapsed wall-clock time
 after initial readiness; it does not prove uninterrupted availability.
 
+## Deployment completion notices
+
+The GitHub workflow checks code; it does not deploy or send deployment notices.
+After `stage-observe` has retained valid completion/restart evidence, re-enabled
+the selected runtime and removed its hold, the administrator helper sends
+`✅ Code deployed: <short SHA> — <instance>` through the policy's single private
+engineering bot. It names only the selected instance, not an entirely upgraded
+fleet. No job or observation file supplies a destination or message text.
+
+The stage's private `notification.json` records `started` before the HTTP request,
+then `confirmed` or `unknown`. An unfinished attempt is unknown, never retried
+automatically. A confirmed API response is not proof of client display. Delivery
+failures are separate from deployment success: they cannot enter the runtime
+hold/stop/restart handler. Inspect the bounded notification status printed by the
+helper; a successful command alone does not prove the notice was delivered.
+
+For verified retained evidence whose automatic notification was never attempted,
+use the same administrator invocation with `stage-notify` instead of
+`stage-observe`, omitting the dispatch-selection argument. This checks the active
+map, installed release/config, live readiness and retained completion proof but
+never restarts or changes a runtime. Existing confirmed/uncertain receipts suppress
+another send. Inspect uncertain outcomes and obtain approval before any separate
+manual resend; never delete receipts to force one.
+
+Do not append an ad-hoc success sender to a cutover that already uses this hook.
+Standalone utility deployments do not run `stage-observe`: the engineering
+assistant must explicitly report their commit, affected components and live
+verification itself. A merged-only change must be called **not deployed**.
+
 ## Recovery, receipts and shared memory
 
 Pending task upgrades require registered definitions and compatible versions.

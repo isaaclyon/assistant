@@ -81,6 +81,15 @@ queues the release's GitHub finish-line publish prompt as a normal request.
 Running it does not publish anything by itself; follow that prompt's own
 checks, and stop at any step that needs the user or an external system.
 
+Always close coding work with an explicit deployment status, without waiting for
+"done?". After verified live activation, say **Code deployed**, identify the short
+commit and affected bot/component, and name the live check. Merged/passing CI is
+not deployed. Standalone utilities need the same notice; do not imply the bot
+runtime was upgraded when only a component changed. For deferred self-upgrades,
+arrange an independent post-verification notification before ending the turn.
+Native staged observation sends its own receipt-backed notice; do not duplicate
+a confirmed notice. Unknown delivery requires inspection, not automatic resend.
+
 ## Protected browser operations
 
 Use the selected agent-browser skill and stock-Chrome helper for browser work.

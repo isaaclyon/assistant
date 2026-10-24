@@ -28,10 +28,12 @@ import { assertInstalledRuntimeSelection, assertNativeDeploymentBinding, readDep
 import { assertLegacyInboxDrained } from './durable/deployment-inbox.js';
 import { releaseFromEntrypoint } from './runtime-entrypoint.js';
 import { defaultReleaseEntrypoints, verifyRelease } from './durable/release-build.js';
+import { notifyVerifiedStage } from './durable/deployment-notification.js';
+import { sendTelegramNotification } from './telegram-notification.js';
 
 const [sha, sourceRelease, action = "activate", configPath = "/etc/pi-telegram-bridge/isolated-deployment.json", migrationPath, activationPath, observationPath] = process.argv.slice(2);
 if (process.getuid?.() !== 0 || process.platform !== "linux" || !sha || !/^[a-f0-9]{40}$/.test(sha) ||
-    !sourceRelease || !["inventory", "preflight", "activate", "stage-preflight", "stage-activate", "stage-observe"].includes(action) || process.argv.length > 9) throw new Error("Isolated deployment requires root, full release SHA and a built release");
+    !sourceRelease || !["inventory", "preflight", "activate", "stage-preflight", "stage-activate", "stage-observe", "stage-notify"].includes(action) || process.argv.length > 9) throw new Error("Isolated deployment requires root, full release SHA and a built release");
 process.umask(0o077);
 const policy = await loadIsolatedDeploymentConfig(configPath);
 const staged = action.startsWith('stage-');
@@ -257,9 +259,9 @@ await withMutationLock(join(policy.checkpointRoot, "deployment-lock.sqlite"), as
     console.log(JSON.stringify({ migrationInventory: await inventoryIsolatedMigration(migration) }));
     return;
   }
-  if(action==='stage-observe'){
-    if(!activation||!observationPath)throw new Error('Canary observation requires the exact stage and a private dispatch selection file');
-    await assertAdministratorPath(currentReceiptPath);await assertAdministratorPath(observationPath);
+  if(action==='stage-observe'||action==='stage-notify'){
+    if(!activation||(action==='stage-observe'&&!observationPath))throw new Error('Canary observation requires the exact stage and a private dispatch selection file');
+    await assertAdministratorPath(currentReceiptPath);if(observationPath)await assertAdministratorPath(observationPath);
     const current=JSON.parse(await readFile(currentReceiptPath,'utf8'));
     if(runtimeActivationDigest(parseRuntimeActivation(current.plan,policy.runtimes.map(runtime=>runtime.instanceId)))!==runtimeActivationDigest(activation))throw new Error('Only the retained active stage can be observed');
     const stageDirectory=join(receiptRoot,activation.stageId),selection=selectionFor(activation.selectedInstance)!;
@@ -281,7 +283,37 @@ await withMutationLock(join(policy.checkpointRoot, "deployment-lock.sqlite"), as
     assertInstalledRuntimeSelection(await readFile(unitPath,'utf8'),selection,policy.releaseRoot,observedBinding.digest);
     const initial=current.initialReady;
     if(!initial||!Number.isSafeInteger(initial.pid)||initial.pid<=0||!Number.isSafeInteger(initial.at)||!Number.isSafeInteger(current.startedAt)||initial.at<current.startedAt||Date.now()-initial.at<activation.observationMs)throw new Error('Canary observation interval or initial readiness is incomplete');
-    const selectedDispatch=parseCanaryDispatchSelection(JSON.parse(await readFile(observationPath,'utf8')));
+    const reportNotification=async()=>{
+      try{
+        const evidencePath=join(stageDirectory,'evidence.json'),observedPath=join(stageDirectory,'observation.json');
+        await assertAdministratorPath(evidencePath);await assertAdministratorPath(observedPath);
+        if(await exists(join(runtime.stateRoot,'.recovery-maintenance')))throw new Error('Selected runtime remains held');
+        const pid=Number(await controlService(runtime,'show',unitName,'--property=MainPID','--value'));
+        assertRuntimeReady(await readRuntimeMetadata(join(config.stateDir,'runtime.json')),{instanceId:runtime.instanceId,releaseSha:selection.releaseSha,pid});
+        if(runtime===personal&&evaluateIsolationIdentity(parseLinuxProcessStatus(await readFile(`/proc/${pid}/status`,'utf8')),{uid:runtime.uid,gid:runtime.gid}).length)throw new Error('Selected runtime lost isolation');
+        const targets=[];
+        for(const recipient of policy.runtimes.filter(entry=>entry.manager==='user')){
+          const manifest=await loadBridgeInstanceManifest(recipient.manifestPath);
+          const instance=manifest.instances.find(entry=>entry.id===recipient.instanceId&&entry.principal==='engineering');
+          if(instance)targets.push({recipient,instance});
+        }
+        if(targets.length!==1||targets[0]!.instance.telegramSurface.type!=='private')throw new Error('Deployment requires one private engineering notification destination');
+        const target=targets[0]!;
+        const notice=await notifyVerifiedStage({plan:activation!,directory:stageDirectory,
+          observation:JSON.parse(await readFile(observedPath,'utf8')),evidence:JSON.parse(await readFile(evidencePath,'utf8')),
+          ready:{startedAt:current.startedAt,initialReady:current.initialReady},
+          send:text=>sendTelegramNotification({agentDir:target.recipient.agentDir,telegramProfile:target.instance.telegramProfile,telegramSurface:target.instance.telegramSurface,text,failureLabel:'Native deployment notification',
+            fetchImpl:(url,init)=>fetch(url,{...init,redirect:'error',signal:AbortSignal.timeout(15000)})}),
+        });
+        console.log(JSON.stringify({deployment:'verified',instanceId:runtime.instanceId,releaseSha:selection.releaseSha,notification:notice}));
+      }catch{
+        // Observation/recovery has already succeeded. Notification failure must
+        // never enter its rollback/hold handler or trigger another restart.
+        console.warn('Deployment notification unavailable or uncertain; inspect retained stage evidence and notification receipt. No automatic resend or runtime restart was attempted.');
+      }
+    };
+    if(action==='stage-notify'){await reportNotification();return;}
+    const selectedDispatch=parseCanaryDispatchSelection(JSON.parse(await readFile(observationPath!,'utf8')));
     for(const retained of ['evidence.json','observation.json'])if(await exists(join(stageDirectory,retained)))throw new Error('Canary observation evidence already exists; inspect the retained result before another restart');
     const marker=join(runtime.stateRoot,'.recovery-maintenance');
     const resuming=await exists(marker);
@@ -327,6 +359,7 @@ await withMutationLock(join(policy.checkpointRoot, "deployment-lock.sqlite"), as
       if(held){await controlService(runtime,'unset-environment','PI_TELEGRAM_RECOVERY_AUTHORIZATION').catch(()=>{});await controlService(runtime,'disable','--now',unitName).catch(()=>{});await assertServiceQuiescent(service);}
       throw new Error('Canary observation failed; retain the hold and reconcile the selected runtime',{cause});
     }
+    await reportNotification();
     return;
   }
   if (action === "preflight" || action === 'stage-preflight') { await preflight(); return; }
