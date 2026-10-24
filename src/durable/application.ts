@@ -26,7 +26,8 @@ import { createMediaArtifactStore, type NativeImageProcessor } from './media-art
 import { assertMediaAttachments, createAlbumJournal, createMediaIngest, createNativeInputAdapter, type MediaIngest } from './media-ingest.js';
 import { createMediaSender, createNativeMediaOutbound, type NativeMediaOutbound } from './media-outbound.js';
 import { MediaDeliveryError, type MediaPort } from './media-transport.js';
-import type { NativeConfig } from './config.js';
+import { loadNativeConfig, type NativeConfig } from './config.js';
+import { assertScheduleOnlyUpgrade } from './schedule-upgrade.js';
 
 export interface NativeApplicationOptions {
  browserServices?:import('./browser.js').NativeBrowserServices;
@@ -65,6 +66,8 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  const cliEnabled=policy.cli,googleEnabled=policy.google,generalEnabled=policy.general;
  if(googleEnabled&&!config.google)throw new Error('Google reads require explicit instance configuration');
  if(enabled&&(!config.memory||(config.principal==='engineering')!==(policy.memory==='history')))throw new Error('Chat-memory profile requires scoped memory configuration');
+ const schedulePrevious=config.scheduleUpgradeFrom?await loadNativeConfig(config.scheduleUpgradeFrom.configPath,{expectedSha256:config.scheduleUpgradeFrom.sha256}):undefined;
+ if(schedulePrevious)assertScheduleOnlyUpgrade(config as unknown as Record<string,unknown>,schedulePrevious as unknown as Record<string,unknown>);
  const provider=options.provider??await createNativeProvider({credentialPath:config.credentialPath,settingsPath:config.settingsPath,account:config.account});
  let resources:Awaited<ReturnType<typeof loadNativeRegistry>>|undefined;
  let host:DurableHost|undefined;
@@ -272,7 +275,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    if(['reload','restart','skills','debug',...(providerEnabled?['fast','usage']:[])].includes(name))return {name,version:1,tools:[],close:async()=>{}};
    throw new Error('Unknown native bundle');
   };
-  const load=()=>loadNativeRegistry({resourceRoot:config.resourceRoot,...(config.instructionUpgradeFrom?{previousResourceRoot:join(dirname(config.resourceRoot),config.instructionUpgradeFrom)}:{}),profileId:config.capabilityProfile,bundleContext:{bundle},...(browserGuard?{executionGuard:browserGuard.run}:{}),authorize:async(_name,api,ctx)=>{
+  const load=()=>loadNativeRegistry({resourceRoot:config.resourceRoot,...(schedulePrevious?{previousResourceRoot:schedulePrevious.resourceRoot}:config.instructionUpgradeFrom?{previousResourceRoot:join(dirname(config.resourceRoot),config.instructionUpgradeFrom)}:{}),profileId:config.capabilityProfile,bundleContext:{bundle},...(browserGuard?{executionGuard:browserGuard.run}:{}),authorize:async(_name,api,ctx)=>{
    const binding=await api.commit(tx=>nativeBinding(tx,requireHost(),config,api.conversationId),ctx);
    if(!binding)throw new Error('Current native authority rejected');
   }});
@@ -358,19 +361,23 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    return (await readFile(path,'utf8')).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/,'').trim();
   }}:{})});
   const bridge=transport;
-  const legacySignature=(registry:string,resourceRoot:string)=>createHash('sha256').update(JSON.stringify({registry,instance:config.instanceId,principal:config.principal,bot:config.transport.botId,actor:config.transport.allowedUserId,...(config.group?{group:config.group}:{}),...(config.routing?{routing:config.routing}:{}),memory:config.memory??null,...(jobsEnabled?{jobs:{role:config.jobsRole,stateDir:config.stateDir,...(coordinatorEnabled?{coordinator:config.coordinator}:{})}}:{}),...(googleEnabled?{google:config.google}:{} ),...(cliEnabled?{cli:config.cli??{}}:{}),...(browserEnabled?{browser:config.browser}:{}),...(childrenEnabled?{children:{workspaceCwd:config.workspaceCwd,resourceRoot,account:config.account,credentialPath:config.credentialPath,settingsPath:config.settingsPath}}:{})})).digest('hex');
-  // Release relocation is not an authority change. Bind the immutable release parent,
-  // all non-content contracts, and the complete configured execution identity.
-  const signature=createHash('sha256').update(JSON.stringify({
-   legacy:legacySignature(resources.compatibilitySignature,dirname(config.resourceRoot)),
-   ...(config.scheduleClient?{scheduleClient:config.scheduleClient}:{}),
-   transport:config.transport,workspaceCwd:config.workspaceCwd,account:config.account,
-   credentialPath:config.credentialPath,settingsPath:config.settingsPath,
+  const legacySignature=(registry:string,resourceRoot:string,selected:NativeConfig=config)=>createHash('sha256').update(JSON.stringify({registry,instance:selected.instanceId,principal:selected.principal,bot:selected.transport.botId,actor:selected.transport.allowedUserId,...(selected.group?{group:selected.group}:{}),...(selected.routing?{routing:selected.routing}:{}),memory:selected.memory??null,...(jobsEnabled?{jobs:{role:selected.jobsRole,stateDir:selected.stateDir,...(coordinatorEnabled?{coordinator:selected.coordinator}:{})}}:{}),...(googleEnabled?{google:selected.google}:{} ),...(cliEnabled?{cli:selected.cli??{}}:{}),...(browserEnabled?{browser:selected.browser}:{}),...(childrenEnabled?{children:{workspaceCwd:selected.workspaceCwd,resourceRoot,account:selected.account,credentialPath:selected.credentialPath,settingsPath:selected.settingsPath}}:{})})).digest('hex');
+  // Reconstruct exact versioned contracts; only the pinned configuration differs.
+  const signatureFor=(selected:NativeConfig,registry:string)=>createHash('sha256').update(JSON.stringify({
+   legacy:legacySignature(registry,dirname(selected.resourceRoot),selected),
+   ...(selected.scheduleClient?{scheduleClient:selected.scheduleClient}:{}),
+   transport:selected.transport,workspaceCwd:selected.workspaceCwd,account:selected.account,
+   credentialPath:selected.credentialPath,settingsPath:selected.settingsPath,
   })).digest('hex');
+  const signature=signatureFor(config,resources.compatibilitySignature);
   const previousCompatibility=resources.previousSignature&&config.instructionUpgradeFrom?{
    runtimeGeneration:'pi-durable-1.3.0',releaseSchema:1,profile:config.capabilityProfile,
    registrySignature:legacySignature(resources.previousSignature,join(dirname(config.resourceRoot),config.instructionUpgradeFrom)),
   }:undefined;
+  const scheduleUpgradeCompatibilities=schedulePrevious&&resources.previousSignature?[
+   {runtimeGeneration:'pi-durable-1.3.0',releaseSchema:1,profile:config.capabilityProfile,registrySignature:legacySignature(resources.previousSignature,schedulePrevious.resourceRoot,schedulePrevious)},
+   {runtimeGeneration:'pi-durable-1.3.0',releaseSchema:2,profile:config.capabilityProfile,registrySignature:signatureFor(schedulePrevious,resources.compatibilitySignature)},
+  ]:undefined;
   // The reader delegates to the active registry after a safe idle reload.
   const registry={snapshot:()=>resources!.registry.snapshot(),subscribe:(listener:()=>void)=>{registryListeners.add(listener);return()=>{registryListeners.delete(listener);};}};
   host=await DurableHost.create({stateDir:config.historyDir,inboxPath:config.inboxPath,models:provider.models,registry,
@@ -378,6 +385,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    agent:{model:provider.model,thinkingLevel:provider.thinkingLevel,cwd:config.workspaceCwd,instructions:[resources.instructions,...resources.skills.map(s=>s.content)].join('\n\n')},
    compatibility:{runtimeGeneration:'pi-durable-1.3.0',releaseSchema:2,profile:config.capabilityProfile,registrySignature:signature},
    instructionRevision:resources.signature,...(previousCompatibility?{previousCompatibility}:{}),
+   ...(scheduleUpgradeCompatibilities?{scheduleUpgradeCompatibilities}:{}),
    onEpochChange:async(tx,previous,nextEpoch)=>{browser?.cancel();for(const id of previous){if(memoryModule)await memoryModule.invalidateMemoryState(tx,operations,id,String(nextEpoch),'new');else await operations.invalidate(tx,id,String(nextEpoch),'new');}},
    onConversation:async cid=>{await visible?.attach(cid);},
    ...(fast?{beforeAdmission:fast.settle}:{}),

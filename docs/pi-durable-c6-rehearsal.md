@@ -227,6 +227,18 @@ inspector does not apply an upgrade. A failed startup still retains the existing
 maintenance hold and no-rewind boundary; never replace metadata by hand to force
 compatibility.
 
+## Delegated scheduling permission upgrades
+
+The separate `scheduleUpgradeFrom: {configPath, sha256}` selector supports only
+changes to `scheduleClient` and `coordinator.control` against an exact retained
+predecessor. It is mutually exclusive with `instructionUpgradeFrom`, keeps all
+other identity/authority/tool contracts fixed, and requires settled native work
+and delivery before the transactional metadata/instruction update. Administrator
+preflight binds the predecessor to the installed map and its existing pin.
+See [delegated scheduling](delegated-schedules.md#settled-scheduling-authority-transition)
+for provisioning, the isolated socket-directory exception and self-upgrade order.
+It does not enable a general authority migration or rewrite recovery state.
+
 ## Canary observation and deliberate advancement
 
 Observation is a separate administrator invocation. Its private selection file

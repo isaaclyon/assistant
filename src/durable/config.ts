@@ -4,6 +4,7 @@ import { lstat, open, realpath } from 'node:fs/promises';
 import type { NativeCoordinatorConfig } from './coordinator.js';
 import { parseScheduleClient, readScheduleKey, type ScheduleClientConfig } from '../schedule-control-client.js';
 import { parseScheduleControl } from '../schedule-control-server.js';
+import { assertScheduleOnlyUpgrade, parseScheduleUpgradeFrom, readSchedulePredecessor, type ScheduleUpgradeFrom } from './schedule-upgrade.js';
 import { SUPPORTED_NATIVE_CHECKER_IDS } from './schedules.js';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { isNativeMemoryProfile, requireProfilePolicy } from './profiles.js';
@@ -35,6 +36,8 @@ export interface NativeConfig {
  version: 1; runtime: 'pi-durable'; instanceId: string; principal: 'isaac'|'emma'|'household'|'engineering';
  /** Explicit v1 instruction-signature migration from a retained immutable sibling release. */
  instructionUpgradeFrom?: string;
+ /** Explicit pinned predecessor; permits only scheduleClient/coordinator.control changes. */
+ scheduleUpgradeFrom?: ScheduleUpgradeFrom;
  releaseSha: string; resourceRoot: string; workspaceCwd: string; stateDir: string;
  capabilityProfile: string; account: string; credentialPath: string; settingsPath: string; jobsRole: 'disabled'|'recipient'|'coordinator'; idleHours: number;
  transport: { mode:'ordinary'; profile:string; configPath:string; locksPath:string; botId:number; allowedUserId:number }
@@ -92,7 +95,7 @@ export async function loadNativeConfig(path:string,options:{expectedSha256?:stri
  if(options.expectedSha256!==undefined&&createHash('sha256').update(bytes).digest('hex')!==options.expectedSha256)throw new Error('Native configuration differs from its pinned administrator digest');
  let raw:unknown; try{raw=JSON.parse(bytes.toString('utf8'));}catch{throw new Error('Invalid native configuration JSON');}
  const value=record(raw,'Native configuration');
- fields(value,['version','runtime','instanceId','principal','releaseSha','resourceRoot','workspaceCwd','stateDir','capabilityProfile','account','credentialPath','settingsPath','jobsRole','idleHours','transport','memory','routing','google','cli','browser','coordinator','scheduleClient','group','instructionUpgradeFrom'],'Native configuration');
+ fields(value,['version','runtime','instanceId','principal','releaseSha','resourceRoot','workspaceCwd','stateDir','capabilityProfile','account','credentialPath','settingsPath','jobsRole','idleHours','transport','memory','routing','google','cli','browser','coordinator','scheduleClient','group','instructionUpgradeFrom','scheduleUpgradeFrom'],'Native configuration');
  if(value.version!==1||value.runtime!=='pi-durable') throw new Error('Unsupported native runtime or configuration version');
  const idleHours=value.idleHours??0;
  if(typeof idleHours!=='number'||!Number.isFinite(idleHours)||idleHours<0||idleHours>8760)throw new Error('Invalid idleHours');
@@ -109,6 +112,14 @@ export async function loadNativeConfig(path:string,options:{expectedSha256?:stri
   if(instructionUpgradeFrom===value.releaseSha||basename(resourceRoot)!==value.releaseSha)throw new Error('Instruction upgrade requires distinct SHA-named releases');
   const previous=join(dirname(resourceRoot),instructionUpgradeFrom);
   if(await realpath(previous)!==previous)throw new Error('Instruction predecessor must be canonical');
+ }
+ let scheduleUpgradeFrom:ScheduleUpgradeFrom|undefined;
+ if(value.scheduleUpgradeFrom!==undefined){
+  if(instructionUpgradeFrom)throw new Error('Select one native upgrade mode');
+  scheduleUpgradeFrom=parseScheduleUpgradeFrom(value.scheduleUpgradeFrom);
+  const prior=await readSchedulePredecessor(scheduleUpgradeFrom,process.getuid!());
+  assertScheduleOnlyUpgrade(value,prior);
+  if(await realpath(String(prior.resourceRoot))!==prior.resourceRoot)throw new Error('Schedule predecessor release must be canonical');
  }
  const workspaceCwd=await realpath(absolute(value.workspaceCwd,'workspaceCwd'));
  const stateDir=await realpath(absolute(value.stateDir,'stateDir'));
@@ -265,7 +276,7 @@ export async function loadNativeConfig(path:string,options:{expectedSha256?:stri
   if(transport.mode==='broker'&&!browser.endpoints)throw new Error('Broker browser requires provisioned private endpoints');
   if(transport.mode==='ordinary'&&(resolve(transport.configPath)!==resolve(browser.agentDir,'telegram.json')||transport.profile!==browser.telegramProfile))throw new Error('Browser and native Telegram profiles differ');
  }
- return {...(instructionUpgradeFrom?{instructionUpgradeFrom}:{}),version:1,runtime:'pi-durable',instanceId:text(value.instanceId,'instanceId',/^[a-z0-9][a-z0-9-]{0,63}$/),principal:principal as NativeConfig['principal'],releaseSha:text(value.releaseSha,'releaseSha',/^[a-f0-9]{40}$/),resourceRoot,workspaceCwd,stateDir,capabilityProfile,account:text(value.account,'account',/^[a-zA-Z0-9._-]{1,128}$/),credentialPath:absolute(value.credentialPath,'credentialPath'),settingsPath:absolute(value.settingsPath,'settingsPath'),jobsRole:value.jobsRole as NativeConfig['jobsRole'],idleHours,transport,...(memory ? { memory } : {}),...(routing?{routing}:{}),...(google?{google}:{}),...(cli?{cli}:{}),...(browser?{browser}:{}),...(coordinator?{coordinator}:{}),...(scheduleClient?{scheduleClient}:{}),...(group?{group}:{}),historyDir:join(stateDir,'durable'),inboxPath:join(stateDir,'inbox.db'),runtimeMetadataPath:join(stateDir,'runtime.json')};
+ return {...(instructionUpgradeFrom?{instructionUpgradeFrom}:{}),...(scheduleUpgradeFrom?{scheduleUpgradeFrom}:{}),version:1,runtime:'pi-durable',instanceId:text(value.instanceId,'instanceId',/^[a-z0-9][a-z0-9-]{0,63}$/),principal:principal as NativeConfig['principal'],releaseSha:text(value.releaseSha,'releaseSha',/^[a-f0-9]{40}$/),resourceRoot,workspaceCwd,stateDir,capabilityProfile,account:text(value.account,'account',/^[a-zA-Z0-9._-]{1,128}$/),credentialPath:absolute(value.credentialPath,'credentialPath'),settingsPath:absolute(value.settingsPath,'settingsPath'),jobsRole:value.jobsRole as NativeConfig['jobsRole'],idleHours,transport,...(memory ? { memory } : {}),...(routing?{routing}:{}),...(google?{google}:{}),...(cli?{cli}:{}),...(browser?{browser}:{}),...(coordinator?{coordinator}:{}),...(scheduleClient?{scheduleClient}:{}),...(group?{group}:{}),historyDir:join(stateDir,'durable'),inboxPath:join(stateDir,'inbox.db'),runtimeMetadataPath:join(stateDir,'runtime.json')};
 }
 
 /** Entrypoint loader. The unit's pinned digest is checked on every start. A

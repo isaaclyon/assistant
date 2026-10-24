@@ -7,11 +7,12 @@ import type { ManagedRuntime } from '../isolated-deployment-config.js';
 import { releaseFromEntrypoint } from '../runtime-entrypoint.js';
 import type { RuntimeSelection } from './activation.js';
 import { profilePolicy } from './profiles.js';
+import { assertScheduleOnlyUpgrade, parseScheduleUpgradeFrom, readSchedulePredecessor } from './schedule-upgrade.js';
 
 /** Inspect configuration as data. Never import or execute candidate release code
  * before the paired checkpoint and irreversible startup barrier. Full native
  * schema/provider validation remains the runtime's own startup responsibility. */
-export async function assertNativeDeploymentBinding(selection:RuntimeSelection,runtime:ManagedRuntime,config:BridgeInstanceConfig,releaseRoot:string,socketPath?:string,telegramIdentity?:{botId:number;allowedUserId:number},previous?:RuntimeSelection):Promise<{capabilityProfile:string;digest:string}> {
+export async function assertNativeDeploymentBinding(selection:RuntimeSelection,runtime:ManagedRuntime,config:BridgeInstanceConfig,releaseRoot:string,socketPath?:string,telegramIdentity?:{botId:number;allowedUserId:number},previous?:RuntimeSelection):Promise<{capabilityProfile:string;digest:string;scheduleControlDirectory?:string}> {
  if(selection.runtime!=='pi-durable'||!selection.nativeConfigPath)throw new Error('Native deployment selection is required');
  const expectedJobsRole=config.jobsRole==='target-only'?'recipient':config.jobsRole;
  const filename=selection.nativeConfigPath,meta=await lstat(filename);
@@ -26,6 +27,14 @@ export async function assertNativeDeploymentBinding(selection:RuntimeSelection,r
   const prior=JSON.parse(await readFile(previous.nativeConfigPath,'utf8'));
   const withoutRelease=(input:Record<string,unknown>)=>Object.fromEntries(Object.entries(input).filter(([key])=>!['releaseSha','resourceRoot','instructionUpgradeFrom'].includes(key)));
   if(!isDeepStrictEqual(withoutRelease(prior),withoutRelease(value)))throw new Error('Instruction upgrade cannot change runtime configuration');
+ }
+ if(value.scheduleUpgradeFrom!==undefined){
+  if(value.instructionUpgradeFrom!==undefined)throw new Error('Select one native upgrade mode');
+  const ref=parseScheduleUpgradeFrom(value.scheduleUpgradeFrom);
+  const prior=await readSchedulePredecessor(ref,runtime.uid);
+  assertScheduleOnlyUpgrade(value,prior);
+  if(previous&&previous.releaseSha!==selection.releaseSha&&
+   (previous.runtime!=='pi-durable'||previous.nativeConfigPath!==ref.configPath||previous.releaseSha!==prior.releaseSha))throw new Error('Schedule upgrade predecessor differs from installed map');
  }
  const profile=value.capabilityProfile,policy=typeof profile==='string'?profilePolicy(profile):undefined;
  if(typeof profile!=='string'||!policy)throw new Error('Native capability profile is not explicit');
@@ -48,14 +57,20 @@ export async function assertNativeDeploymentBinding(selection:RuntimeSelection,r
   if(!group||typeof group!=='object'||Array.isArray(group)||!actors||typeof actors!=='object'||Array.isArray(actors)||Object.keys(group).sort().join()!=='actors,chatId'||Object.keys(actors).sort().join()!=='emma,isaac'||group.chatId!==legacySurface.chatId||actors.isaac!==legacySurface.actors.isaac||actors.emma!==legacySurface.actors.emma)throw new Error('Native group surface differs from the legacy household group');
   if(transport.allowedUserId!==legacySurface.actors.isaac&&transport.allowedUserId!==legacySurface.actors.emma)throw new Error('Native Telegram user is not a legacy group actor');
  }else if(value.group!==undefined)throw new Error('A private native profile cannot declare a group surface');
+ let scheduleControlDirectory:string|undefined;
  if(runtime.manager==='system'){
   if(!socketPath||transport.mode!=='broker'||transport.socketPath!==socketPath)throw new Error('Isolated native runtime must use its selected trusted broker');
   if(config.jobsRole==='coordinator'){
    const coordinator=value.coordinator as Record<string,unknown>|undefined;
    if(!coordinator||coordinator.scope!=='self'||JSON.stringify(coordinator.targets)!==JSON.stringify([runtime.instanceId])||coordinator.stateRoot!==runtime.stateRoot||coordinator.coordinatorStateDir!==join(runtime.stateRoot,'coordinator'))throw new Error('Isolated native coordinator must select its own private state and target only');
+   if(coordinator.control!==undefined){
+    const control=coordinator.control as Record<string,unknown>;
+    scheduleControlDirectory=`/run/pi-telegram-schedules/${runtime.instanceId}`;
+    if(!control||typeof control!=='object'||Array.isArray(control)||control.socketPath!==`${scheduleControlDirectory}/control.sock`)throw new Error('Isolated schedule control requires its dedicated runtime socket directory');
+   }
   }
  }else if(transport.mode!=='ordinary'||transport.configPath!==join(runtime.agentDir,'telegram.json')||transport.profile!==config.telegramProfile)throw new Error('Native ordinary transport differs from its selected legacy identity');
- return {capabilityProfile:value.capabilityProfile as string,digest:createHash('sha256').update(bytes).digest('hex')};
+ return {capabilityProfile:value.capabilityProfile as string,digest:createHash('sha256').update(bytes).digest('hex'),...(scheduleControlDirectory?{scheduleControlDirectory}:{})};
 }
 
 /** Read only the selected transport identity. Never return or print its token. */

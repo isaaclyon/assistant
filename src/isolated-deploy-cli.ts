@@ -220,7 +220,8 @@ async function preflight(): Promise<void> {
       ...(selected?.runtime==='pi-durable'?{runtime:{generation:'pi-durable' as const,configPath:selected.nativeConfigPath!,configSha256:nativeBinding!.digest}}:{}) };
     const unit = runtime === personal ? renderIsolatedInstanceServiceUnit({ ...shared, user: runtime.user, group: runtime.user, privateHome: runtime.home,
       networkNamespace: policy.network.namespace, resolverPath: policy.resolverPath, auditPolicyPath: join(runtime.configRoot, "isolation-policy.json"),
-      trustedSocket: socketPath, browserAddress: policy.network.runtimeAddress, privateInputOrigin: policy.privateInputOrigin, privateTakeoverOrigin: policy.privateTakeoverOrigin }) : renderInstanceServiceUnit(shared);
+      trustedSocket: socketPath, browserAddress: policy.network.runtimeAddress, privateInputOrigin: policy.privateInputOrigin, privateTakeoverOrigin: policy.privateTakeoverOrigin,
+      ...(nativeBinding?.scheduleControlDirectory?{scheduleControlDirectory:nativeBinding.scheduleControlDirectory}:{}) }) : renderInstanceServiceUnit(shared);
     const service: ManagedService = { name: unit.unitName, manager: runtime, path: join(runtime.manager === "system" ? "/etc/systemd/system" : join(runtime.home, ".config/systemd/user"), unit.unitName) };
     if(activation){
       const previous=activation.previous.find(entry=>entry.instanceId===runtime.instanceId)!,installed=await readFile(service.path,'utf8');

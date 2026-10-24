@@ -1,4 +1,5 @@
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
@@ -43,6 +44,12 @@ it('checks native paths, owner, principal and self-only broker jobs without impo
  await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,undefined,prior)).rejects.toThrow(/configuration/);
  await save({...value,instructionUpgradeFrom:'c'.repeat(40)});
  await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,undefined,prior)).rejects.toThrow(/predecessor/);
+ const ref={configPath:priorPath,sha256:createHash('sha256').update(await readFile(priorPath)).digest('hex')};
+ const scheduled={...value,scheduleUpgradeFrom:ref,coordinator:{...value.coordinator,control:{socketPath:'/run/pi-telegram-schedules/personal/control.sock',grants:[{keyFile:'/private/key',jobPrefix:'ops-',targets:['personal']}]}}};
+ await save(scheduled);await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,undefined,prior)).resolves.toMatchObject({scheduleControlDirectory:'/run/pi-telegram-schedules/personal'});
+ await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,undefined,{...prior,nativeConfigPath:'/wrong.json'})).rejects.toThrow(/installed map/);
+ await save({...scheduled,scheduleUpgradeFrom:{...ref,sha256:'0'.repeat(64)}});await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,undefined,prior)).rejects.toThrow(/digest/);
+ await save({...scheduled,account:'unrelated-change'});await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,undefined,prior)).rejects.toThrow(/other runtime authority/);
  await save(value);await chmod(filename,0o644);await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket)).rejects.toThrow(/private/);
 });
 

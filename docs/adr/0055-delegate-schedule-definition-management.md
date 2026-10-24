@@ -54,10 +54,16 @@ coordinator lifetime; revocation requires its controlled restart.
 Configuration is off by default. Grant provisioning, group access, key copies,
 pinned configurations and service activation require administrator action.
 Adding/removing client or coordinator control authority participates in native
-runtime compatibility signatures. Existing incompatible histories remain held;
-this feature does not provide a generic signature bypass, delete history, or
-turn an instruction-only upgrade into an authority migration. Production enablement
-requires separate supported authority reconciliation as well as provisioning.
+runtime compatibility signatures. `scheduleUpgradeFrom` supplies the exact private
+predecessor config path and digest, checked against the administrator's installed
+map and pin. Only schedule client/control settings may differ; all other authority
+and tool contracts remain fixed. Schema-1/2 signatures are reconstructed rather
+than supplied by the operator. With all native work and delivery settled, startup
+updates metadata/instructions atomically while retaining conversations and receipts.
+Pending, uncertain or incompatible work remains held. This does not provide a
+generic signature bypass or turn an instruction-only upgrade into an authority
+migration. The isolated unit gains write access only to its instance-specific
+socket directory under `/run/pi-telegram-schedules`, not a shared state directory.
 The existing personal coordinator remains self-targeted: this interface does
 not introduce cross-UID recipient handoffs or a path back into a privileged bot.
 

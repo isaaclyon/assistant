@@ -164,3 +164,31 @@ it('does not apply new instructions across an uncertain external delivery',async
  const next=await open(dir,'v1',{instructionRevision:'new',agent:{instructions:'new'}});
  await expect(next.host.start()).rejects.toThrow('settled');expect(next.calls.transportStart).toBe(0);
 });
+
+it.each([1,2])('schedule-management upgrade accepts only an exact settled predecessor (schema %s)',async releaseSchema=>{
+ const dir=await directory();const old={...compatibility,releaseSchema};
+ const first=await open(dir,'v1',{compatibility:old,instructionRevision:'old-text'});
+ const rootId=first.host.runtime.root.id;await first.host.close();
+ const next={...compatibility,releaseSchema:2,registrySignature:'scoped-schedule-client'};
+ const candidate=await open(dir,'v1',{compatibility:next,instructionRevision:'new-text',scheduleUpgradeCompatibilities:[old]});
+ expect((await candidate.host.inspect()).compatibility).toEqual(old);
+ await candidate.host.validateRecovery();
+ expect((await candidate.host.inspect()).compatibility).toEqual(next);
+ expect(candidate.host.runtime.root.id).toBe(rootId);
+ expect(candidate.calls.transportStart).toBe(0);
+ await candidate.host.close();
+ const reopened=await open(dir,'v1',{compatibility:next,instructionRevision:'new-text'});
+ expect((await reopened.host.inspect()).compatibility).toEqual(next);
+});
+it('schedule-management upgrade preserves pending work and refuses to activate it under changed authority',async()=>{
+ const dir=await directory();await seedPending(dir);
+ const next={...compatibility,releaseSchema:2,registrySignature:'scoped-schedule-client'};
+ const candidate=await open(dir,'v1',{compatibility:next,instructionRevision:'new-text',scheduleUpgradeCompatibilities:[compatibility]});
+ await expect(candidate.host.validateRecovery()).rejects.toThrow(/settled work/);
+ expect((await candidate.host.inspect()).compatibility).toEqual(compatibility);
+ expect(candidate.calls.transportStart).toBe(0);expect(candidate.seen).toEqual([]);
+});
+it('schedule-management upgrade rejects a changed predecessor signature',async()=>{
+ const dir=await directory();const first=await open(dir,'v1');await first.host.close();
+ await expect(open(dir,'v1',{compatibility:{...compatibility,releaseSchema:2,registrySignature:'new'},instructionRevision:'new-text',scheduleUpgradeCompatibilities:[{...compatibility,registrySignature:'forged'}]})).rejects.toThrow(/Incompatible/);
+});

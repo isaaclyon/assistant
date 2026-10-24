@@ -24,6 +24,8 @@ export interface HostConfig {
   compatibility:HostCompatibility;
   /** Exact reconstructed v1 metadata, not an arbitrary ignore-compatibility flag. */
   previousCompatibility?:HostCompatibility;
+  /** Exact signatures reconstructed from the pinned scheduling-only predecessor. */
+  scheduleUpgradeCompatibilities?:readonly HostCompatibility[];
   instructionRevision?:string;
   transport:HostTransport;
   /** Checks instance, bot, principal and target, on acceptance and recovery. */
@@ -70,9 +72,10 @@ export class DurableHost {
         const state=await tx.doc(HostState,root.id);
         if(state.compatibility&&JSON.stringify(state.compatibility)!==JSON.stringify(config.compatibility)){
           const previous=config.previousCompatibility;
-          if(!previous||!config.instructionRevision||previous.releaseSchema!==1||config.compatibility.releaseSchema!==2||
-            previous.runtimeGeneration!==config.compatibility.runtimeGeneration||previous.profile!==config.compatibility.profile||
-            JSON.stringify(state.compatibility)!==JSON.stringify(previous))throw new Error('Incompatible native host metadata');
+          const samePredecessor=(prior:HostCompatibility)=>prior.runtimeGeneration===config.compatibility.runtimeGeneration&&prior.profile===config.compatibility.profile&&JSON.stringify(state.compatibility)===JSON.stringify(prior);
+          const instruction=previous?.releaseSchema===1&&samePredecessor(previous);
+          const scheduling=config.scheduleUpgradeCompatibilities?.some(prior=>[1,2].includes(prior.releaseSchema)&&samePredecessor(prior));
+          if(!config.instructionRevision||config.compatibility.releaseSchema!==2||(!instruction&&!scheduling))throw new Error('Incompatible native host metadata');
         }
         // Existing stores are migrated only by validateRecovery, never by inspection.
         if(!state.compatibility){state.compatibility=config.compatibility;state.instructionRevision=config.instructionRevision??null;}

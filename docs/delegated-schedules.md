@@ -23,11 +23,15 @@ configured on both sides. See [ADR-0055](adr/0055-delegate-schedule-definition-m
    optional `scheduleClient` to their private native configurations. Repin the
    administrator configuration digests through the staged deployment procedure.
    Use distinct keys and non-overlapping prefixes for additional grants.
-5. These are **authority changes**, not instruction-only updates. Native history
-   compatibility checks deliberately hold an existing store on changed authority.
-   Reconcile that transition through the supported administrator process before
-   activation; do not edit stored signatures, remove databases, or replay uncertain
-   work. This patch does not supply a general authority-migration bypass.
+5. These are **authority changes**, not instruction-only updates. Select the
+   narrow `scheduleUpgradeFrom` transition described below. Do not edit stored
+   signatures, remove databases, or replay uncertain work.
+   For an isolated system coordinator the socket must be exactly
+   `/run/pi-telegram-schedules/<instanceId>/control.sock`. The administrator
+   renderer opens only that directory in `ReadWritePaths`; all other sandbox
+   restrictions remain unchanged. Provision its setgid directory and boot-time
+   recreation separately. A pre-existing operator-only client group can be used
+   without adding the personal runtime to any privileged supplementary group.
 6. Use the [staged administrator procedure](pi-durable-c6-rehearsal.md) for
    release/service operations. No restart or enablement is implied by merging.
    Verify the actual cross-UID socket permissions under the deployed identities.
@@ -63,6 +67,45 @@ The client does not need the coordinator state path, global manifest, server key
 path, personal token, memory or provider credentials. Its OS identity can use
 its granted key; the interface is an authority boundary at the server, not a
 restriction on arbitrary shell execution by the same identity.
+
+## Settled scheduling-authority transition
+
+A new private native configuration may select:
+
+```json
+{"scheduleUpgradeFrom":{"configPath":"/private/retained-prior.json","sha256":"<exact prior configuration SHA-256>"}}
+```
+
+Keep the prior configuration and immutable release available. The predecessor
+must be a private, canonical, single-link runtime-owned file matching the exact
+pinned digest. Administrator preflight binds its path and release to the installed
+previous map; the old unit's existing config digest remains independently checked.
+The new and old releases must be distinct SHA-named siblings.
+
+Only `scheduleClient` and `coordinator.control` may change. Existing coordinator
+targets, checker selection, jobs role, transport, identity, credentials, memory,
+workspace, model account and all other settings must remain identical. Drop a
+previous instruction-upgrade selector; never select both upgrade modes. The
+runtime reconstructs schema-1 and schema-2 predecessor signatures using the
+current exact tool contracts and retained prior instructions/configuration. A
+contract mismatch still refuses startup.
+
+Before cutover, let native tasks, submissions, controls, local accepted inbox work
+and external delivery settle. The old metadata is not changed during inspection.
+Startup validates retained sources under unchanged recipient authority and updates
+compatibility plus instructions in one native transaction before the coordinator,
+transport or provider execution starts. Pending/uncertain work remains held, not
+resubmitted. This preserves conversation IDs, history, model preferences and
+operation receipts. After success the selector may be omitted from later configs.
+This is not a generic authority/signature override.
+
+Use staged activation and its paired checkpoint/no-rewind barrier. When upgrading
+the bot performing the work, queue the approved administrator cutover in a managed
+one-shot service **after that turn has settled**, rather than killing the active
+turn and then attempting to bypass the settled-work check. Retain a private status
+receipt and perform post-start list/create/inspect/remove checks using the client
+runtime identity. A canary's native completion and restart observation remain
+separate from definition acceptance.
 
 ## Agent workflow
 
