@@ -119,6 +119,13 @@ Client/grant configuration remains an administrator-provisioned authority change
 See [ADR-0055](docs/adr/0055-delegate-schedule-definition-management.md) and
 [delegated schedules](docs/delegated-schedules.md).
 
+Standalone read-only Linux monitoring can use a restricted collector identity and
+sanitized report without widening the personal runtime's network boundary. A
+sandboxed engineering-identity publisher uses its existing pinned schedule grant
+only for transitions and recovery; healthy checks do not wake a provider. These
+operator-installed utilities hold no personal credentials or repair authority.
+See [ADR-0056](docs/adr/0056-read-only-linux-health-monitoring.md).
+
 The sections below describe the deployed legacy architecture. Its package,
 source patches and service path remain in the legacy release tree until the
 C6/C7 activation gates pass.
