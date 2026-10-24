@@ -16,6 +16,7 @@ import {
   startJobScheduler,
 } from "../jobs.js";
 import type { NativeGoogleConfig } from "./config.js";
+import { parseScheduleControl, startScheduleControl, type ScheduleControlConfig } from "../schedule-control-server.js";
 import {
   buildScheduleRuntime,
   type NativeScheduleConfig,
@@ -28,6 +29,7 @@ export type NativeCoordinatorConfig = {
   targets: string[];
   scope: "self" | "shared-owner";
   schedules?: NativeScheduleConfig;
+  control?: ScheduleControlConfig;
 };
 
 export interface NativeJobsCoordinator {
@@ -300,6 +302,14 @@ export async function startNativeJobsCoordinator(
     throw error;
   }
 
+  let control: Awaited<ReturnType<typeof startScheduleControl>> | undefined;
+  try {
+    if (config.coordinator.control) control = await startScheduleControl(parseScheduleControl(config.coordinator.control, targets), coordinatorStateDir);
+  } catch (error) {
+    await scheduler.stop();
+    lease.close();
+    throw error;
+  }
   let stopping: Promise<void> | undefined;
   return {
     tick: () => scheduler.tick(),
@@ -309,7 +319,7 @@ export async function startNativeJobsCoordinator(
     stop: () => {
       // A failed stop keeps the lease so no second writer can start beside a
       // scheduler that may still be running; a retry may complete it.
-      stopping ??= scheduler.stop().then(() => { if (lease.isOpen) lease.close(); }, (error) => {
+      stopping ??= Promise.resolve().then(() => control?.close()).then(() => scheduler.stop()).then(() => { if (lease.isOpen) lease.close(); }, (error) => {
         stopping = undefined;
         throw error;
       });

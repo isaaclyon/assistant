@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -9,12 +9,16 @@ import { inspectUnresolvedJobHandoffs, recoverJobHandoff } from "./job-handoff.j
 
 export interface JobsCliEnvironment {
   PI_TELEGRAM_JOBS_DIR?: string;
+  PI_TELEGRAM_SCHEDULE_CLIENT?: string;
   PI_TELEGRAM_BRIDGE_INSTANCE_MANIFEST?: string;
   PI_TELEGRAM_BRIDGE_STATE_ROOT?: string;
   PI_TELEGRAM_BRIDGE_STATE_DIR?: string;
   PI_TELEGRAM_BRIDGE_INSTANCE_ID?: string;
 }
+export interface ScheduleScope { jobPrefix: string; targets: readonly string[] }
 export interface ApplyJobsRequestOptions {
+  /** Server-owned grant, never accepted from request JSON. */
+  scope?: ScheduleScope;
   stateDir?: string;
   env?: JobsCliEnvironment;
   now?: () => number;
@@ -95,6 +99,11 @@ async function waitForReload(stateDir: string, hash: string, timeoutMs: number):
 export async function applyJobsRequest(input: Record<string, unknown>, options: ApplyJobsRequestOptions = {}): Promise<Record<string, unknown>> {
   const request = record(input, "request");
   const env = options.env ?? process.env;
+  if (!options.scope && env.PI_TELEGRAM_SCHEDULE_CLIENT && request.operation !== "inspect_handoffs" && request.operation !== "recover_handoff") {
+    const { forwardScheduleRequest } = await import("./schedule-control-client.js");
+    return forwardScheduleRequest(request, env.PI_TELEGRAM_SCHEDULE_CLIENT);
+  }
+  if (options.scope) validateScopedRequest(request);
   if (request.operation === "inspect_handoffs" || request.operation === "recover_handoff") {
     const inspect = request.operation === "inspect_handoffs";
     const fields = new Set(inspect ? ["operation"] : ["operation", "dispatchId", "state", "revision", "action"]);
@@ -126,13 +135,37 @@ export async function applyJobsRequest(input: Record<string, unknown>, options: 
     if (!Array.isArray(existing.jobs)) throw new Error("jobs file has no jobs array");
     return existing.jobs.map((job: unknown) => record(job, "job"));
   };
+  if (options.scope && (request.operation === "list" || request.operation === "inspect")) {
+    const scope = options.scope;
+    // Definitions, revisions and acknowledgement are read under the writer lock.
+    return withMutationLock(join(stateDir, ".jobs-mutation-lock.sqlite"), async () => {
+      const jobs = (await readExisting()).filter(job => inScope(job, scope));
+      if (request.operation === "list") {
+        const offset = (request.offset as number | undefined) ?? 0;
+        const page = jobs.slice(offset, offset + 20).map(job => {
+          const { prompt: _prompt, ...summary } = job;
+          return { job: summary, revision: jobRevision(job) };
+        });
+        return { ok: true, operation: "list", grant: { jobPrefix: scope.jobPrefix, targets: scope.targets, jobTypes: ["cron", "at"] }, jobs: page, nextOffset: offset + page.length < jobs.length ? offset + page.length : null };
+      }
+      const job = jobs.find(job => job.id === request.id);
+      if (!job) throw new Error("Job unavailable in this grant");
+      const state = record(await readJson(statePath, {}), "jobs state");
+      const hash = jobsContentHash(await readFile(jobsPath, "utf8"));
+      const publication = { hash, status: state.observedHash !== hash ? "pending" : state.lastLoadError ? "rejected" : state.acceptedHash === hash ? "accepted" : "pending" };
+      return { ok: true, operation: "inspect", job, revision: jobRevision(job), publication,
+        lastRun: record(state.lastRun ?? {}, "last run")[String(job.id)] ?? null,
+        fired: record(state.fired ?? {}, "fired")[String(job.id)] ?? null };
+    });
+  }
   if (request.operation === "list") return { ok: true, operation: "list", stateDir, jobs: await readExisting() };
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
   const saved = await withMutationLock(join(stateDir, ".jobs-mutation-lock.sqlite"), async () => {
     const existingJobs = await readExisting();
+    if (options.scope) authorizeScopedMutation(request, existingJobs, options.scope);
     const state = record(await readJson(statePath, { fired: {} }), "jobs state");
     const fired = state.fired && typeof state.fired === "object" ? record(state.fired, "fired") : {};
-    const pruned = existingJobs.filter((job) => job.type === "at" && typeof job.id === "string" && fired[job.id] !== undefined).map((job) => job.id);
+    const pruned = existingJobs.filter((job) => !options.scope && job.type === "at" && typeof job.id === "string" && fired[job.id] !== undefined).map((job) => job.id);
     const jobs = existingJobs.filter((job) => !pruned.includes(job.id));
     let result: Record<string, unknown>;
     if (request.operation === "add_at") {
@@ -168,7 +201,46 @@ export async function applyJobsRequest(input: Record<string, unknown>, options: 
   const publication = options.validateReload === false
     ? { hash: saved.hash, status: "pending" as const }
     : await waitForReload(stateDir, saved.hash, options.reloadTimeoutMs ?? 5_000);
+  if (options.scope) {
+    const { pruned: _pruned, ...result } = saved.result;
+    return { ok: true, ...result, ...(result.job ? { revision: jobRevision(record(result.job, "job")) } : {}), publication };
+  }
   return { ok: true, ...saved.result, stateDir, publication };
+}
+
+function jobRevision(job: Record<string, unknown>): string {
+  // Stable across object-key order changes by another definition writer.
+  return createHash("sha256").update(JSON.stringify(Object.fromEntries(Object.entries(job).sort(([a], [b]) => a.localeCompare(b))))).digest("hex");
+}
+function delegatedJobFields(type: unknown): readonly string[] {
+  return type === "cron" ? ["id", "target", "type", "schedule", "tz", "prompt"] :
+    type === "at" ? ["id", "target", "type", "at", "prompt"] : [];
+}
+function inScope(job: Record<string, unknown>, scope: ScheduleScope): boolean {
+  const fields = delegatedJobFields(job.type);
+  return typeof job.id === "string" && job.id.startsWith(scope.jobPrefix) &&
+    typeof job.target === "string" && scope.targets.includes(job.target) &&
+    fields.length > 0 && Object.keys(job).every(key => fields.includes(key));
+}
+function validateScopedRequest(request: Record<string, unknown>): void {
+  const fields: Record<string, string[]> = {
+    list: ["operation", "offset"], inspect: ["operation", "id"],
+    upsert: ["operation", "job", "expectedRevision"],
+    add_at: ["operation", "id", "target", "at", "in", "prompt", "expectedRevision"],
+    remove: ["operation", "id", "expectedRevision"],
+  };
+  const allowed = typeof request.operation === "string" ? fields[request.operation] : undefined;
+  if (!allowed || Object.keys(request).some(key => !allowed.includes(key))) throw new Error("Unsupported delegated schedule request");
+  if (request.operation === "list" && request.offset !== undefined && (!Number.isSafeInteger(request.offset) || Number(request.offset) < 0)) throw new Error("Invalid list offset");
+  if (request.operation === "inspect") requireId(request.id);
+}
+function authorizeScopedMutation(request: Record<string, unknown>, jobs: Record<string, unknown>[], scope: ScheduleScope): void {
+  const candidate = request.operation === "upsert" ? record(request.job, "job") : request.operation === "add_at" ? { id: request.id, target: request.target, type: "at" } : undefined;
+  const id = requireId(candidate?.id ?? request.id);
+  const existing = jobs.find(job => job.id === id);
+  if (!id.startsWith(scope.jobPrefix) || (existing && !inScope(existing, scope)) || (candidate && !inScope(candidate, scope))) throw new Error("Job unavailable in this grant");
+  const revision = existing ? jobRevision(existing) : null;
+  if (request.expectedRevision !== revision) throw new Error("Schedule revision conflict; inspect before editing");
 }
 
 export async function runJobsCli(): Promise<void> {
@@ -178,7 +250,9 @@ export async function runJobsCli(): Promise<void> {
       raw += String(chunk);
       if (Buffer.byteLength(raw) > 64 * 1024) throw new Error("Request is too large");
     }
-    process.stdout.write(`${JSON.stringify(await applyJobsRequest(JSON.parse(raw) as Record<string, unknown>))}\n`);
+    const result = await applyJobsRequest(JSON.parse(raw) as Record<string, unknown>);
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    if (result.ok === false) process.exitCode = 1;
   } catch (error) {
     process.stdout.write(`${JSON.stringify({ ok: false, error: error instanceof Error ? error.message : "Job mutation failed" })}\n`);
     process.exitCode = 1;

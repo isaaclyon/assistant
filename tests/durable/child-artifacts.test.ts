@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, existsSync, statSync, symlinkSync, writeFileSync, readdirSync, mkdirSync, chmodSync, renameSync, linkSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, statSync, symlinkSync, writeFileSync, readdirSync, mkdirSync, chmodSync, renameSync, linkSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -88,7 +88,8 @@ describe('ChildArtifacts', () => {
     await expect(art.readManifest(B, J)).rejects.toThrow(/Unsafe/);
     await expect(art.tryWriterLease(B, J)).rejects.toThrow(/Unsafe/);
     await expect(art.listPreparedBatches()).rejects.toThrow(/Unsafe/);
-    rmSync(art.jobDir(B, J));
+    // Remove the link itself; Node 24's rmSync can reject a directory symlink.
+    unlinkSync(art.jobDir(B, J));
     renameSync(real, art.jobDir(B, J));
     // broad batch directory
     chmodSync(art.batchDir(B), 0o755);
