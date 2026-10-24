@@ -110,7 +110,13 @@ it('deduplicates repeated publication and never reprocesses a completed dispatch
 it('quarantines a changed payload for an already-bound dispatch without admitting it', async () => {
   const d = await dirs(); const { dispatchId } = await enqueue(d);
   const { h, faux } = await host(d); await h.start(); await h.reconcile();
+  // Settle the original run before snapshotting. Legitimate pending -> done
+  // progress must not race the assertion that the conflicting payload changed nothing.
+  const admitted = (await receipts(h))[dispatchId]!;
+  await (await h.runtime.harness.submission(admitted.submissionId!, context))!.wait(context);
+  await h.reconcile();
   const before = (await receipts(h))[dispatchId]!;
+  expect(before.run).toBe('done');
   await pendingFile(d, `${dispatchId}.json`, { version: 1, dispatchId, jobId: 'daily', target: INSTANCE, prompt: 'Different prompt', createdAt: NOW.toISOString() });
   // The completed copy exists; a pending copy is a conflicting duplicate, and an altered prompt is a payload conflict.
   await h.reconcile(); await h.reconcile();
