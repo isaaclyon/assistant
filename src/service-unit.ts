@@ -78,6 +78,8 @@ export interface IsolatedInstanceServiceUnitOptions extends InstanceServiceUnitO
   browserAddress: string;
   privateInputOrigin: string;
   privateTakeoverOrigin: string;
+  /** The only extra writable path for a provisioned delegated schedule socket. */
+  scheduleControlDirectory?: string;
 }
 
 /** Render only: account membership, canonical ownership and transport preflight
@@ -95,6 +97,7 @@ export function renderIsolatedInstanceServiceUnit(
     throw new Error("Isolated native service requires a pinned administrator configuration digest");
   }
   const { privateHome, config } = options;
+  if(options.scheduleControlDirectory!==undefined&&(!options.runtime||options.scheduleControlDirectory!==`/run/pi-telegram-schedules/${config.instanceId}`))throw new Error('Invalid isolated schedule control directory');
   if (!/^pi-[a-z0-9-]{1,24}$/.test(options.networkNamespace) ||
       !/^\/run\/[a-z0-9/-]+\.sock$/.test(options.trustedSocket)) throw new Error("Invalid isolated service transport");
   const endpointEnv = { PI_TELEGRAM_TRUSTED_SOCKET: options.trustedSocket,
@@ -133,7 +136,9 @@ export function renderIsolatedInstanceServiceUnit(
     `NetworkNamespacePath=/run/netns/${options.networkNamespace}`,
     `BindReadOnlyPaths=${quote(options.resolverPath)}:/etc/resolv.conf`,
     ...Object.entries(endpointEnv).map(([key, value]) => `Environment=${quote(`${key}=${value}`)}`),
-    `ReadWritePaths=${quote(privateHome)}`, `Environment=${quote(`HOME=${privateHome}`)}`,
+    `ReadWritePaths=${quote(privateHome)}`,
+    ...(options.scheduleControlDirectory?[`ReadWritePaths=${quote(options.scheduleControlDirectory)}`]:[]),
+    `Environment=${quote(`HOME=${privateHome}`)}`,
   ].join("\n");
   return {
     ...rendered,

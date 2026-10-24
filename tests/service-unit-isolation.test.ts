@@ -45,6 +45,15 @@ describe("isolated personal system unit", () => {
   it.each(["root", "0", "sudo", "docker", "lxd", "bad\nUser=root", "-bad"])("rejects unsafe account %s", user => {
     expect(() => renderIsolatedInstanceServiceUnit({ ...options, user })).toThrow();
   });
+  it("opens only the dedicated scheduling socket directory for a pinned native runtime",()=>{
+    const runtime={generation:'pi-durable' as const,configPath:'/var/lib/test-personal/native.json',configSha256:'b'.repeat(64)};
+    const directory='/run/pi-telegram-schedules/emma';
+    const {contents}=renderIsolatedInstanceServiceUnit({...options,runtime,scheduleControlDirectory:directory});
+    expect(contents).toContain(`ReadWritePaths="${directory}"`);
+    expect(contents).toContain('ProtectSystem=strict');expect(contents).toContain('SupplementaryGroups=\n');
+    for(const scheduleControlDirectory of ['/run','/','/run/pi-telegram-schedules/other','/run/pi-telegram-schedules/emma/../other'])expect(()=>renderIsolatedInstanceServiceUnit({...options,runtime,scheduleControlDirectory})).toThrow();
+    expect(()=>renderIsolatedInstanceServiceUnit({...options,scheduleControlDirectory:directory})).toThrow();
+  });
   it("rejects privileged supplementary group choices", () => {
     expect(() => renderIsolatedInstanceServiceUnit({ ...options, group: "docker" })).toThrow();
   });
