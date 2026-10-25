@@ -22,7 +22,7 @@ const exec = promisify(execFile);
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const serveStatus = async () => JSON.parse((await exec("tailscale", ["serve", "status", "--json"], { timeout: 5_000, maxBuffer: 2_000_000 })).stdout);
 const httpsPort = 8447;
-type Result = (TakeoverResult | { status: "unavailable" | "browser_blocked" }) & { copiedCredentialItem?: string; credentialCopyStatus?: "unknown" };
+type Result = (TakeoverResult | { status: "unavailable" | "browser_blocked" }) & { copiedCredentialItem?: string; credentialCopyStatus?: "unknown"; loginFailure?: "unsupported_form" };
 
 export async function runBrowserTakeover(options: {
   config: PrivateBrowserConfig; request: TakeoverRequest; chatId: number; threadId?: number;
@@ -100,7 +100,12 @@ export async function runBrowserTakeover(options: {
             }
           } } : {}),
         };
-        if (loginRequest.credentialItem?.startsWith("source:")) {
+        if (loginRequest.credentialItem && !canUseSaved()) {
+          // Do not consume/copy a credential or send the user into a viewer that
+          // cannot use it. A new adapter or an explicit manual flow is required.
+          result = { status: "unavailable", loginFailure: "unsupported_form" };
+          finishWithoutHandoff = true;
+        } else if (loginRequest.credentialItem?.startsWith("source:")) {
           credentialAttempted = true;
           options.notifyWaiting();
           const approved = await privateApprovedCredential(loginRequest.credentialItem.slice(7), new URL(loginRequest.pageUrl).origin,

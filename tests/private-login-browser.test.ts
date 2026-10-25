@@ -13,12 +13,12 @@ const available = await access(chrome).then(() => true, () => false);
 describe.skipIf(!available)("private general login against Chrome", () => {
   const cleanup: Array<() => Promise<unknown>> = [];
   afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
-  async function fixture(spa = false, initial?: string, amazon = false) {
+  async function fixture(spa = false, initial?: string, amazon: boolean | "costco" = false) {
     const root = await mkdtemp(join(tmpdir(), "private-login-test-"));
     cleanup.push(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
     await exec("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(root,"key"), "-out", join(root,"cert"), "-days", "1", "-subj", "/CN=localhost"]);
     const received: string[] = [];
-    const startPath = amazon ? "/ap/signin" : "/start";
+    const startPath = amazon === "costco" ? "/e0714dd4-784d-46d6-a278-3e29553483eb/B2C_1A_SSO_WCS_signup_signin_214/oauth2/v2.0/authorize" : amazon ? "/ap/signin" : "/start";
     const form = (kind: string, next: string) => `<h1>${kind === "code" ? "Two-Step Verification" : "Sign in"}</h1><form method="post" action="/${next}"><input type="hidden" name="challenge" value="fixed"><label>${kind === "username" ? "Email or phone" : kind}</label><input id="entry" name="${kind}" type="${kind === "password" ? "password" : "text"}" autocomplete="${kind === "password" ? "current-password" : kind === "code" ? "one-time-code" : "username"}"><button>Continue</button></form>`;
     const server = createServer({ key: await readFile(join(root,"key")), cert: await readFile(join(root,"cert")) }, (req,res) => {
       const render = () => {
@@ -32,8 +32,8 @@ describe.skipIf(!available)("private general login against Chrome", () => {
     await new Promise<void>(r=>server.listen(0,"127.0.0.1",r));
     cleanup.push(()=>new Promise<void>(r=>{server.close(()=>r());server.closeAllConnections();}));
     const portNumber = (server.address() as any).port;
-    const origin = amazon ? "https://www.amazon.com" : `https://127.0.0.1:${portNumber}`;
-    const child: ChildProcess = spawn(chrome,["--headless","--no-sandbox","--disable-dev-shm-usage","--ignore-certificate-errors","--no-first-run",`--user-data-dir=${join(root,"profile")}`,"--remote-debugging-port=0",...(amazon ? ["--no-proxy-server",`--host-resolver-rules=MAP www.amazon.com 127.0.0.1:${portNumber}`] : []),`${origin}${startPath}`],{stdio:"ignore",detached:true});
+    const origin = amazon === "costco" ? "https://signin.costco.com" : amazon ? "https://www.amazon.com" : `https://127.0.0.1:${portNumber}`;
+    const child: ChildProcess = spawn(chrome,["--headless","--no-sandbox","--disable-dev-shm-usage","--ignore-certificate-errors","--no-first-run",`--user-data-dir=${join(root,"profile")}`,"--remote-debugging-port=0",...(amazon ? ["--no-proxy-server",`--host-resolver-rules=MAP ${new URL(origin).hostname} 127.0.0.1:${portNumber}`] : []),`${origin}${startPath}`],{stdio:"ignore",detached:true});
     cleanup.push(async()=>{if(child.exitCode===null&&child.signalCode===null){const exit=new Promise(r=>child.once("exit",r));try{process.kill(-child.pid!,"SIGTERM");}catch{child.kill("SIGTERM");}await exit;}});
     let port=0;
     await vi.waitFor(async()=>{port=Number((await readFile(join(root,"profile/DevToolsActivePort"),"utf8")).split("\n")[0]);expect(port).toBeGreaterThan(0);},{timeout:15000});
@@ -72,6 +72,28 @@ describe.skipIf(!available)("private general login against Chrome", () => {
     await f.edit(change==="field" ? `document.querySelector('#entry').outerHTML='<input id="entry" name="username" autocomplete="username">'` : change==="destination" ? `document.querySelector('form').action='https://other.invalid/'` : change==="challenge" ? `document.querySelector('[type=hidden]').value='changed'` : change==="autocomplete" ? `document.querySelector('#entry').autocomplete='new-password'` : change==="extra hidden" ? `document.querySelector('form').insertAdjacentHTML('beforeend','<input type="hidden" name="action" value="delete">')` : change==="external control" ? `document.querySelector('form').id='login';document.body.insertAdjacentHTML('beforeend','<input type="hidden" form="login" name="action" value="delete">')` : `document.querySelector('h1').textContent='Create account'`);
     expect(await f.login.submit(["synthetic-secret"])).toEqual({state:"manual"});
     expect(f.received).toEqual([]); expect(await f.edit("document.querySelector('#entry').value")).toBe("");
+  },30000);
+  const costcoForm = '<h1>Sign In</h1><form id="localAccountForm" action="JavaScript:void(0);"><input id="signInName" name="Sign in name" autocomplete="email"><input id="password" name="Password" type="password" autocomplete="current-password"><button type="button">Forgot Password?</button><input id="rememberMe" type="checkbox" name="rememberMe"><div id="top1" style="display:none"><ul><li>Checkout faster with saved shipping and payment information.</li></ul></div><button id="next" type="submit">Sign In</button><button type="submit">Receive a Passcode</button><button type="submit">Sign in with a passkey</button></form>';
+  it("fills the inspected Costco JavaScript sign-in without weakening generic GET rejection", async () => {
+    const html = costcoForm + `<script>document.querySelector('form').onsubmit=async e=>{e.preventDefault();const r=await fetch('/login/done',{method:'POST',body:new URLSearchParams(new FormData(e.target))});document.open();document.write(await r.text());document.close()}</script>`;
+    const f = await fixture(false, html, "costco");
+    expect(f.login.state()).toEqual({state:"fields",fields:["username","password"]});
+    expect(await f.login.submit(["synthetic-user","synthetic-secret"])).toEqual({state:"complete"});
+    expect(f.received).toHaveLength(1);
+    expect(f.received[0]).toContain("Password=synthetic-secret");
+  }, 30000);
+  it.each(["origin","button","action","purpose","extra field","visible benefits","embedded form"])("refuses a Costco-like form with wrong %s", async change => {
+    const html = change === "visible benefits" ? costcoForm.replace('style="display:none"','') : change === "embedded form" ? costcoForm.replace('</form>','<iframe></iframe></form>') : change === "button" ? costcoForm.replace('id="next"','id="other"') : change === "action" ? costcoForm.replace('JavaScript:void(0);','https://other.invalid/login') : change === "purpose" ? costcoForm.replace('<h1>Sign In</h1>','<h1>Create account</h1>') : change === "extra field" ? costcoForm.replace('</form>','<input name="emailConfirm"></form>') : costcoForm;
+    const f = await fixture(false,html,change === "origin" ? false : "costco");
+    expect(f.login.state()).toEqual({state:"manual"}); expect(f.received).toEqual([]);
+  }, 30000);
+  it.each(["action","policy","visibility"])("does not fill Costco fields after %s changes", async change => {
+    const f=await fixture(false,costcoForm,"costco");
+    expect(f.login.state().state).toBe("fields");
+    await f.edit(change === "action" ? "document.querySelector('form').action='https://other.invalid/login'" : change === "policy" ? "history.replaceState({},'',location.pathname.replace('signup_signin_214','password_reset'))" : "document.querySelector('#top1').style.display='block'");
+    expect(await f.login.submit(["synthetic-user","synthetic-secret"])).toEqual({state:"manual"});
+    expect(await f.edit("document.querySelector('#password').value")).toBe("");
+    expect(f.received).toEqual([]);
   },30000);
   it("recognizes Amazon's inspected identifier screen with an aria-labelledby submit input", async () => {
     const html = '<h1>Sign in or create account</h1><form method="post" action="/ax/claim"><input name="email" id="ap_email_login" autocomplete="webauthn"><input type="password" name="password" style="display:none"><span><input type="submit" aria-labelledby="continue-announce"><span id="continue-announce">Continue</span></span></form>';

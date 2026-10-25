@@ -38,3 +38,8 @@ test('browser status boundary drops all added data and preserves independent cop
  expect(browserOutcome({status:'cancelled',mode:'private',copiedCredentialItem:copy,credentialCopyStatus:'unknown',password:'synthetic-secret',page:'synthetic-page'})).toEqual({status:'cancelled',mode:'private',copiedCredentialItem:copy,credentialCopyStatus:'unknown'});
  expect(browserOutcome({status:'synthetic-secret'})).toEqual({status:'unavailable'});
 });
+
+test('browser outcome returns only the fixed unsupported-form reason',()=>{
+ expect(browserOutcome({status:'unavailable',loginFailure:'unsupported_form',page:'synthetic-page'})).toEqual({status:'unavailable',loginFailure:'unsupported_form'});
+ expect(browserOutcome({status:'unavailable',loginFailure:'synthetic-private-detail'})).toEqual({status:'unavailable'});
+});

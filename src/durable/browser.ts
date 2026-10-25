@@ -31,7 +31,8 @@ export function browserOutcome(raw:unknown):Record<string,string> {
  if(typeof value.status!=='string'||!terminal.has(value.status))return {status:'unavailable'};
  return {status:value.status,...(value.mode==='private'||value.mode==='share'?{mode:value.mode}:{}),
   ...(typeof value.copiedCredentialItem==='string'&&/^[a-z0-9]{26}$/.test(value.copiedCredentialItem)?{copiedCredentialItem:value.copiedCredentialItem}:{}),
-  ...(value.credentialCopyStatus==='unknown'?{credentialCopyStatus:'unknown'}:{})};
+  ...(value.credentialCopyStatus==='unknown'?{credentialCopyStatus:'unknown'}:{}),
+  ...(value.loginFailure==='unsupported_form'?{loginFailure:'unsupported_form'}:{})};
 }
 async function findCandidates(origin:string,signal:AbortSignal):Promise<unknown>{
  const response=await runtimeTelegramFetch('https://api.telegram.org/bot0:surrogate/credentialCandidates',{
@@ -77,6 +78,7 @@ export function createNativeBrowser(config:NativeConfig,services:NativeBrowserSe
     promptGuidelines: [
       "Use private_browser_login for authorized existing-account sign-in across multiple screens. Inspect the initial page first; pass its exact pageUrl and a clean same-origin HTTPS resumeUrl. Tell the user to keep Tailscale connected and open Sign in privately.",
       "Never ask for credentials in chat or tool arguments. Optional credentialItem names a user-approved Login item in the current instance's dedicated 1Password vault; the user may select Use saved sign-in privately. When find_login_candidates is available, a source: reference plus purpose requests Allow Once, Always Allow or Deny through trusted Telegram buttons before protected sign-in. Resolve ambiguous candidates before requesting approval. No general email-code lookup is enabled; codes remain private manual input.",
+      "The inspected Costco US JavaScript sign-in has a narrow origin/policy-bound adapter; other JavaScript-only forms remain unsupported. loginFailure unsupported_form means saved sign-in stopped before initial credential access; do not repeat that flow or send the user to manual control as if saved autofill were available.",
       "copiedCredentialItem reports an independent saved copy even if browser sign-in fails. Report the copy and sign-in outcomes separately. Removing that copy stops future password use but does not end existing website sessions.",
       "Stay paused for the whole operation. Do not inspect browser/runtime/profile files, use raw CDP, or run other browser tools while waiting. Unknown, repeated, embedded, cross-origin, recovery, registration or CAPTCHA screens need the Take over choice inside the Mini App; it preserves the same protected session.",
       "submitted is not proof of authentication. Verify the clean resume page afterward. Continue from this page explicitly shares the current website/form contents. On browser_blocked stop the stock session before reopening; never delete the gate.",
