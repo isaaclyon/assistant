@@ -10,6 +10,7 @@ import {
 } from "../src/jobs-cli.js";
 import { drainJobHandoffs, enqueueJobHandoff } from "../src/job-handoff.js";
 
+// Local fixtures must never inherit a running bot's delegated scheduler or manifest.
 describe("schedule-reminders-and-jobs helper", () => {
   it("inspects and recovers only the host-bound recipient with exact evidence", async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "jobs-cli-recovery-"));
@@ -40,12 +41,12 @@ describe("schedule-reminders-and-jobs helper", () => {
     const request = { operation: "upsert", job: {
       id: "test", type: "cron", target: "isaac", schedule: "0 8 * * *", prompt: "Synthetic",
     } };
-    const first = await applyJobsRequest(request, { stateDir, validateReload: false });
+    const first = await applyJobsRequest(request, { stateDir, env: {}, validateReload: false });
     const hash = (first.publication as { hash: string }).hash;
     await writeFile(join(stateDir, "jobs-state.json"), JSON.stringify({
       observedHash: hash, acceptedHash: null, lastLoadError: "Unknown target",
     }));
-    const second = await applyJobsRequest(request, { stateDir, reloadTimeoutMs: 1 });
+    const second = await applyJobsRequest(request, { stateDir, env: {}, reloadTimeoutMs: 1 });
     expect(second).toMatchObject({ ok: true, publication: { status: "pending" } });
     expect((second.publication as { hash: string }).hash).not.toBe(hash);
   });
@@ -54,7 +55,7 @@ describe("schedule-reminders-and-jobs helper", () => {
     const stateDir = await mkdtemp(join(tmpdir(), "jobs-cli-concurrent-"));
     await Promise.all(Array.from({ length: 10 }, (_, index) => applyJobsRequest({
       operation: "add_at", id: `test-${index}`, target: "isaac", in: "1h", prompt: "Synthetic",
-    }, { stateDir, validateReload: false })));
+    }, { stateDir, env: {}, validateReload: false })));
     const stored = JSON.parse(await readFile(join(stateDir, "jobs.json"), "utf8"));
     expect(stored.jobs).toHaveLength(10);
   });
@@ -65,7 +66,7 @@ describe("schedule-reminders-and-jobs helper", () => {
     await writeFile(join(stateDir, "jobs.json"), original);
     await expect(applyJobsRequest({ operation: "upsert", job: {
       id: "invalid", type: "cron", target: "isaac", schedule: "not cron", prompt: "Synthetic",
-    } }, { stateDir, validateReload: false })).rejects.toThrow(/schedule/);
+    } }, { stateDir, env: {}, validateReload: false })).rejects.toThrow(/schedule/);
     expect(await readFile(join(stateDir, "jobs.json"), "utf8")).toBe(original);
   });
 
@@ -77,7 +78,7 @@ describe("schedule-reminders-and-jobs helper", () => {
     }));
     const result = await applyJobsRequest({
       operation: "add_at", id: "new", target: "isaac", in: "1h", prompt: "Synthetic",
-    }, { stateDir, reloadTimeoutMs: 30 });
+    }, { stateDir, env: {}, reloadTimeoutMs: 30 });
     expect(result).toMatchObject({ ok: true, publication: { status: "pending" } });
     expect(JSON.parse(await readFile(join(stateDir, "jobs.json"), "utf8")).jobs).toHaveLength(1);
   });
@@ -119,7 +120,7 @@ describe("schedule-reminders-and-jobs helper", () => {
       target: "builder",
       in: "45m",
       prompt: "Follow up",
-    }, { stateDir, now: () => Date.parse("2026-07-27T03:00:00Z"), validateReload: false });
+    }, { stateDir, env: {}, now: () => Date.parse("2026-07-27T03:00:00Z"), validateReload: false });
 
     expect(result).toMatchObject({ ok: true, operation: "add_at", pruned: ["old"] });
     const stored = JSON.parse(await readFile(join(stateDir, "jobs.json"), "utf8"));
@@ -136,10 +137,10 @@ describe("schedule-reminders-and-jobs helper", () => {
     await applyJobsRequest({
       operation: "upsert",
       job: { id: "weekly", type: "cron", target: "builder", schedule: "0 9 * * 1", tz: "America/Denver", prompt: "Review" },
-    }, { stateDir, validateReload: false });
+    }, { stateDir, env: {}, validateReload: false });
     const removed = await applyJobsRequest(
       { operation: "remove", id: "weekly" },
-      { stateDir, validateReload: false },
+      { stateDir, env: {}, validateReload: false },
     );
 
     expect(removed).toMatchObject({ ok: true, removed: "weekly" });

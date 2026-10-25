@@ -402,7 +402,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
   const storeId=await runtime.runtime.root.commit(async tx=>{const identity=await tx.doc(NativeIdentity,runtime.runtime.root.id);identity.storeId||=randomUUID();return identity.storeId;},context);
   initializeHistory?.(storeId);
   await controls.restore();
-  if(enabled){const {createVisibleEvents}=await import('./visible-events.js');visible=createVisibleEvents({host:requireHost,config,stream:bridge.stream,activity:bridge.activity,cwd:config.workspaceCwd,debug});}
+  if(enabled){const {createVisibleEvents}=await import('./visible-events.js');visible=createVisibleEvents({host:requireHost,config,stream:bridge.stream,typing:bridge.typing,activity:bridge.activity,cwd:config.workspaceCwd,debug});}
   const lintMemory=async()=>{
    if(!canonicalMemory||!search||!config.memory)throw new Error('Memory lint requires the chat-memory profile');
    const {executeMemoryOperation}=await import('../../.pi/skills/personal-memory/scripts/memory.mjs');
