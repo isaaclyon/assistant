@@ -2,7 +2,7 @@
 """Typed media-stack operations for a restricted SSH forced command. Standard library only.
 
 Reads one small JSON request on stdin, runs exactly one allowlisted operation against
-loopback Sonarr, Radarr, Prowlarr and Seerr APIs, and prints one bounded JSON result.
+local Sonarr, Radarr, Prowlarr and Seerr APIs (loopback or this host's tailnet address), and prints one bounded JSON result.
 It accepts no shell text, URL, header, path or command from the caller. Private
 configuration (service URLs and API-key file locations) is root-owned and fixed.
 
@@ -20,6 +20,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 CONFIG_LIMIT = 64 * 1024
+TAILNET = ipaddress.ip_network('100.64.0.0/10')
 REQUEST_LIMIT = 2 * 1024
 RESPONSE_LIMIT = 4 * 1024 * 1024
 OUTPUT_LIMIT = 96 * 1024
@@ -58,8 +59,9 @@ def load_config(path):
         parsed = urllib.parse.urlsplit(item.get('url', ''))
         if parsed.scheme != 'http' or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ('', '/'):
             raise ValueError('Service URL must be a plain http origin')
-        if not ipaddress.ip_address(parsed.hostname).is_loopback:
-            raise ValueError('Service URL must be loopback')
+        address = ipaddress.ip_address(parsed.hostname)
+        if not (address.is_loopback or address in TAILNET):
+            raise ValueError('Service URL must be loopback or a tailnet address of this host')
         key = item.get('apiKey')
         if not isinstance(key, dict) or not isinstance(key.get('file'), str) or not os.path.isabs(key['file']):
             raise ValueError('Invalid API key source')

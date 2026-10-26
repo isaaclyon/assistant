@@ -136,8 +136,16 @@ with tempfile.TemporaryDirectory() as tmp:
     fails({'op': 'queue'}, 'SERVICE_UNAVAILABLE')
     assert ok({'op': 'health'})['services']['sonarr']['reachable'] is False
 
+    # A service bound to this host's tailnet address is accepted by the loader.
+    write_config({'sonarr': {'url': 'http://100.79.123.105:8989', 'apiKey': {'file': xml, 'xml': 'ApiKey'}}})
+    spec = importlib.util.spec_from_file_location('collector', SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.load_config(cfg)['sonarr']['origin'] == 'http://100.79.123.105:8989'
+
     # Configuration must be loopback http and a known service.
-    for services in ({'sonarr': {'url': 'http://10.0.0.5', 'apiKey': {'file': xml, 'xml': 'ApiKey'}}},
+    for services in ({'sonarr': {'url': 'http://100.128.0.1', 'apiKey': {'file': xml, 'xml': 'ApiKey'}}},
+                     {'sonarr': {'url': 'http://10.0.0.5', 'apiKey': {'file': xml, 'xml': 'ApiKey'}}},
                      {'sonarr': {'url': 'http://127.0.0.1/x', 'apiKey': {'file': xml, 'xml': 'ApiKey'}}},
                      {'plex': {'url': origin, 'apiKey': {'file': xml, 'xml': 'ApiKey'}}},
                      {'sonarr': {'url': origin, 'apiKey': {'file': 'relative.xml', 'xml': 'ApiKey'}}}):
