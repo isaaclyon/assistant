@@ -94,6 +94,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  let places:ReturnType<typeof import('./places.js')['createNativePlaces']>|undefined;
  let calendar:ReturnType<typeof import('./calendar.js')['createNativeCalendar']>|undefined;
  let googleFactory:(()=>NativeBundle)|undefined;
+ let mediaStackFactory:(()=>NativeBundle)|undefined;
  let browser:ReturnType<typeof import('./browser.js')['createNativeBrowser']>|undefined;
  let browserGuard:ReturnType<typeof import('./browser-environment.js')['createNativeBrowserGate']>|undefined;
  let unbindBrowser:(()=>void)|undefined;
@@ -172,6 +173,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    const module=await import('./browser.js');browser=module.createNativeBrowser(config,options.browserServices);
    browserGuard=env.createNativeBrowserGate(browser.bundle().tools.map(({tool})=>tool.name));
   }
+  if(policy.mediaStack){const media=await import('./media-stack.js');mediaStackFactory=()=>media.createMediaStackBundle(config);}
   if(generalEnabled){
    const tools=await import('./general-tools.js');
    generalFactory=()=>{const bundle=tools.createGeneralToolsBundle();return mediaOutbound?{...bundle,tools:[...bundle.tools,...mediaOutbound.bundle.tools]}:bundle;};
@@ -268,6 +270,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    if(generalEnabled&&name==='public-web')return publicWebFactory!();
    if(mutationsEnabled&&name==='google-mutations')return {...calendar!.bundle(),close:async()=>{}};
    if(googleEnabled&&!mutationsEnabled&&name==='google-reads')return googleFactory!();
+   if(policy.mediaStack&&name==='media-stack')return mediaStackFactory!();
    if(placesEnabled&&name==='places')return {...places!.bundle(),close:async()=>{}}; // Application owns the shared domain lifetime across reloads.
    if(canonicalMemory&&name==='memory')return {name,version:1,tools:[memoryTool!],close:async()=>{}};
    if(name==='search')return searchFactory!();

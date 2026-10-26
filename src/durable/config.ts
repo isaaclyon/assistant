@@ -47,6 +47,8 @@ export interface NativeConfig {
  routing?: NativeRoutingConfig;
  google?: NativeGoogleConfig;
  cli?: { messagesBaseUrl?: string };
+ /** Unix socket of the media-stack gateway. Absent means the media tools register nothing. */
+ mediaStack?: { socketPath: string };
  browser?: NativeBrowserConfig;
  coordinator?: NativeCoordinatorConfig;
  /** Delegated definition management; confers no coordinator or recipient-file access. */
@@ -95,7 +97,7 @@ export async function loadNativeConfig(path:string,options:{expectedSha256?:stri
  if(options.expectedSha256!==undefined&&createHash('sha256').update(bytes).digest('hex')!==options.expectedSha256)throw new Error('Native configuration differs from its pinned administrator digest');
  let raw:unknown; try{raw=JSON.parse(bytes.toString('utf8'));}catch{throw new Error('Invalid native configuration JSON');}
  const value=record(raw,'Native configuration');
- fields(value,['version','runtime','instanceId','principal','releaseSha','resourceRoot','workspaceCwd','stateDir','capabilityProfile','account','credentialPath','settingsPath','jobsRole','idleHours','transport','memory','routing','google','cli','browser','coordinator','scheduleClient','group','instructionUpgradeFrom','scheduleUpgradeFrom'],'Native configuration');
+ fields(value,['version','runtime','instanceId','principal','releaseSha','resourceRoot','workspaceCwd','stateDir','capabilityProfile','account','credentialPath','settingsPath','jobsRole','idleHours','transport','memory','routing','google','cli','mediaStack','browser','coordinator','scheduleClient','group','instructionUpgradeFrom','scheduleUpgradeFrom'],'Native configuration');
  if(value.version!==1||value.runtime!=='pi-durable') throw new Error('Unsupported native runtime or configuration version');
  const idleHours=value.idleHours??0;
  if(typeof idleHours!=='number'||!Number.isFinite(idleHours)||idleHours<0||idleHours>8760)throw new Error('Invalid idleHours');
@@ -228,6 +230,12 @@ export async function loadNativeConfig(path:string,options:{expectedSha256?:stri
    google.calendarTargets={account,personal,thingsToDo};
   }
  }else if(value.google!==undefined)throw new Error('Google configuration requires the read-integrations profile');
+ let mediaStack:NativeConfig['mediaStack'];
+ if(value.mediaStack!==undefined){
+  if(!policy.mediaStack)throw new Error('Media stack configuration requires a profile that enables it');
+  const selected=record(value.mediaStack,'mediaStack');fields(selected,['socketPath'],'mediaStack');
+  mediaStack={socketPath:absolute(selected.socketPath,'Media stack socket path')};
+ }
  let cli:NativeConfig['cli'];
  if(value.cli!==undefined){
   if(!policy.cli)throw new Error('CLI configuration requires the CLI-integrations profile');
@@ -276,7 +284,7 @@ export async function loadNativeConfig(path:string,options:{expectedSha256?:stri
   if(transport.mode==='broker'&&!browser.endpoints)throw new Error('Broker browser requires provisioned private endpoints');
   if(transport.mode==='ordinary'&&(resolve(transport.configPath)!==resolve(browser.agentDir,'telegram.json')||transport.profile!==browser.telegramProfile))throw new Error('Browser and native Telegram profiles differ');
  }
- return {...(instructionUpgradeFrom?{instructionUpgradeFrom}:{}),...(scheduleUpgradeFrom?{scheduleUpgradeFrom}:{}),version:1,runtime:'pi-durable',instanceId:text(value.instanceId,'instanceId',/^[a-z0-9][a-z0-9-]{0,63}$/),principal:principal as NativeConfig['principal'],releaseSha:text(value.releaseSha,'releaseSha',/^[a-f0-9]{40}$/),resourceRoot,workspaceCwd,stateDir,capabilityProfile,account:text(value.account,'account',/^[a-zA-Z0-9._-]{1,128}$/),credentialPath:absolute(value.credentialPath,'credentialPath'),settingsPath:absolute(value.settingsPath,'settingsPath'),jobsRole:value.jobsRole as NativeConfig['jobsRole'],idleHours,transport,...(memory ? { memory } : {}),...(routing?{routing}:{}),...(google?{google}:{}),...(cli?{cli}:{}),...(browser?{browser}:{}),...(coordinator?{coordinator}:{}),...(scheduleClient?{scheduleClient}:{}),...(group?{group}:{}),historyDir:join(stateDir,'durable'),inboxPath:join(stateDir,'inbox.db'),runtimeMetadataPath:join(stateDir,'runtime.json')};
+ return {...(instructionUpgradeFrom?{instructionUpgradeFrom}:{}),...(scheduleUpgradeFrom?{scheduleUpgradeFrom}:{}),version:1,runtime:'pi-durable',instanceId:text(value.instanceId,'instanceId',/^[a-z0-9][a-z0-9-]{0,63}$/),principal:principal as NativeConfig['principal'],releaseSha:text(value.releaseSha,'releaseSha',/^[a-f0-9]{40}$/),resourceRoot,workspaceCwd,stateDir,capabilityProfile,account:text(value.account,'account',/^[a-zA-Z0-9._-]{1,128}$/),credentialPath:absolute(value.credentialPath,'credentialPath'),settingsPath:absolute(value.settingsPath,'settingsPath'),jobsRole:value.jobsRole as NativeConfig['jobsRole'],idleHours,transport,...(memory ? { memory } : {}),...(routing?{routing}:{}),...(google?{google}:{}),...(cli?{cli}:{}),...(mediaStack?{mediaStack}:{}),...(browser?{browser}:{}),...(coordinator?{coordinator}:{}),...(scheduleClient?{scheduleClient}:{}),...(group?{group}:{}),historyDir:join(stateDir,'durable'),inboxPath:join(stateDir,'inbox.db'),runtimeMetadataPath:join(stateDir,'runtime.json')};
 }
 
 /** Entrypoint loader. The unit's pinned digest is checked on every start. A

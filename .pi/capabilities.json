@@ -13,6 +13,11 @@
         "enabled": true
       },
       {
+        "id": "native-media-stack",
+        "path": ".pi/native/media-stack.mjs",
+        "enabled": true
+      },
+      {
         "id": "native-places",
         "path": ".pi/native/places.mjs",
         "enabled": true
@@ -198,6 +203,11 @@
       {
         "id": "schedule-reminders-and-jobs",
         "path": ".pi/skills/schedule-reminders-and-jobs/SKILL.md",
+        "enabled": true
+      },
+      {
+        "id": "manage-media",
+        "path": ".pi/skills/manage-media/SKILL.md",
         "enabled": true
       },
       {
@@ -712,7 +722,8 @@
         "native-fast",
         "native-usage",
         "native-web-run",
-        "native-background-children"
+        "native-background-children",
+        "native-media-stack"
       ],
       "skills": [
         "personal-memory",
@@ -725,7 +736,8 @@
         "plan-weekend",
         "native-reserve-restaurant",
         "schedule-reminders-and-jobs",
-        "watch-prices"
+        "watch-prices",
+        "manage-media"
       ],
       "instructions": "telegram-durable-personal-isaac"
     },
@@ -802,7 +814,8 @@
         "native-fast",
         "native-usage",
         "native-web-run",
-        "native-background-children"
+        "native-background-children",
+        "native-media-stack"
       ],
       "skills": [
         "agent-browser",
@@ -810,7 +823,8 @@
         "extend-this-agent",
         "schedule-reminders-and-jobs",
         "watch-prices",
-        "track-improvement-ideas"
+        "track-improvement-ideas",
+        "manage-media"
       ],
       "instructions": "telegram-durable-builder"
     }

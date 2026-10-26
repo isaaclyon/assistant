@@ -126,6 +126,13 @@ only for transitions and recovery; healthy checks do not wake a provider. These
 operator-installed utilities hold no personal credentials or repair authority.
 See [ADR-0056](docs/adr/0056-read-only-linux-health-monitoring.md).
 
+Typed media-stack tools (`media_stack`, `media_request`) let the personal Isaac and
+builder bots check health and queues, search the library, and request titles through
+Seerr. A separately identified local gateway holds the only SSH key and serves a Unix
+socket; a forced command on the media host calls loopback APIs. The runtime gains no
+network route, key or shell. See [ADR-0057](docs/adr/0057-typed-media-stack-gateway.md)
+and [media stack](docs/media-stack.md).
+
 The sections below describe the deployed legacy architecture. Its package,
 source patches and service path remain in the legacy release tree until the
 C6/C7 activation gates pass.
