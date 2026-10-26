@@ -33,7 +33,7 @@ Operations: `health`, `queue`, `upcoming`, `library_search`, `request_search`,
      "seerr":{"url":"http://127.0.0.1:5055","apiKey":{"file":"<seerr settings.json>","json":"main.apiKey"}}}}
    ```
 
-   URLs must be loopback `http`. Use the real container config paths on the host.
+   URLs must be plain `http` on loopback or this host's own tailnet address (`100.64.0.0/10`). Use the real container config paths on the host.
    Omit a service to disable it.
 2. Add a root-owned wrapper that runs
    `/usr/bin/python3 -I /usr/local/libexec/media-stack-collector.py /etc/media-stack/collector.json`

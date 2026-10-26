@@ -31,7 +31,7 @@ gateway, and a restricted collector on the media host.
   address and no command. It never retries and enforces size, time and concurrency
   limits. Request creation is off unless the operator sets `allowRequests`.
 - **Collector.** `scripts/media-stack-collector.py` is the remote end of an SSH forced
-  command. It reads one request from stdin, validates it again, and calls loopback
+  command. It reads one request from stdin, validates it again, and calls local
   Sonarr, Radarr, Prowlarr and Seerr APIs. It reads API keys from root-owned files
   that the caller cannot see, and returns bounded, field-filtered JSON. It accepts no
   URL, header, path or shell text. The operations are health, queue, upcoming,
