@@ -50,6 +50,11 @@ it('checks native paths, owner, principal and self-only broker jobs without impo
  await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,undefined,{...prior,nativeConfigPath:'/wrong.json'})).rejects.toThrow(/installed map/);
  await save({...scheduled,scheduleUpgradeFrom:{...ref,sha256:'0'.repeat(64)}});await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,undefined,prior)).rejects.toThrow(/digest/);
  await save({...scheduled,account:'unrelated-change'});await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,undefined,prior)).rejects.toThrow(/other runtime authority/);
+ const media={...value,mediaUpgradeFrom:ref,mediaStack:{socketPath:'/run/media-gateway/gateway.sock'}};
+ await save(media);await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,undefined,prior)).resolves.toBeDefined();
+ await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,undefined,{...prior,nativeConfigPath:'/wrong.json'})).rejects.toThrow(/installed map/);
+ await save({...media,account:'unrelated-change'});await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,undefined,prior)).rejects.toThrow(/other runtime authority/);
+ await save({...media,scheduleUpgradeFrom:ref});await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket,undefined,prior)).rejects.toThrow(/one native upgrade/);
  await save(value);await chmod(filename,0o644);await expect(assertNativeDeploymentBinding(selection,runtime,config,releaseRoot,socket)).rejects.toThrow(/private/);
 });
 

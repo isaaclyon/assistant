@@ -75,15 +75,19 @@ Operations: `health`, `queue`, `upcoming`, `library_search`, `request_search`,
 
 ## 3. Instance configuration
 
-Add to each selected instance's native configuration, then deploy normally so the
-configuration digest pin is updated:
+The media bundle is part of the stored runtime compatibility contract of
+`durable-personal-isaac` and `durable-builder`. A store created before this release
+refuses to start on it, with or without the socket setting, unless the new private
+configuration selects the one-time upgrade below. Deploy through the staged
+procedure in [pi-durable-c6-rehearsal.md](pi-durable-c6-rehearsal.md#media-bundle-upgrades).
 
 ```json
-{"mediaStack":{"socketPath":"/run/media-gateway/gateway.sock"}}
+{"mediaStack":{"socketPath":"/run/media-gateway/gateway.sock"},
+ "mediaUpgradeFrom":{"configPath":"/private/retained-prior.json","sha256":"<exact prior configuration SHA-256>"}}
 ```
 
-Only `durable-personal-isaac` and `durable-builder` accept this field. Other profiles
-reject it.
+Only `durable-personal-isaac` and `durable-builder` accept `mediaStack`. Other
+profiles reject it. Drop `mediaUpgradeFrom` from later configurations.
 
 ## Acceptance checks
 
