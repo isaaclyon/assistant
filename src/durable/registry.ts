@@ -48,6 +48,7 @@ export async function loadNativeRegistry(options: NativeRegistryOptions) {
   const toolNames: string[] = [];
   const toolSignatures: string[] = [];
   const bundleVersions: number[] = [];
+  const bundleContracts: Array<{ name: string; version: number; toolNames: string[]; toolSignatures: string[] }> = [];
   let closed = false;
   async function close(): Promise<void> {
     if (closed) return;
@@ -72,12 +73,16 @@ export async function loadNativeRegistry(options: NativeRegistryOptions) {
         taskNames.add(task.definition.name);
       }
       bundleVersions.push(bundle.version ?? 1);
+      const contracted = { name: bundle.name, version: bundle.version ?? 1, toolNames: [] as string[], toolSignatures: [] as string[] };
+      bundleContracts.push(contracted);
       const tools = bundle.tools.map(descriptor => {
         const tool = descriptor.tool;
         if (toolNames.includes(tool.name)) throw new Error('Duplicate native tool');
         const signature = fingerprint(descriptor);
         toolSignatures.push(signature);
         toolNames.push(tool.name);
+        contracted.toolSignatures.push(signature);
+        contracted.toolNames.push(tool.name);
         const execute = async (args:unknown,api:ToolExecutionApi,context:Context) => {
           if (closed) throw new Error('Native registry closed');
           await options.authorize(tool.name, api, context);
@@ -94,6 +99,12 @@ export async function loadNativeRegistry(options: NativeRegistryOptions) {
     const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
     const signature = hash({ ...contract, instructions, skills: skills.map(s => s.content) });
     const compatibilitySignature = hash(contract);
+    /** Reconstruct the contract a predecessor release had before it carried one bundle. */
+    const compatibilitySignatureWithout = (name: string) => {
+      const kept = bundleContracts.filter(entry => entry.name !== name);
+      return hash({ profileId: options.profileId, extensionNames: kept.map(entry => entry.name), bundleVersions: kept.map(entry => entry.version),
+        toolNames: kept.flatMap(entry => entry.toolNames), toolSignatures: kept.flatMap(entry => entry.toolSignatures) });
+    };
     let previousSignature: string | undefined;
     if (options.previousResourceRoot) {
       // Read selected text only: never execute predecessor code. Reconstruct with CURRENT
@@ -102,7 +113,7 @@ export async function loadNativeRegistry(options: NativeRegistryOptions) {
       previousSignature = hash({ ...contract, instructions: await readFile(prior.instructionsPath, 'utf8'),
         skills: await Promise.all(prior.skillPaths.map(path => readFile(path, 'utf8'))) });
     }
-    return { registry, instructions, skills, extensionNames, toolNames, signature, compatibilitySignature, previousSignature, close };
+    return { registry, instructions, skills, extensionNames, toolNames, signature, compatibilitySignature, compatibilitySignatureWithout, previousSignature, close };
   } catch (error) {
     try { await close(); } catch (cleanup) { throw new AggregateError([error, cleanup], 'Native registry construction failed'); }
     throw error;

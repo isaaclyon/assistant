@@ -239,6 +239,20 @@ See [delegated scheduling](delegated-schedules.md#settled-scheduling-authority-t
 for provisioning, the isolated socket-directory exception and self-upgrade order.
 It does not enable a general authority migration or rewrite recovery state.
 
+## Media bundle upgrades
+
+Releases that include the `media-stack` bundle change the tool contract of
+`durable-personal-isaac` and `durable-builder`, even when no gateway is configured.
+The separate `mediaUpgradeFrom: {configPath, sha256}` selector lets an existing
+schema-2 store move to such a release. It is mutually exclusive with the other two
+upgrade selectors. The new configuration may differ from the retained predecessor
+only in `releaseSha`, `resourceRoot`, `mediaStack` and the selector; the predecessor
+must not carry `mediaStack`, and both releases must be distinct SHA-named siblings.
+The runtime reconstructs the predecessor's signature by omitting the bundle from the
+current contract, so any other tool or schema change still refuses startup.
+Administrator preflight binds the predecessor to the installed map and its pin the
+same way as for scheduling. See [media stack](media-stack.md).
+
 ## Canary observation and deliberate advancement
 
 Observation is a separate administrator invocation. Its private selection file

@@ -7,6 +7,7 @@ import type { ManagedRuntime } from '../isolated-deployment-config.js';
 import { releaseFromEntrypoint } from '../runtime-entrypoint.js';
 import type { RuntimeSelection } from './activation.js';
 import { profilePolicy } from './profiles.js';
+import { assertMediaOnlyUpgrade } from './media-upgrade.js';
 import { assertScheduleOnlyUpgrade, parseScheduleUpgradeFrom, readSchedulePredecessor } from './schedule-upgrade.js';
 
 /** Inspect configuration as data. Never import or execute candidate release code
@@ -29,12 +30,20 @@ export async function assertNativeDeploymentBinding(selection:RuntimeSelection,r
   if(!isDeepStrictEqual(withoutRelease(prior),withoutRelease(value)))throw new Error('Instruction upgrade cannot change runtime configuration');
  }
  if(value.scheduleUpgradeFrom!==undefined){
-  if(value.instructionUpgradeFrom!==undefined)throw new Error('Select one native upgrade mode');
+  if(value.instructionUpgradeFrom!==undefined||value.mediaUpgradeFrom!==undefined)throw new Error('Select one native upgrade mode');
   const ref=parseScheduleUpgradeFrom(value.scheduleUpgradeFrom);
   const prior=await readSchedulePredecessor(ref,runtime.uid);
   assertScheduleOnlyUpgrade(value,prior);
   if(previous&&previous.releaseSha!==selection.releaseSha&&
    (previous.runtime!=='pi-durable'||previous.nativeConfigPath!==ref.configPath||previous.releaseSha!==prior.releaseSha))throw new Error('Schedule upgrade predecessor differs from installed map');
+ }
+ if(value.mediaUpgradeFrom!==undefined){
+  if(value.instructionUpgradeFrom!==undefined||value.scheduleUpgradeFrom!==undefined)throw new Error('Select one native upgrade mode');
+  const ref=parseScheduleUpgradeFrom(value.mediaUpgradeFrom);
+  const prior=await readSchedulePredecessor(ref,runtime.uid);
+  assertMediaOnlyUpgrade(value,prior);
+  if(previous&&previous.releaseSha!==selection.releaseSha&&
+   (previous.runtime!=='pi-durable'||previous.nativeConfigPath!==ref.configPath||previous.releaseSha!==prior.releaseSha))throw new Error('Media upgrade predecessor differs from installed map');
  }
  const profile=value.capabilityProfile,policy=typeof profile==='string'?profilePolicy(profile):undefined;
  if(typeof profile!=='string'||!policy)throw new Error('Native capability profile is not explicit');

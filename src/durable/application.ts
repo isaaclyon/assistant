@@ -27,6 +27,7 @@ import { assertMediaAttachments, createAlbumJournal, createMediaIngest, createNa
 import { createMediaSender, createNativeMediaOutbound, type NativeMediaOutbound } from './media-outbound.js';
 import { MediaDeliveryError, type MediaPort } from './media-transport.js';
 import { loadNativeConfig, type NativeConfig } from './config.js';
+import { assertMediaOnlyUpgrade } from './media-upgrade.js';
 import { assertScheduleOnlyUpgrade } from './schedule-upgrade.js';
 
 export interface NativeApplicationOptions {
@@ -68,6 +69,8 @@ export async function createNativeApplication(config:NativeConfig,options:Native
  if(enabled&&(!config.memory||(config.principal==='engineering')!==(policy.memory==='history')))throw new Error('Chat-memory profile requires scoped memory configuration');
  const schedulePrevious=config.scheduleUpgradeFrom?await loadNativeConfig(config.scheduleUpgradeFrom.configPath,{expectedSha256:config.scheduleUpgradeFrom.sha256}):undefined;
  if(schedulePrevious)assertScheduleOnlyUpgrade(config as unknown as Record<string,unknown>,schedulePrevious as unknown as Record<string,unknown>);
+ const mediaPrevious=config.mediaUpgradeFrom?await loadNativeConfig(config.mediaUpgradeFrom.configPath,{expectedSha256:config.mediaUpgradeFrom.sha256}):undefined;
+ if(mediaPrevious)assertMediaOnlyUpgrade(config as unknown as Record<string,unknown>,mediaPrevious as unknown as Record<string,unknown>);
  const provider=options.provider??await createNativeProvider({credentialPath:config.credentialPath,settingsPath:config.settingsPath,account:config.account});
  let resources:Awaited<ReturnType<typeof loadNativeRegistry>>|undefined;
  let host:DurableHost|undefined;
@@ -381,6 +384,10 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    {runtimeGeneration:'pi-durable-1.3.0',releaseSchema:1,profile:config.capabilityProfile,registrySignature:legacySignature(resources.previousSignature,schedulePrevious.resourceRoot,schedulePrevious)},
    {runtimeGeneration:'pi-durable-1.3.0',releaseSchema:2,profile:config.capabilityProfile,registrySignature:signatureFor(schedulePrevious,resources.compatibilitySignature)},
   ]:undefined;
+  // The media bundle is the only contract difference from the predecessor; rebuild its schema-2 signature without that bundle.
+  const mediaUpgradeCompatibilities=mediaPrevious?[
+   {runtimeGeneration:'pi-durable-1.3.0',releaseSchema:2,profile:config.capabilityProfile,registrySignature:signatureFor(mediaPrevious,resources.compatibilitySignatureWithout('media-stack'))},
+  ]:undefined;
   // The reader delegates to the active registry after a safe idle reload.
   const registry={snapshot:()=>resources!.registry.snapshot(),subscribe:(listener:()=>void)=>{registryListeners.add(listener);return()=>{registryListeners.delete(listener);};}};
   host=await DurableHost.create({stateDir:config.historyDir,inboxPath:config.inboxPath,models:provider.models,registry,
@@ -388,7 +395,7 @@ export async function createNativeApplication(config:NativeConfig,options:Native
    agent:{model:provider.model,thinkingLevel:provider.thinkingLevel,cwd:config.workspaceCwd,instructions:[resources.instructions,...resources.skills.map(s=>s.content)].join('\n\n')},
    compatibility:{runtimeGeneration:'pi-durable-1.3.0',releaseSchema:2,profile:config.capabilityProfile,registrySignature:signature},
    instructionRevision:resources.signature,...(previousCompatibility?{previousCompatibility}:{}),
-   ...(scheduleUpgradeCompatibilities?{scheduleUpgradeCompatibilities}:{}),
+   ...((scheduleUpgradeCompatibilities??mediaUpgradeCompatibilities)?{scheduleUpgradeCompatibilities:(scheduleUpgradeCompatibilities??mediaUpgradeCompatibilities)!}:{}),
    onEpochChange:async(tx,previous,nextEpoch)=>{browser?.cancel();for(const id of previous){if(memoryModule)await memoryModule.invalidateMemoryState(tx,operations,id,String(nextEpoch),'new');else await operations.invalidate(tx,id,String(nextEpoch),'new');}},
    onConversation:async cid=>{await visible?.attach(cid);},
    ...(fast?{beforeAdmission:fast.settle}:{}),

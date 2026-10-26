@@ -54,3 +54,10 @@ searches or read logs. Those stay with an administrator.
   configuration change needs a normal deployment.
 - Adding a service later needs a collector operation, a gateway allowlist entry and a
   tool change. It never needs host-specific release code.
+
+## Activation on existing stores
+
+The bundle is registered for both profiles whether or not a socket is configured,
+so it changes the stored compatibility contract. Existing stores therefore need the
+`mediaUpgradeFrom` selector, which accepts exactly this change against a pinned
+predecessor and nothing else. See `docs/media-stack.md`.
