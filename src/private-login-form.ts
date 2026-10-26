@@ -4,7 +4,11 @@ export const LOGIN_FORM = String.raw`function(origin, bind) {
   const visible = e => e.isConnected && e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden' && getComputedStyle(e).display !== 'none';
   const text = e => (e?.getAttribute('aria-label') || (e?.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => doc.getElementById(id)?.textContent || '').join(' ').trim() || e?.innerText || e?.value || '').trim().replace(/\s+/g,' ').toLowerCase();
   const denied = /(?:create (?:an? |your )?account|sign ?up|register|reset password|change password|new password|account recovery|place order|checkout|payment|delete account|enable two|disable two|set up|add (?:a )?(?:phone|mobile))/i;
-  if (location.origin !== origin || /(?:register|signup|forgot|recover|reset|checkout|payment|settings|enroll)/i.test(location.pathname)) return 'manual';
+  // Explicit adapter for the inspected Costco Azure B2C existing-account page.
+  // Never generalize this exception to arbitrary GET/JavaScript forms or B2C policies.
+  const costcoPage = () => origin === 'https://signin.costco.com' && location.origin === origin &&
+    location.pathname === '/e0714dd4-784d-46d6-a278-3e29553483eb/B2C_1A_SSO_WCS_signup_signin_214/oauth2/v2.0/authorize';
+  if (location.origin !== origin || (!costcoPage() && /(?:register|signup|forgot|recover|reset|checkout|payment|settings|enroll)/i.test(location.pathname))) return 'manual';
   const headings = Array.from(doc.querySelectorAll('h1,h2')).filter(visible).map(text).join(' ').slice(0,2000);
   const candidates = [];
   const loginDestination = (value, amazonIdentifier) => {
@@ -32,7 +36,13 @@ export const LOGIN_FORM = String.raw`function(origin, bind) {
     if (buttons.length !== 1) continue;
     const button = buttons[0], label = text(button), copy = form.cloneNode(true);
     copy.querySelectorAll('a,button,input[type=submit],input[type=button],script,style').forEach(e => e.remove());
-    const purpose = headings+' '+copy.textContent.slice(0,4000).toLowerCase();
+    // The inspected Costco form contains closed informational tooltips about
+    // checkout/payment. Judge its visible purpose, not those hidden benefits.
+    // All original text/controls still participate in the pre-fill mutation fence.
+    const visibleCopy = () => [form,...Array.from(form.querySelectorAll('*'))].filter(e => visible(e) && !e.closest('a,button,script,style'))
+      .flatMap(e => Array.from(e.childNodes).filter(n => n.nodeType === 3).map(n => n.textContent)).join(' ');
+    const costcoCopy = visibleCopy();
+    const purpose = headings+' '+(costcoPage() && form.id === 'localAccountForm' ? costcoCopy : copy.textContent).slice(0,4000).toLowerCase();
     // Amazon's identifier page can say "Sign in or create account". Never accept
     // that ambiguity for a password/code screen or click a registration action.
     const amazonIdentifier = origin === 'https://www.amazon.com' && location.pathname === '/ap/signin' &&
@@ -41,9 +51,17 @@ export const LOGIN_FORM = String.raw`function(origin, bind) {
     if (!/(?:sign ?in|log ?in|two.?step verification|two.?factor authentication)/.test(purpose+' '+label)) continue;
     const action = form.action, method = form.method, target = form.target;
     const attrs = ['formaction','formmethod','formtarget'].map(k => button.getAttribute(k));
-    const destinationSafe = () => form.method.toLowerCase() === 'post' && loginDestination(form.action, amazonIdentifier) &&
+    const costcoForm = () => costcoPage() && form.id === 'localAccountForm' && form.method.toLowerCase() === 'get' &&
+      form.getAttribute('action')?.toLowerCase() === 'javascript:void(0);' && !form.target &&
+      kinds.length === 2 && kinds[0] === 'username' && kinds[1] === 'password' &&
+      inputs[0].id === 'signInName' && inputs[0].name === 'Sign in name' && inputs[0].autocomplete === 'email' &&
+      inputs[1].id === 'password' && inputs[1].name === 'Password' && inputs[1].autocomplete === 'current-password' &&
+      button.id === 'next' && label === 'sign in' &&
+      !['formaction','formmethod','formtarget'].some(k => button.hasAttribute(k)) &&
+      !form.querySelector('iframe');
+    const destinationSafe = () => costcoForm() || (form.method.toLowerCase() === 'post' && loginDestination(form.action, amazonIdentifier) &&
       (!form.target || form.target === '_self') && (!button.hasAttribute('formaction') || loginDestination(button.formAction, amazonIdentifier)) &&
-      (!button.hasAttribute('formmethod') || button.formMethod.toLowerCase() === 'post') && (!button.formTarget || button.formTarget === '_self');
+      (!button.hasAttribute('formmethod') || button.formMethod.toLowerCase() === 'post') && (!button.formTarget || button.formTarget === '_self'));
     if (!destinationSafe()) continue;
     const types = inputs.map(e => e.type), names = inputs.map(e => e.name), ids = inputs.map(e => e.id);
     const identity = e => JSON.stringify([e.autocomplete,e.placeholder,e.getAttribute('aria-label'),Array.from(e.labels || []).map(text)]);
@@ -54,7 +72,7 @@ export const LOGIN_FORM = String.raw`function(origin, bind) {
       destinationSafe() && form.action === action && form.method === method && form.target === target &&
       attrs.every((v,i) => button.getAttribute(['formaction','formmethod','formtarget'][i]) === v) &&
       visible(button) && button.form === form && text(button) === label &&
-      form.textContent.slice(0,4000) === bodyText &&
+      form.textContent.slice(0,4000) === bodyText && (!costcoPage() || visibleCopy() === costcoCopy) &&
       form.elements.length === allControls.length && Array.from(form.elements).every((e,i) => e === allControls[i][0] && controlState(e) === allControls[i][1]) &&
       Array.from(form.querySelectorAll('input')).filter(e => visible(e) && !e.matches(':disabled') && !e.readOnly && !['hidden','submit','button','checkbox','radio'].includes(e.type)).every((e,i) => e === inputs[i]) &&
       Array.from(doc.querySelectorAll('h1,h2')).filter(visible).map(text).join(' ').slice(0,2000) === headings && inputs.every((e,i) => visible(e) &&

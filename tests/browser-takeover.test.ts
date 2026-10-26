@@ -133,6 +133,14 @@ describe("takeover ownership and teardown", () => {
     expect(h.exec.mock.calls.every(call => call[0] === "agent-browser")).toBe(true);
     expect(h.serverClose.mock.invocationCallOrder[0]).toBeLessThan(h.finish.mock.invocationCallOrder[0]!);
   });
+  it("refuses unsupported saved-login pages before approval or credential copying", async () => {
+    const close = vi.fn();
+    h.privatePage.mockResolvedValue({state:()=>({state:"manual"}),close});
+    expect(await runApproved()).toEqual({status:"unavailable",loginFailure:"unsupported_form"});
+    expect(h.approve).not.toHaveBeenCalled(); expect(h.spawn).not.toHaveBeenCalled();
+    expect(h.send).not.toHaveBeenCalled(); expect(close).toHaveBeenCalled();
+    expect(h.finish).toHaveBeenCalledWith("private");
+  });
   it("retains one approved credential across username and password screens, then clears it", async () => {
     let step = 0;
     const submitted: string[][] = [], credential = { username: "synthetic-user", password: "synthetic-secret" };

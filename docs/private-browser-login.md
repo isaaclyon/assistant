@@ -41,6 +41,24 @@ Amazon specialization accepts the inspected US identifier screen's combined
 "Sign in or create account" heading and `/ax/claim` action; registration steps
 still require human control.
 
+A separate, origin/policy-bound Costco adapter recognizes the inspected US Azure
+B2C existing-account page on `https://signin.costco.com`. It requires the exact
+known policy path, combined email/current-password fields, form and submit IDs,
+and JavaScript no-op action. It does not enable arbitrary GET/JavaScript forms,
+other B2C tenants, registration, recovery or embedded forms. Its closed benefits
+tooltips are excluded from purpose recognition, but visible purpose, all form
+text, controls and destinations are still rechecked before filling. Website
+scripts remain trusted; this is not network containment. See
+[ADR-0057](adr/0057-bound-javascript-login-adapters.md).
+
+When a saved credential is requested but the initial page is unsupported, the
+operation returns `status: unavailable, loginFailure: unsupported_form` after
+private cleanup, before requesting source approval, copying or resolving a login.
+It does not open a manual viewer as an implicit substitute for saved autofill.
+Do not retry the same unsupported flow or claim that a copied credential proves
+compatibility. A page changing after approval can still prevent submission;
+copy and website outcomes remain independent.
+
 Each field kind is submitted at most once, progressing from username to password
 to code. Repeated challenges, ambiguous forms, unsupported destinations,
 registration/recovery/settings screens, cross-origin transitions, embedded

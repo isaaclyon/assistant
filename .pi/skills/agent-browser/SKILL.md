@@ -56,6 +56,10 @@ user-approved Login item in this instance's dedicated 1Password vault; its saved
 website must match the exact origin, and the user chooses **Use saved sign-in**.
 General codes remain private manual input. Use the OpenTable specialization
 below for its existing email-code support. Verify sign-in after the tool returns.
+The inspected Costco US JavaScript sign-in has a narrow origin/policy-bound
+adapter. Other JavaScript-only forms remain unsupported. If the result contains
+`loginFailure: unsupported_form`, saved sign-in stopped before initial credential
+access; do not repeat it or imply the manual viewer can use the saved login.
 See [the multi-step guide](../../../docs/private-browser-login.md).
 
 When `private_browser_input` is available, use it for user-authorized passwords
