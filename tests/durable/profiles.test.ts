@@ -41,9 +41,11 @@ test('manifest selections mirror the legacy profiles with native replacements',a
  const skills=(id:string)=>get(id).skills.slice().sort();
  expect(skills('durable-personal-emma')).toEqual(legacy('personal-emma'));
  expect(skills('durable-household-shared')).toEqual(legacy('household-shared'));
- expect(skills('durable-builder')).toEqual(legacy('builder'));
- expect(skills('durable-personal-isaac')).toEqual(skills('durable-jobs-children-test'));
+ expect(skills('durable-builder').filter((id:string)=>id!=='manage-media')).toEqual(legacy('builder'));
+ expect(skills('durable-personal-isaac').filter((id:string)=>id!=='manage-media')).toEqual(skills('durable-jobs-children-test'));
  const ext=(id:string)=>new Set<string>(get(id).extensions);
+ expect(['durable-personal-isaac','durable-builder'].map(id=>[ext(id).has('native-media-stack'),skills(id).includes('manage-media')])).toEqual([[true,true],[true,true]]);
+ expect(['durable-personal-emma','durable-household-shared','durable-jobs-children-test'].some(id=>ext(id).has('native-media-stack')||skills(id).includes('manage-media'))).toBe(false);
  for(const id of NEW){expect(ext(id).has('native-background-children')).toBe(true);await loadCapabilityProfile(root,id);}
  expect(ext('durable-builder').has('native-memory')).toBe(false);expect(ext('durable-builder').has('native-core-memory')).toBe(false);
  expect(ext('durable-builder').has('native-search')).toBe(true);expect(ext('durable-builder').has('native-places')).toBe(false);
@@ -64,6 +66,17 @@ test('configuration accepts the four profiles and rejects legacy resource profil
  const b=await load('durable-builder',builderCfg);await expect(b.load()).resolves.toMatchObject({principal:'engineering'});
  const noPrivate=await load('durable-builder',raw=>{builderCfg(raw);raw.principal='isaac';});await expect(noPrivate.load()).rejects.toThrow();
  await expect((await load('durable-chat-memory-test',raw=>{delete raw.google;delete raw.browser;delete raw.cli;delete raw.coordinator;raw.jobsRole='disabled';})).load()).resolves.toMatchObject({capabilityProfile:'durable-chat-memory-test'});
+});
+
+test('media stack configuration is an absolute socket path accepted only by profiles that enable it',async()=>{
+ const ok=await load('durable-personal-isaac',raw=>{raw.mediaStack={socketPath:'/run/media-gateway/gateway.sock'};});
+ await expect(ok.load()).resolves.toMatchObject({mediaStack:{socketPath:'/run/media-gateway/gateway.sock'}});
+ await expect((await load('durable-personal-isaac')).load()).resolves.not.toHaveProperty('mediaStack');
+ for(const mediaStack of [{socketPath:'relative.sock'},{socketPath:'/run/m.sock',extra:1},'x']){
+  await expect((await load('durable-personal-isaac',raw=>{raw.mediaStack=mediaStack;})).load()).rejects.toThrow();
+ }
+ await expect((await load('durable-places-test',raw=>{raw.mediaStack={socketPath:'/run/m.sock'};})).load()).rejects.toThrow(/Media stack/);
+ expect(NATIVE_PROFILE_IDS.filter(id=>requireProfilePolicy(id).mediaStack)).toEqual(['durable-personal-isaac','durable-builder']);
 });
 
 test('household configuration needs an exact group with two distinct actors and no group on private profiles',async()=>{
@@ -98,6 +111,19 @@ test('builder runs session search without memory or core tools and its tools aut
  expect(tools).not.toContain('assistant_memory');expect(tools).not.toContain('rank_places');
  expect(tools).not.toContain('google_workspace');
  expect(s.fatal).toEqual([]);
+});
+test('media tools reach the personal Isaac and builder bots only when a gateway socket is configured',async()=>{
+ const socketPath='/run/media-gateway/gateway.sock';
+ const isaac=await setup('durable-personal-isaac');isaac.config.browser={...isaac.config.browser!,credentialScope:'isaac-personal'} as never;
+ await isaac.open([answer('NONE')]);await isaac.accept('Media?');await vi.waitFor(()=>expect(isaac.finals).toEqual(['NONE']));
+ expect(names(isaac)).not.toContain('media_stack');expect(isaac.fatal).toEqual([]);await isaac.close();
+ const configured=await setup('durable-personal-isaac');configured.config.browser={...configured.config.browser!,credentialScope:'isaac-personal'} as never;
+ Object.assign(configured.config,{mediaStack:{socketPath}});
+ await configured.open([answer('SOME')]);await configured.accept('Media?');await vi.waitFor(()=>expect(configured.finals).toEqual(['SOME']));
+ expect(names(configured)).toEqual(expect.arrayContaining(['media_stack','media_request']));expect(configured.fatal).toEqual([]);await configured.close();
+ const b=await builder();Object.assign(b.config,{mediaStack:{socketPath}});
+ await b.open([answer('BUILT')]);await b.accept('Media?');await vi.waitFor(()=>expect(b.finals).toEqual(['BUILT']));
+ expect(names(b)).toEqual(expect.arrayContaining(['media_stack','media_request']));expect(b.fatal).toEqual([]);
 });
 test('/deploy is a builder command that enqueues the deploy prompt as normal input',async()=>{
  const s=await builder();
