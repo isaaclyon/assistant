@@ -93,6 +93,15 @@ profiles reject it. Drop `mediaUpgradeFrom` from later configurations.
 
 - `media_stack` with `health` returns each service as reachable.
 - `library_search` for a known title finds it.
+- `request_search` for a multiword title succeeds, not just a single word.
+  The collector uses percent-encoded URI components (`%20` for spaces).
+  Seerr's OpenAPI validator rejects the raw `+` used by form-style encoding.
+  If single-word search works but multiword search returns HTTP 400, check the
+  installed collector version before treating it as a service outage. A
+  collector-only fix needs an administrator to replace the root-owned collector
+  on the media host; merging code or upgrading a bot alone does not install it.
+  Verify through the typed tool after installation; no service restart is needed
+  for the per-request collector.
 - `media_request` for an already-requested title returns `ALREADY_EXISTS`.
 - With `allowRequests` false, `media_request` returns `REQUESTS_DISABLED`.
 - Stop the gateway: both tools return `MEDIA_GATEWAY_UNAVAILABLE` once, without

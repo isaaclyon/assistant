@@ -7,6 +7,8 @@ import subprocess
 import sys
 import tempfile
 import threading
+import re
+import urllib.parse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCRIPT = os.path.join(ROOT, 'scripts', 'media-stack-collector.py')
@@ -41,6 +43,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(STATUS_OVERRIDE[path])
             self.end_headers()
             return
+        # Seerr's OpenAPI validator checks undecoded query values and rejects
+        # reserved characters (including '+' used by form-style space encoding).
+        if path == '/api/v1/search':
+            raw_query = urllib.parse.urlsplit(self.path).query
+            raw_values = [pair.partition('=')[2] for pair in raw_query.split('&')]
+            if any(re.search(r"[:/?#\[\]@!$&'()*+,;=]", value) for value in raw_values):
+                self.send_response(400)
+                self.end_headers()
+                return
         route = ROUTES.get((method, path))
         self.send_response(200 if route is not None else 404)
         self.end_headers()
@@ -102,6 +113,17 @@ with tempfile.TemporaryDirectory() as tmp:
     # Seerr search drops people, bounds text and maps availability.
     found = ok({'op': 'request_search', 'args': {'query': 'matrix'}})['results']
     assert len(found) == 1 and found[0]['mediaId'] == 603 and found[0]['year'] == '1999' and len(found[0]['overview']) == 240
+    # Multiword and reserved/non-ASCII titles must round-trip exactly, without
+    # raw '+' separators, injected query fields or double-encoding.
+    for query in ['Example Show', 'C++ & Friends / Part 2?', "Amélie: 100% (Director's Cut)", 'literal%20text']:
+        SEEN.clear()
+        ok({'op': 'request_search', 'args': {'query': query}})
+        assert len(SEEN) == 1
+        raw_query = urllib.parse.urlsplit(SEEN[0][1]).query
+        assert '+' not in raw_query, raw_query
+        assert urllib.parse.parse_qs(raw_query) == {'query': [query], 'page': ['1']}, raw_query
+        if ' ' in query:
+            assert '%20' in raw_query, raw_query
     listed = ok({'op': 'request_list', 'args': {'filter': 'pending'}})['requests'][0]
     assert listed['requestStatus'] == 'pending' and listed['availability'] == 'pending'
 

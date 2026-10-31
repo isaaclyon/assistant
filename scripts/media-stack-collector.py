@@ -100,7 +100,9 @@ def call(services, name, path, query=None, body=None):
         raise OperationError('SERVICE_NOT_CONFIGURED', '%s is not configured' % name)
     url = service['origin'] + API_PREFIX[name] + path
     if query:
-        url += '?' + urllib.parse.urlencode(query)
+        # Seerr's OpenAPI validator rejects raw reserved characters, including
+        # '+' for spaces. Encode URI components (%20), not HTML form values.
+        url += '?' + urllib.parse.urlencode(query, quote_via=urllib.parse.quote)
     data = None if body is None else json.dumps(body, separators=(',', ':')).encode()
     request = urllib.request.Request(url, data=data, method='GET' if body is None else 'POST')
     request.add_header('X-Api-Key', api_key(service))
